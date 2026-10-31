@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Asset Test Room — WebXR</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;font:13px/1.4 ui-sans-serif,-apple-system,system-ui,sans-serif;background:#111;color:#eee;overflow:hidden}
+  #hud{position:fixed;top:12px;left:12px;z-index:10;background:#000a;border:1px solid #333;
+       border-radius:10px;padding:12px 14px;max-width:270px;backdrop-filter:blur(6px)}
+  #hud h1{margin:0 0 2px;font-size:13px;font-weight:600}
+  #hud .s{color:#888;font-size:11px;margin-bottom:10px}
+  #hud button{background:#1c1c1c;color:#eee;border:1px solid #333;border-radius:6px;
+              padding:5px 9px;font-size:11px;cursor:pointer;margin:2px 2px 0 0;font-family:inherit}
+  #hud button:hover{background:#262626}
+  #hud button.on{background:#1f6feb;border-color:#1f6feb}
+  #meta{color:#777;font-size:11px;margin-top:8px;font-variant-numeric:tabular-nums}
+  #err{position:fixed;bottom:12px;left:12px;right:12px;z-index:10;color:#f88;font-size:12px;
+       background:#200a0a;border:1px solid #622;border-radius:8px;padding:8px 12px;display:none}
+</style>
+</head>
+<body>
+<div id="hud">
+  <h1>Asset Test Room</h1>
+  <div class="s">WebXR · SteamVR ready</div>
+  <button id="btn-vr">Enter VR</button>
+  <button id="wire">Wireframe</button>
+  <button id="rot">Rotate</button>
+  <button id="grid" class="on">Grid</button>
+  <button id="light">Bright</button>
+  <div id="meta">loading…</div>
+</div>
+<div id="err"></div>
+
+<script type="module">
+import * as THREE from './vendor/three.module.js';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+import { OrbitControls } from './vendor/OrbitControls.js';
+
+const err = (m) => { const e = document.getElementById('err'); e.style.display='block'; e.textContent = m; };
+const meta = document.getElementById('meta');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x15181d);
+scene.fog = new THREE.Fog(0x15181d, 12, 30);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 100);
+camera.position.set(2.2, 1.5, 2.8);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+// ── lighting ─────────────────────────────────────────────────────────────
+const hemi = new THREE.HemisphereLight(0xffffff, 0x444455, 1.6);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(3, 6, 2);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+fill.position.set(-4, 2, -3);
+scene.add(fill);
+let bright = false;
+
+// ── floor + 1 m grid ─────────────────────────────────────────────────────
+const floorGeo = new THREE.PlaneGeometry(40, 40);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.95, metalness: 0 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI/2;
+scene.add(floor);
+
+const grid = new THREE.GridHelper(40, 40, 0x5a6572, 0x333a43);
+grid.position.y = 0.002;
+scene.add(grid);
+
+// 1 m and 1.8 m height references so scale is obvious in VR
+const pole = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.02, 0.02, 1.8, 8),
+  new THREE.MeshStandardMaterial({ color: 0x6f7681 })
+);
+pole.position.set(-1.5, 0.9, -1.5);
+scene.add(pole);
+meta.dataset.pole = '1.8m reference at (-1.5, -1.5)';
+
+// ── load the asset ───────────────────────────────────────────────────────
+const holder = new THREE.Group();
+scene.add(holder);
+
+const loader = new GLTFLoader();
+loader.load('./pig.glb', (gltf) => {
+  const obj = gltf.scene;
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  // Sit it on the floor and centre it, whatever its native units.
+  obj.position.y -= box.min.y;
+  const c = box.getCenter(new THREE.Vector3());
+  obj.position.x -= c.x; obj.position.z -= c.z;
+  holder.add(obj);
+  const tris = (() => { let n = 0; obj.traverse(o => { if (o.isMesh) n += o.geometry.index ? o.geometry.index.count/3 : o.geometry.attributes.position.count/3; }); return n; })();
+  meta.textContent = `pig.glb · ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)} m · ${Math.round(tris).toLocaleString()} tris`;
+}, undefined, (e) => {
+  meta.textContent = 'pig.glb not found — drop it beside this file';
+  err('pig.glb missing. Put the exported GLB next to this HTML and reload.');
+});
+
+// ── controls ─────────────────────────────────────────────────────────────
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.6, 0);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI/2 - 0.02;
+
+renderer.xr.addEventListener('sessionstart', () => { controls.enabled = false; });
+renderer.xr.addEventListener('sessionend', () => { controls.enabled = true; });
+
+// ── HUD wiring ───────────────────────────────────────────────────────────
+const btnVR = document.getElementById('btn-vr');
+btnVR.addEventListener('click', async () => {
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor']
+    });
+    renderer.xr.setSession(session);
+  } catch (e) { err('Could not start VR: ' + e.message); }
+});
+
+document.getElementById('wire').addEventListener('click', (ev) => {
+  const on = !ev.target.classList.contains('on');
+  holder.traverse(o => { if (o.isMesh) o.material.wireframe = on; });
+  ev.target.classList.toggle('on', on);
+});
+
+let spinning = false;
+document.getElementById('rot').addEventListener('click', (ev) => {
+  spinning = !spinning;
+  ev.target.classList.toggle('on', spinning);
+});
+
+document.getElementById('grid').addEventListener('click', (ev) => {
+  grid.visible = !grid.visible;
+  ev.target.classList.toggle('on', grid.visible);
+});
+
+document.getElementById('light').addEventListener('click', (ev) => {
+  bright = !bright;
+  hemi.intensity = bright ? 3.2 : 1.6;
+  key.intensity = bright ? 3.6 : 2.2;
+  renderer.toneMappingExposure = bright ? 1.25 : 1.0;
+  ev.target.classList.toggle('on', bright);
+});
+
+// ── loop ─────────────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  if (spinning) holder.rotation.y += dt * 0.5;
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// VR availability hint
+if (!navigator.xr) {
+  btnVR.textContent = 'No WebXR';
+  btnVR.title = 'This browser has no WebXR. Use Chrome/Edge.';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Blender wrapper.
+#
+# Do NOT symlink Blender: running it through a symlink breaks the
+# bundle-relative lookup of its embedded Python, and it dies with
+#   "Bundled Python not found ... Failed to import encodings module"
+# Always exec the real binary inside the .app so Blender can find
+# Contents/Resources/<ver>/python.
+set -euo pipefail
+
+APP="${BLENDER_APP:-/Applications/Blender.app}"
+BIN="$APP/Contents/MacOS/Blender"
+
+if [ ! -x "$BIN" ]; then
+  echo "blender not found at $BIN" >&2
+  exit 1
+fi
+
+# Blender's bundled interpreter must not inherit a host Python environment.
+unset PYTHONHOME PYTHONPATH VIRTUAL_ENV CONDA_PREFIX 2>/dev/null || true
+
+exec "$BIN" "$@"

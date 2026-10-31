@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# media-stack control CLI — thin wrapper over the web panel's API.
+# Usage: stack start|stop|restart|status|logs <svc>|panel|free
+set -uo pipefail
+
+PANEL="http://127.0.0.1:8787"
+STACK="$HOME/media-stack"
+PY="$STACK/audio/.venv/bin/python"
+mkdir -p "$STACK/run" "$STACK/logs"
+
+panel_up() { curl -sf -m 1 "$PANEL/api/status" >/dev/null 2>&1; }
+
+ensure_panel() {
+  if panel_up; then return 0; fi
+  echo "starting control panel on :8787 ..."
+  nohup "$PY" "$STACK/control/panel.py" >"$STACK/logs/panel.log" 2>&1 &
+  echo $! > "$STACK/run/panel.pid"
+  for _ in $(seq 1 50); do panel_up && return 0; sleep 0.2; done
+  echo "panel failed to start; see $STACK/logs/panel.log" >&2; return 1
+}
+
+cmd="${1:-status}"; target="${2:-}"
+
+case "$cmd" in
+  panel)
+    ensure_panel && { echo "panel: $PANEL"; open "$PANEL" 2>/dev/null || true; }
+    ;;
+  status)
+    ensure_panel || exit 1
+    curl -s "$PANEL/api/status" | "$PY" "$STACK/control/status.py"
+    ;;
+  start|stop|restart)
+    [ -z "$target" ] && { echo "usage: stack $cmd <comfy|audio>" >&2; exit 1; }
+    ensure_panel || exit 1
+    curl -s -X POST "$PANEL/api/$cmd/$target" | "$PY" -c 'import json,sys;print(" ",json.load(sys.stdin).get("message","ok"))'
+    ;;
+  free)
+    ensure_panel || exit 1
+    curl -s -X POST "$PANEL/api/comfy/free" | "$PY" -c 'import json,sys;print(" ",json.load(sys.stdin).get("message","ok"))'
+    ;;
+  logs)
+    [ -z "$target" ] && { echo "usage: stack logs <comfy|audio|panel>" >&2; exit 1; }
+    tail -n "${3:-60}" "$STACK/logs/$target.log"
+    ;;
+  music)
+    # stack music "caption" ["lyrics"] [outfile]
+    caption="${2:-}"
+    [ -z "$caption" ] && { echo 'usage: stack music "jazz trio, brushed drums" "lyrics..." [out.wav]' >&2; exit 1; }
+    lyrics="${3:-[instrumental]}"
+    out="${4:-$STACK/scratch/music_$(date +%Y%m%d_%H%M%S).wav}"
+    "$STACK/audio/.venv/bin/mlx_audio.music.generate" \
+      --model "${MUSIC_MODEL:-mlx-community/MiniMax-Music3-8bit}" \
+      --caption "$caption" --lyrics "$lyrics" --output "$out"
+    echo "  → $out"
+    ;;
+  vr)
+    # The VR room is a tab in the panel now — one origin, port 8787.
+    ensure_panel || exit 1
+    echo "  VR room: http://127.0.0.1:8787  (VR Room tab)"
+    echo "  asset:   $STACK/vr/pig.glb"
+    open "$PANEL" 2>/dev/null || true
+    ;;
+  *)
+    echo "usage: stack {start|stop|restart|status|logs|panel|free|music|vr} [comfy|audio]" >&2
+    exit 1
+    ;;
+esac

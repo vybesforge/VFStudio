@@ -1,0 +1,28 @@
+# upstream clone, has its own .git; pinned commit recorded in COMFYUI_COMMIT
+ComfyUI/
+audio/.venv/
+*.pid
+logs/
+run/
+
+# model weights (tens of GB, reproducible by download)
+models/
+ComfyUI/models/
+
+# generated output
+ComfyUI/output/
+scratch/*.png
+scratch/*.glb
+scratch/*.wav
+scratch/*.json
+scratch/__pycache__/
+__pycache__/
+*.pyc
+
+# large binary test assets: these two are the shippable ones
+vr/*.glb
+!vr/pig.glb
+!vr/pig_clean.glb
+
+.DS_Store
+*.log
