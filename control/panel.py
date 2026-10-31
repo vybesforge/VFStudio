@@ -486,6 +486,42 @@ def api_assets_use(path: str):
     return {"ok": True, "message": f"room now uses {src.name}"}
 
 
+@app.get("/api/comfy/job")
+def api_comfy_job():
+    """What ComfyUI is working on right now.
+
+    The machine is shared — Dylan drives ComfyUI from its own UI, other agents
+    queue jobs, and two heavy models at once will OOM. Surface occupancy instead
+    of letting everyone guess.
+    """
+    import urllib.request as _u
+    try:
+        with _u.urlopen("http://127.0.0.1:8188/queue", timeout=3) as r:
+            q = json.loads(r.read() or b"{}")
+    except Exception as exc:
+        return {"reachable": False, "error": str(exc)}
+
+    running = q.get("queue_running") or []
+    pending = q.get("queue_pending") or []
+    out = {"reachable": True, "running": len(running), "pending": len(pending), "job": None}
+    if running:
+        item = running[0]
+        graph = item[2] if len(item) > 2 and isinstance(item[2], dict) else {}
+        types = sorted({v.get("class_type") for v in graph.values() if isinstance(v, dict)})
+        prefix = ""
+        for node in graph.values():
+            if isinstance(node, dict):
+                ins = node.get("inputs", {})
+                if "filename_prefix" in ins:
+                    prefix = str(ins["filename_prefix"])
+        out["job"] = {"prompt_id": item[1], "nodes": len(graph),
+                      "prefix": prefix, "kinds": types[:8],
+                      "pipeline": next((t for t in ("Trellis2TextureStage", "Hunyuan3Dv2Conditioning",
+                                                    "Hunyuan3Dv2ConditioningMultiView", "KSampler")
+                                        if t in types), types[0] if types else "")}
+    return out
+
+
 app.mount("/vr", StaticFiles(directory=str(VR), html=True), name="vr")
 for _mount, _dir in (("/files/out3d", COMFY / "output" / "3d"),
                      ("/files/images", HOME / ".hermes" / "cache" / "generated" / "images")):
@@ -591,6 +627,7 @@ PAGE = r"""<!doctype html>
 </nav>
 <main>
   <section class="tab active" id="tab-services">
+    <div class="card" id="occupancy" style="margin-bottom:14px"><span class="desc">checking GPU occupancy…</span></div>
     <div class="grid" id="services"></div>
     <h2>ComfyUI models</h2>
     <div class="card"><ul id="comfy-models"><li><span>loading…</span></li></ul>
@@ -742,8 +779,32 @@ async function useAsset(path){
   const f = $('vrframe'); if(f) f.src = '/vr/index.html?t=' + Date.now();
 }
 
+// ── GPU occupancy (shared machine: who is using ComfyUI right now) ─────
+async function refreshOccupancy(){
+  const el = $('occupancy');
+  try{
+    const j = await (await fetch('/api/comfy/job')).json();
+    if(!j.reachable){
+      el.innerHTML = '<span class="dot off"></span><b>ComfyUI unreachable</b>' +
+        '<div class="meta">not running — nothing is using the GPU from this stack</div>';
+      return;
+    }
+    if(!j.job){
+      el.innerHTML = '<span class="dot on"></span><b>GPU idle</b>' +
+        `<div class="meta">queue empty${j.pending?' · '+j.pending+' pending':''}</div>`;
+      return;
+    }
+    const k = j.job;
+    el.innerHTML = `<span class="dot warn"></span><b>ComfyUI busy — ${k.pipeline||'job'}</b>
+      <div class="meta">${k.nodes} nodes &middot; output <code>${k.prefix||'?'}</code>
+      &middot; ${j.pending} pending &middot; <code>${k.prompt_id.slice(0,8)}</code></div>
+      <div class="meta">a second heavy job now risks OOM on 64 GB — generation scripts wait for the queue</div>`;
+  }catch(e){ el.innerHTML = '<span class="desc">occupancy unavailable</span>'; }
+}
+
 // ── services ──────────────────────────────────────────────────────────
 async function refreshServices(){
+  refreshOccupancy();
   const s = await (await fetch('/api/status')).json();
   $('services').innerHTML = Object.entries(s.services).map(([key,v])=>{
     const cls = v.responding ? 'on' : (v.running ? 'warn' : 'off');

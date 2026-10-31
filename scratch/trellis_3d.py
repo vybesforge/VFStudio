@@ -30,9 +30,13 @@ TEX_VAE = "trellis_2_texture_vae_bf16.safetensors"
 
 SEED = 7
 STEPS_STRUCT, STEPS_SHAPE, STEPS_TEX = 12, 20, 12
-# texture stage needs real guidance too: cfg 1.0 means cond-only sampling,
-# which is what produced the abstract yellow/teal blocks
-CFG_STRUCT, CFG_SHAPE, CFG_TEX = 7.5, 7.5, 7.5
+# 7.5 / 7.5 / 1.0 mirrors the official 3d_pixal3d_trellis2 template: the texture
+# stage runs cond-only, guidance comes from the refine pass below.
+CFG_STRUCT, CFG_SHAPE, CFG_TEX = 7.5, 7.5, 1.0
+STEPS_REFINE, CFG_REFINE = 12, 7.5
+# BakeTextureFromVoxel emits THREE images; slot 0 was assumed to be base colour
+# and produced flat grey, so make the slot selectable.
+TEXSLOT = int(__import__("os").environ.get("TEXSLOT", "0"))
 UPSAMPLE = 1536
 TEX_SIZE = 2048
 DECIMATE = 150000
@@ -98,8 +102,12 @@ def _base_graph(image: str) -> dict:
         # stage 2: shape
         "10": {"class_type": "Trellis2ShapeStage",
                "inputs": {"positive": ["5", 0], "negative": ["5", 1], "voxel": ["8", 0]}},
+        # CFG rescale parity with the reference pipeline. Without it the texture
+        # stage collapses to degenerate colour (three runs confirmed).
+        "30": {"class_type": "RescaleCFG", "inputs": {"model": ["2", 0], "multiplier": 0.5}},
+        "31": {"class_type": "RescaleCFG", "inputs": {"model": ["2", 0], "multiplier": 0.7}},
         "11": {"class_type": "KSampler",
-               "inputs": {"model": ["2", 0], "positive": ["10", 0], "negative": ["10", 1],
+               "inputs": {"model": ["30", 0], "positive": ["10", 0], "negative": ["10", 1],
                           "latent_image": ["10", 2], "seed": SEED + 1, "steps": STEPS_SHAPE,
                           "cfg": CFG_SHAPE, "sampler_name": "euler",
                           "scheduler": "normal", "denoise": 1.0}},
@@ -110,11 +118,18 @@ def _base_graph(image: str) -> dict:
                "inputs": {"positive": ["10", 0], "negative": ["10", 1],
                           "shape_latent": ["10", 2], "vae": ["9", 0],
                           "target_resolution": UPSAMPLE}},
+        # refine pass on the upsampled latent. Feeding the raw upsample straight
+        # into the texture stage yields a noise atlas -> scrambled bake.
+        "24": {"class_type": "KSampler",
+               "inputs": {"model": ["2", 0], "positive": ["13", 0], "negative": ["13", 1],
+                          "latent_image": ["13", 2], "seed": SEED, "steps": STEPS_REFINE,
+                          "cfg": CFG_REFINE, "sampler_name": "euler",
+                          "scheduler": "simple", "denoise": 1.0}},
         "14": {"class_type": "Trellis2TextureStage",
                "inputs": {"positive": ["13", 0], "negative": ["13", 1],
-                          "shape_latent": ["13", 2]}},
+                          "shape_latent": ["24", 0]}},
         "15": {"class_type": "KSampler",
-               "inputs": {"model": ["2", 0], "positive": ["14", 0], "negative": ["14", 1],
+               "inputs": {"model": ["31", 0], "positive": ["14", 0], "negative": ["14", 1],
                           "latent_image": ["14", 2], "seed": SEED + 2, "steps": STEPS_TEX,
                           "cfg": CFG_TEX, "sampler_name": "euler",
                           "scheduler": "normal", "denoise": 1.0}},
@@ -137,10 +152,37 @@ def _base_graph(image: str) -> dict:
                "inputs": {"mesh": ["21", 0], "voxel_colors": ["17", 0],
                           "texture_size": TEX_SIZE}},
         "22": {"class_type": "ApplyTextureToMesh",
-               "inputs": {"mesh": ["21", 0], "base_color": ["19", 0]}},
+               "inputs": {"mesh": ["21", 0], "base_color": ["19", TEXSLOT]}},
         "23": {"class_type": "SaveGLB",
                "inputs": {"mesh": ["22", 0], "filename_prefix": "3d/trellis"}},
     }
+
+
+def wait_for_idle(timeout_s: int = 1800) -> None:
+    """Block until the ComfyUI queue is empty.
+
+    The machine is shared: Dylan drives ComfyUI from the UI, other agents on this
+    box queue their own jobs, and two heavy models at once will OOM 64 GB of
+    unified memory. Defer to whatever is already running instead of racing it.
+    """
+    deadline = time.time() + timeout_s
+    announced = False
+    while time.time() < deadline:
+        try:
+            q = api("GET", "/queue", timeout=10)
+        except Exception:
+            time.sleep(3)
+            continue
+        busy = len(q.get("queue_running") or []) + len(q.get("queue_pending") or [])
+        if busy == 0:
+            if announced:
+                print("queue clear, submitting", flush=True)
+            return
+        if not announced:
+            print(f"ComfyUI busy ({busy} job(s)) — waiting for it to clear...", flush=True)
+            announced = True
+        time.sleep(5)
+    raise SystemExit("gave up waiting for an idle ComfyUI queue")
 
 
 def main():
@@ -148,14 +190,19 @@ def main():
     vcol = "--vcol" in args
     if vcol:
         args.remove("--vcol")
+    no_wait = "--now" in args
+    if no_wait:
+        args.remove("--now")
     if not args:
-        sys.exit("usage: trellis_3d.py <image> [out.glb] [--vcol]")
+        sys.exit("usage: trellis_3d.py <image> [out.glb] [--vcol] [--now]")
     src = Path(args[0])
     out = Path(args[1]) if len(args) > 1 else (VR / "pig_trellis.glb")
     if not src.is_file():
         sys.exit(f"missing image: {src}")
 
     wf = build(stage(src), vcol=vcol)
+    if not no_wait:
+        wait_for_idle()
     t0 = time.time()
     sub = api("POST", "/prompt", {"prompt": wf, "client_id": uuid.uuid4().hex})
     pid = sub.get("prompt_id")
