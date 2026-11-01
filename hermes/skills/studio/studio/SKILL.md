@@ -28,7 +28,7 @@ are copy-pasteable as written.
 
 | You need | Command / tool | Detail skill |
 |---|---|---|
-| Image from text (fast, default) | `gen image "prompt"` (Z-Image-Turbo, ~20 s) | this file |
+| Image from text (fast, default) | `gen image "prompt"` (Z-Image-Turbo, ~50 s) · `--model klein` (FLUX.2 klein, ~23 s) | this file |
 | Image, highest quality / text in image | `gen image "prompt" --model flux` (~3-4 min) | this file |
 | Image guided by a sketch/photo edges | `gen control "prompt" --image ref.png` | this file |
 | Edit an existing image / turnaround views | Qwen-Image-Edit (ComfyUI UI template) | `local-media-stack` (its qwen-image-edit-apose reference) |
@@ -73,8 +73,8 @@ Outputs land in `~/media-stack/output/<kind>/`. It waits for an idle ComfyUI que
 submitting (`--now` to skip) because one GPU is shared with the Telegram session.
 
 ```bash
-gen image "a brass compass on a map, soft window light"                      # Z-Image-Turbo, 1024², 8 steps
-gen image "..." --model klein --w 1344 --h 768 --n 2                          # FLUX.2 klein 4B, 4 steps
+gen image "a brass compass on a map, soft window light"                      # Z-Image-Turbo, 1024², 8 steps, ~50 s
+gen image "..." --model klein --w 1344 --h 768 --n 2                          # FLUX.2 klein 4B, 4 steps, ~23 s — fastest
 gen image "..." --model flux --seed 42                                        # Flux dev fp8, 20 steps, slow
 gen control "same scene, watercolor" --image photo.png --mode canny --save-control
 gen control "..." --image depth_or_pose_map.png --mode raw                    # you supply the control map
@@ -105,6 +105,8 @@ disk inflates every timing 2-3×.
 - **Downloading assets is fine; generating via cloud is not.** Fonts, HDRIs, models, JS libs — fetch freely. Inference stays here.
 - **Deliverables must not phone home.** Any HTML/VR page: vendor its JS, then prove it with `performance.getEntriesByType('resource')`.
 - **Models only appear after download completes.** `fetch-models` writes `.part` then renames; ComfyUI (Oct-2026 build) picks new files up without a restart — if a loader still rejects a filename, `stack restart comfy` while the queue is empty.
+- **Model folders are per loader, not per "kind".** `ModelPatchLoader` (Z-Image ControlNet Union) reads `models/model_patches/`, not `controlnet/`. When a loader says `Value not in list: … not in []`, the file is in the wrong folder; check `/object_info/<Loader>` for the list it sees.
+- **ComfyUI drops a failing branch and still reports success.** If one output node fails validation the rest runs and `/history` shows `status_str: success` with only the surviving outputs. `gen` fails on `node_errors` in the submit response; do the same in any custom script.
 
 ## Memory budget (64 GB unified)
 

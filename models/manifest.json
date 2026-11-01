@@ -10,7 +10,7 @@
      "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors", "gb": 8.0},
     {"id": "z-image-vae", "role": "image/fast vae", "path": "vae/ae.safetensors",
      "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors", "gb": 0.34},
-    {"id": "z-image-controlnet-union", "role": "image/control (canny/depth/pose/hed for Z-Image)", "path": "controlnet/Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
+    {"id": "z-image-controlnet-union", "role": "image/control (canny/depth/pose/hed for Z-Image)", "path": "model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
      "url": "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors", "gb": 3.1},
 
     {"id": "qwen-image-edit-2509", "role": "image/edit (instruction editing, turnarounds)", "path": "diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",

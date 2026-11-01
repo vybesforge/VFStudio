@@ -27,7 +27,7 @@ FILES = {
     "zimage": ["diffusion_models/z_image_turbo_bf16.safetensors", "text_encoders/qwen_3_4b.safetensors", "vae/ae.safetensors"],
     "klein": ["diffusion_models/flux-2-klein-4b.safetensors", "text_encoders/qwen_3_4b.safetensors", "vae/flux2-vae.safetensors"],
     "flux": ["checkpoints/flux1-dev-fp8.safetensors"],
-    "control": ["controlnet/Z-Image-Turbo-Fun-Controlnet-Union.safetensors"],
+    "control": ["model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors"],  # ModelPatchLoader reads model_patches/, NOT controlnet/
     "esrgan": ["upscale_models/RealESRGAN_x4plus.pth"],
     "ultrasharp": ["upscale_models/4x-UltraSharp.pth"],
     "seedvr2": ["diffusion_models/seedvr2_3b_int8_convrot.safetensors", "vae/seedvr2_ema_vae_fp16.safetensors"],
@@ -107,6 +107,10 @@ def run(prompt, kind, out_dir, timeout, now=False):
     if "prompt_id" not in res:
         die(f"submit rejected: {json.dumps(res)[:800]}")
     pid = res["prompt_id"]
+    if res.get("node_errors"):
+        # ComfyUI drops any output whose branch fails validation and still runs the rest,
+        # so a "success" could be only a side output. Treat validation errors as failure.
+        die(f"ComfyUI rejected part of the graph: {json.dumps(res['node_errors'])[:1200]}")
     while True:
         time.sleep(2)
         h = http("GET", f"/history/{pid}")

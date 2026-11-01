@@ -11,12 +11,12 @@ progress bar, output galleries with inline preview, Models inventory). Legacy pa
 
 | Area | Tool | Models | Verified |
 |---|---|---|---|
-| Image | `gen image` (Z-Image-Turbo default, FLUX.2 klein 4B, Flux dev) + Hermes `image_generate` | manifest | Z-Image 53 s incl. load under I/O load; klein pending |
-| Control | `gen control` (Z-Image Fun ControlNet Union, canny or raw map) | ✓ downloaded | not yet run |
-| Upscale | `gen upscale` esrgan / ultrasharp / seedvr2 | ESRGAN+UltraSharp ✓, SeedVR2 downloading | 8 s for 4× |
+| Image | `gen image` (Z-Image-Turbo default, FLUX.2 klein 4B, Flux dev) + Hermes `image_generate` | manifest | Z-Image 50 s warm idle (6 s/step); klein 23 s; see studio/references/benchmarks.md |
+| Control | `gen control` (Z-Image Fun ControlNet Union, canny or raw map) | ✓ (`models/model_patches/`!) | 93 s, composition held |
+| Upscale | `gen upscale` esrgan / ultrasharp / seedvr2 | ✓ all three | ESRGAN 8 s; SeedVR2 2× 40 s, laplacian 69→114 |
 | Video | `gen video` (Wan 2.2 TI2V 5B) | ✓ | 832×480×49f, 20 steps: 372 s (14 s/step) |
 | Video edit | `vid`, `vse_build.py` (Blender 5.2 VSE), `transcribe_srt.py` | — | all subcommands tested |
-| SFX | `gen sfx` (Stable Audio Open 1.0 / Stable Audio 3 medium) | SAO ✓, t5-base + SA3 downloading | pending |
+| SFX | `gen sfx` (Stable Audio Open 1.0 / Stable Audio 3 medium) | ✓ both | SAO 6 s in 10 s; SA3 20 s in 10 s |
 | Music | `gen music` (ACE-Step 1.5 turbo AIO) | ✓ | 30 s track in 72 s |
 | Voice | `voice say/clone/transcribe/enhance` (Kokoro, Qwen3-TTS clone, Whisper) | ✓ HF cache | clone 2 s warm; transcript matched |
 | 3D | TRELLIS.2 via UI (unchanged gold path); Hunyuan checkpoints **removed from disk** | ✓ | — |
@@ -35,8 +35,8 @@ ComfyUI progress on the panel works because `gen` and the Hermes plugin submit w
 `client_id: gen-cli` and the panel's websocket listens under that id (ComfyUI only sends
 per-step progress to the submitting client). UI-submitted jobs show an indeterminate bar.
 
-Open items: measure klein/control/SFX/SeedVR2 once downloads land (`references/benchmarks.md`
-in the `studio` skill); test the Godot Windows build on the 4080 box; the panel's Voice
+Open items: test the Godot Windows build on the 4080 box; run `install.sh` on a second Mac to
+prove the repro (only tested idempotently on this one); the panel's Voice
 clone form needs a reference wav path (use the gallery "as ref" button).
 
 ---
