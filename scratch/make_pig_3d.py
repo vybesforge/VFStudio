@@ -36,14 +36,22 @@ def api(method, path, payload=None, timeout=60):
 
 
 def stage(path: Path) -> str:
-    """Copy an image into ComfyUI's input dir; LoadImage only reads from there."""
+    """Copy an image into ComfyUI's input dir; LoadImage only reads from there.
+
+    No padding, no squaring. `CLIPVisionEncode` runs with crop="none", so the
+    whole frame reaches the vision encoder. (crop="center" takes a square out of
+    the middle — on a 2:3 portrait that deletes the head and the feet before the
+    model ever sees them, which is the "bad crop" seen on both Hunyuan 2 and 2.1.)
+    Padding the canvas to square instead of fixing crop is worse: the white
+    margins reconstruct as a flat card (measured 0.008 m deep).
+    """
     INPUT.mkdir(parents=True, exist_ok=True)
     name = f"pig_{path.stem}.png"
     shutil.copy(path, INPUT / name)
     return name
 
 
-def build(images, seed=42, texture=None, unwrap=True, octree=256, decimate=0):
+def build(images, seed=42, texture=None, unwrap=True, octree=256, decimate=0, texres=2048):
     """images: staged filenames (1 = single-view, 4 = multi-view).
     texture: optional staged filename used as the mesh base colour.
     unwrap: UV-unwrap before texturing (expensive; OOM risk on dense meshes).
@@ -59,7 +67,7 @@ def build(images, seed=42, texture=None, unwrap=True, octree=256, decimate=0):
         wf[img_id] = {"class_type": "LoadImage", "inputs": {"image": name}}
         wf[vis_id] = {"class_type": "CLIPVisionEncode",
                       "inputs": {"clip_vision": ["1", 1], "image": [img_id, 0],
-                                 "crop": "center"}}
+                                 "crop": "none"}}
         vision_ids.append(vis_id)
 
     if len(vision_ids) == 1:
@@ -99,7 +107,7 @@ def build(images, seed=42, texture=None, unwrap=True, octree=256, decimate=0):
         if unwrap:
             wf["16"] = {"class_type": "UnwrapMesh",
                         "inputs": {"mesh": mesh_src, "segmenter": "pec",
-                                   "resolution": 2048, "padding": 4, "weld_distance": 0.0001}}
+                                   "resolution": texres, "padding": 4, "weld_distance": 0.0001}}
             tex_in = ["16", 0]
         else:
             tex_in = mesh_src
@@ -118,6 +126,12 @@ def main():
     unwrap = True
     octree = 256
     decimate = 0
+    texres = 2048
+    out_path = None
+    if "--out" in args:
+        i = args.index("--out")
+        out_path = args[i + 1]
+        del args[i:i + 2]
     if "--no-unwrap" in args:
         args.remove("--no-unwrap")
         unwrap = False
@@ -133,6 +147,10 @@ def main():
         i = args.index("--decimate")
         decimate = int(args[i + 1])
         del args[i:i + 2]
+    if "--texres" in args:
+        i = args.index("--texres")
+        texres = int(args[i + 1])
+        del args[i:i + 2]
 
     paths = [Path(p) for p in args[:4]]
     if len(paths) not in (1, 4):
@@ -145,7 +163,8 @@ def main():
 
     staged = [stage(p) for p in paths]
     tex_staged = stage(texture) if texture is not None else None
-    wf = build(staged, texture=tex_staged, unwrap=unwrap, octree=octree, decimate=decimate)
+    wf = build(staged, texture=tex_staged, unwrap=unwrap, octree=octree,
+               decimate=decimate, texres=texres)
 
     t0 = time.time()
     sub = api("POST", "/prompt", {"prompt": wf, "client_id": uuid.uuid4().hex})
@@ -187,8 +206,10 @@ def main():
 
     f = files[0]
     src = OUTPUT / f.get("subfolder", "") / f["filename"]
-    VR.mkdir(parents=True, exist_ok=True)
-    dst = VR / "pig.glb"
+    # Default keeps the old behaviour, but --out lets a comparison run write
+    # somewhere else instead of overwriting the room's live asset.
+    dst = Path(out_path) if out_path else (VR / "pig.glb")
+    dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(src, dst)
     print(f"done in {time.time()-t0:.1f}s -> {dst} ({dst.stat().st_size/1048576:.1f} MB)")
 
