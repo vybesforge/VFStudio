@@ -26,9 +26,22 @@ SERVER = os.environ.get("VOICE_SERVER", "http://127.0.0.1:8000")
 KOKORO = "mlx-community/Kokoro-82M-bf16"
 CLONE_MODEL = os.environ.get("VOICE_CLONE_MODEL", "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16")
 WHISPER = "mlx-community/whisper-large-v3-turbo-asr-fp16"
-TOOLS_PY = f"{HOME}/media-stack/tools/.venv/bin/python"
-FFMPEG = f"{HOME}/.hermes/tools/ffmpeg-9.0.1-darwin-arm64/ffmpeg"
-SCRATCH = f"{HOME}/media-stack/scratch/voice"
+def _find_ffmpeg(name="ffmpeg"):
+    """FFMPEG env var > PATH > Hermes-bundled build. Portable across machines."""
+    import os, shutil, glob
+    env = os.environ.get(name.upper())
+    if env and os.path.exists(env):
+        return env
+    w = shutil.which(name)
+    if w:
+        return w
+    hits = sorted(glob.glob(os.path.expanduser(f"~/.hermes/tools/ffmpeg-*/{name}")))
+    return hits[-1] if hits else name
+
+STACK = os.environ.get("MEDIA_STACK", f"{HOME}/media-stack")
+TOOLS_PY = f"{STACK}/tools/.venv/bin/python"
+FFMPEG = _find_ffmpeg()
+SCRATCH = f"{STACK}/scratch/voice"
 
 
 def die(msg, code=1):

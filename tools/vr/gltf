@@ -1,6 +1,10 @@
 #!/bin/bash
-# Wrapper for @gltf-transform/cli installed with the Hermes-bundled node/npm.
-# Usage: ~/media-stack/tools/vr/gltf <command> [args]   e.g.  gltf inspect in.glb
-NODE_BIN="$HOME/.hermes/tools/node-26.12.1-darwin-arm64/bin"
-export PATH="$NODE_BIN:$PATH"
-exec "$NODE_BIN/gltf-transform" "$@"
+# Wrapper for @gltf-transform/cli. Finds node from PATH (brew) or the Hermes-bundled build,
+# so the same script works on a fresh machine after install.sh.
+# Usage: gltf <command> [args]   e.g.  gltf inspect in.glb
+for d in "$HOME"/.hermes/tools/node-*/bin "$HOME"/.hermes/tools/npm-*/bin /opt/homebrew/bin; do
+  [ -d "$d" ] && export PATH="$PATH:$d"
+done
+GT="$(command -v gltf-transform 2>/dev/null)"
+[ -z "$GT" ] && { echo "gltf-transform not installed: npm install -g @gltf-transform/cli" >&2; exit 127; }
+exec "$GT" "$@"

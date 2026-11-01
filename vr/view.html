@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>view</title>
+<style>html,body{margin:0;height:100%;background:#0b0d10;color:#9aa2ad;font:12px ui-sans-serif,system-ui}#info{position:fixed;left:10px;bottom:8px;font-variant-numeric:tabular-nums}canvas{display:block}</style>
+</head><body><div id="info">loading…</div>
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from './vendor/GLTFLoader.js';
+import {OrbitControls} from './vendor/OrbitControls.js';
+const src = new URLSearchParams(location.search).get('src') || './pig.glb';
+const info = document.getElementById('info');
+const renderer = new THREE.WebGLRenderer({antialias:true}); renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight); renderer.outputColorSpace = THREE.SRGBColorSpace; document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0d10);
+const cam = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 100); cam.position.set(1.6,1.2,1.6);
+const ctl = new OrbitControls(cam, renderer.domElement); ctl.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
+const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(2,3,2); scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.8); fill.position.set(-2,1,-2); scene.add(fill);
+scene.add(new THREE.GridHelper(2, 20, 0x2a3140, 0x1c2027));
+function fit(obj){
+  const box = new THREE.Box3().setFromObject(obj); const size = box.getSize(new THREE.Vector3()); const c = box.getCenter(new THREE.Vector3());
+  const s = 1.0 / Math.max(size.x, size.y, size.z); obj.scale.setScalar(s); obj.position.sub(c.multiplyScalar(s)); obj.position.y += size.y*s/2;
+  let tris = 0; obj.traverse(o=>{ if(o.isMesh){ const g=o.geometry; tris += g.index ? g.index.count/3 : g.attributes.position.count/3; }});
+  info.textContent = `${src.split('/').pop()} · ${Math.round(tris).toLocaleString()} tris · ${size.x.toFixed(3)} × ${size.y.toFixed(3)} × ${size.z.toFixed(3)} (source units) · drag to orbit, wheel to zoom`;
+}
+// STL (binary or ascii) — small inline parser so prints preview too
+async function loadSTL(url){
+  const buf = await (await fetch(url)).arrayBuffer(); const dv = new DataView(buf);
+  let geo;
+  const head = new TextDecoder().decode(buf.slice(0,80));
+  const n = dv.getUint32(80, true);
+  if (!head.startsWith('solid') || 84 + n*50 === buf.byteLength) {
+    const pos = new Float32Array(n*9); let o = 84;
+    for (let i=0;i<n;i++){ o += 12; for(let k=0;k<9;k++){ pos[i*9+k] = dv.getFloat32(o, true); o += 4; } o += 2; }
+    geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  } else {
+    const txt = new TextDecoder().decode(buf); const v = []; const re = /vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g; let m;
+    while ((m = re.exec(txt))) v.push(+m[1], +m[2], +m[3]);
+    geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  }
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({color:0x7fa7d6, metalness:0.1, roughness:0.6}));
+  mesh.rotation.x = -Math.PI/2; // STL is Z-up
+  const g = new THREE.Group(); g.add(mesh); return g;
+}
+(async () => {
+  try {
+    const ext = src.split('?')[0].split('.').pop().toLowerCase();
+    const obj = ext === 'stl' ? await loadSTL(src) : (await new GLTFLoader().loadAsync(src)).scene;
+    scene.add(obj); fit(obj);
+  } catch (e) { info.textContent = 'failed to load: ' + e.message; }
+})();
+addEventListener('resize', () => { cam.aspect = innerWidth/innerHeight; cam.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+renderer.setAnimationLoop(() => { ctl.update(); renderer.render(scene, cam); });
+</script></body></html>

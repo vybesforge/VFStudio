@@ -20,7 +20,19 @@ from pathlib import Path
 
 import requests
 
-FFMPEG = str(Path.home() / ".hermes/tools/ffmpeg-9.0.1-darwin-arm64/ffmpeg")
+def _find_ffmpeg(name="ffmpeg"):
+    """FFMPEG env var > PATH > Hermes-bundled build. Portable across machines."""
+    import os, shutil, glob
+    env = os.environ.get(name.upper())
+    if env and os.path.exists(env):
+        return env
+    w = shutil.which(name)
+    if w:
+        return w
+    hits = sorted(glob.glob(os.path.expanduser(f"~/.hermes/tools/ffmpeg-*/{name}")))
+    return hits[-1] if hits else name
+
+FFMPEG = _find_ffmpeg()
 DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo-asr-fp16"
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac"}
 

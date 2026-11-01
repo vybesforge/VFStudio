@@ -1,0 +1,360 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>studio · media stack</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{color-scheme:dark;--bg:#0b0d10;--card:#14171c;--line:#232830;--mut:#8b929c;--fg:#e6e8eb;--acc:#1f6feb;--ok:#37d67a;--warn:#f5a623;--err:#e05561}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 ui-sans-serif,-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+  header{padding:18px 28px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap}
+  h1{font-size:17px;font-weight:600;margin:0}
+  .sub{color:var(--mut);font-size:12px;margin-top:2px}
+  nav{display:flex;gap:2px;padding:12px 28px 0;border-bottom:1px solid #1c2027;overflow-x:auto}
+  nav button{background:none;border:none;border-bottom:2px solid transparent;color:var(--mut);padding:8px 13px;font-size:13px;cursor:pointer;font-family:inherit;border-radius:0;white-space:nowrap}
+  nav button:hover{color:var(--fg)} nav button.active{color:var(--fg);border-bottom-color:var(--acc)}
+  main{padding:18px 28px 40px}
+  .tab{display:none} .tab.active{display:block}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .name{font-weight:600;font-size:15px} .desc{color:var(--mut);font-size:12px}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+  .on{background:var(--ok);box-shadow:0 0 8px #37d67a88} .off{background:#4a5160} .warn{background:var(--warn)} .bad{background:var(--err)}
+  button,select,input,textarea{font-family:inherit;font-size:12px;color:var(--fg)}
+  button{background:#1d2229;border:1px solid #2c323c;border-radius:7px;padding:6px 11px;cursor:pointer}
+  button:hover{background:#262d36;border-color:#3a424f} button.primary{background:var(--acc);border-color:var(--acc)} button.danger:hover{background:#3a1d21;border-color:#7a2c35}
+  button:disabled{opacity:.5;cursor:default}
+  input,select,textarea{background:#0b0d10;border:1px solid var(--line);border-radius:7px;padding:7px 9px;width:100%}
+  textarea{min-height:70px;resize:vertical}
+  label{display:block;font-size:11px;color:var(--mut);margin:9px 0 3px;text-transform:uppercase;letter-spacing:.05em}
+  .two{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:16px;align-items:start}
+  @media(max-width:900px){.two{grid-template-columns:1fr}}
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:0 10px} .fields .full{grid-column:1/-1}
+  .btns{display:flex;gap:7px;margin-top:14px;flex-wrap:wrap}
+  .meta{font-size:11px;color:#6f7681;font-variant-numeric:tabular-nums;margin-top:8px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);margin:20px 0 10px;font-weight:600}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  pre{background:#0b0d10;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;line-height:1.45;max-height:220px;overflow:auto;white-space:pre-wrap;color:#9aa2ad;margin:10px 0 0}
+  .bar{height:8px;background:#1c2027;border-radius:4px;overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;background:var(--acc);transition:width .3s}
+  .bar.g>i{background:var(--ok)} .bar.a>i{background:var(--warn)} .bar.r>i{background:var(--err)} .bar.pulse>i{animation:pulse 1.2s infinite}
+  @keyframes pulse{0%{opacity:.4}50%{opacity:1}100%{opacity:.4}}
+  /* gallery */
+  .gal{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+  .it{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+  .it .th{height:160px;background:#0b0d10;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;position:relative}
+  .it .th img,.it .th video{width:100%;height:100%;object-fit:contain}
+  .it .th .ph{font-size:34px;color:#39414d}
+  .it .bd{padding:8px 10px;display:flex;flex-direction:column;gap:3px}
+  .it .fn{font-size:12px;word-break:break-all;line-height:1.3}
+  .it .kv{font-size:11px;color:#7f8791;font-variant-numeric:tabular-nums}
+  .it audio{width:100%;height:30px;margin-top:4px}
+  .it .acts{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap} .it .acts button{padding:3px 8px;font-size:11px}
+  .pill{position:absolute;top:8px;left:8px;font-size:10px;padding:2px 7px;border-radius:5px;background:#000a;border:1px solid #2c323c;color:#9aa2ad}
+  /* jobs */
+  .job{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid #1c2027;font-size:12px}
+  .job:last-child{border:0} .chip{font-size:10px;padding:1px 7px;border-radius:5px;border:1px solid #2c323c;color:var(--mut)}
+  .chip.run{color:var(--warn);border-color:#5a4418} .chip.done{color:var(--ok);border-color:#265c3d} .chip.failed{color:var(--err);border-color:#6b2a30}
+  /* modal */
+  #modal{position:fixed;inset:0;background:#000c;display:none;align-items:center;justify-content:center;z-index:20}
+  #modal.open{display:flex} #modal .box{width:min(92vw,1200px);height:min(88vh,860px);background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+  #modal .hd{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px}
+  #modal .ct{flex:1;display:flex;align-items:center;justify-content:center;background:#0b0d10;overflow:hidden}
+  #modal .ct img,#modal .ct video{max-width:100%;max-height:100%} #modal iframe{width:100%;height:100%;border:0}
+  table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+  th{text-align:left;color:var(--mut);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:6px 0;border-bottom:1px solid var(--line)}
+  td{padding:5px 0;border-bottom:1px solid #16191f;vertical-align:top} td.r{text-align:right}
+  .stats{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut)}
+  .stat .v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums} .stat .v small{font-size:13px;color:var(--mut);font-weight:400}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  iframe.room{width:100%;height:min(70vh,720px);border:0;display:block;border-radius:10px;border:1px solid var(--line)}
+  .tag{font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid #2c323c;color:var(--mut)} .tag.ok{color:var(--ok);border-color:#265c3d} .tag.dl{color:var(--warn);border-color:#5a4418}
+  .hint{font-size:11px;color:#6f7681;margin-top:6px}
+</style></head><body>
+<header>
+  <div><h1>studio</h1><div class="sub">local asset generation · M3 Max 64 GB · nothing leaves the machine</div></div>
+  <div class="card" id="progress" style="min-width:360px;flex:1;max-width:720px;padding:10px 14px"></div>
+</header>
+<nav>
+  <button data-tab="image" class="active">Image</button>
+  <button data-tab="video">Video</button>
+  <button data-tab="3d">3D &amp; VR</button>
+  <button data-tab="sound">Sound</button>
+  <button data-tab="voice">Voice</button>
+  <button data-tab="models">Models</button>
+  <button data-tab="services">Services</button>
+  <button data-tab="resources">Resources</button>
+</nav>
+<main>
+
+<!-- IMAGE -->
+<section class="tab active" id="tab-image"><div class="two">
+  <div>
+    <div class="card"><div class="name">Text → image</div>
+      <label>prompt</label><textarea id="im-prompt">a brass compass on an old map, soft window light, macro</textarea>
+      <div class="fields">
+        <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option></select></div>
+        <div><label>size</label><select id="im-size"><option value="1024x1024">1024 × 1024</option><option value="1344x768">1344 × 768 landscape</option><option value="768x1344">768 × 1344 portrait</option><option value="1536x1024">1536 × 1024</option></select></div>
+        <div><label>seed (blank = random)</label><input id="im-seed" placeholder="random"></div>
+        <div><label>count</label><input id="im-n" value="1" type="number" min="1" max="4"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n')})">Generate</button></div>
+      <div class="hint">CLI: <code>gen image "prompt" --model zimage</code></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">Upscale / control</div>
+      <label>source image path (click a gallery item → "use")</label><input id="im-src" placeholder="/Users/dcruse/media-stack/output/image/…png">
+      <div class="fields">
+        <div><label>upscaler</label><select id="im-up"><option value="esrgan">RealESRGAN x4 · fast</option><option value="ultrasharp">4x-UltraSharp · crisper</option><option value="seedvr2">SeedVR2 3B · diffusion, slow</option></select></div>
+        <div><label>scale</label><input id="im-scale" value="2"></div>
+      </div>
+      <div class="btns"><button onclick="runJob('upscale',{image:v('im-src'),method:v('im-up'),scale:v('im-scale')})">Upscale</button>
+        <button onclick="runJob('control',{prompt:v('im-prompt'),image:v('im-src'),mode:'canny'})">Canny-guided re-render with prompt</button></div>
+    </div>
+    <div id="jobs-image" class="card" style="margin-top:12px"></div>
+  </div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('image')">Refresh</button></div><div class="gal" id="gal-image"></div></div>
+</div></section>
+
+<!-- VIDEO -->
+<section class="tab" id="tab-video"><div class="two">
+  <div>
+    <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B</span></div>
+      <label>prompt</label><textarea id="vd-prompt">a mulefoot hog walks slowly across a sunlit barn floor, dust in the air, cinematic</textarea>
+      <label>start image (optional, path)</label><input id="vd-img" placeholder="blank = text-to-video">
+      <div class="fields">
+        <div><label>size</label><select id="vd-size"><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
+        <div><label>frames (24 fps)</label><select id="vd-frames"><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
+        <div><label>steps</label><input id="vd-steps" value="20"></div>
+        <div><label>seed</label><input id="vd-seed" placeholder="random"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
+      <div class="hint">~14 s/step at 832×480×49f on this GPU. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
+    </div>
+    <div id="jobs-video" class="card" style="margin-top:12px"></div>
+  </div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('video')">Refresh</button></div><div class="gal" id="gal-video"></div></div>
+</div></section>
+
+<!-- 3D -->
+<section class="tab" id="tab-3d">
+  <div class="row" style="margin-bottom:10px"><div><div class="name">Asset room</div><div class="desc" id="vr-asset">checking…</div></div>
+    <div class="btns" style="margin:0"><button class="primary" onclick="window.open('/vr/index.html','_blank')">Open full screen (WebXR)</button>
+      <button onclick="window.open('/vr/rig.html','_blank')">Joint picker</button><button onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
+  <iframe id="room" class="room" src="/vr/index.html" allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"></iframe>
+  <div class="grid" style="margin-top:14px">
+    <div class="card"><div class="name">Photo → mesh</div><div class="desc">TRELLIS.2 (gold path) runs through the ComfyUI UI template; it cannot be driven from this page. Recipe: skill <code>local-media-stack</code> → <code>photo-to-3d-gold-standard.md</code>. Progress shows in the bar above while it runs.</div>
+      <div class="btns"><button onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div></div>
+    <div class="card"><div class="name">Print</div><div class="desc">build123d part → <code>meshcheck.py</code> → <code>slice --preset bambu|generic</code> → G-code/3MF. Skill <code>studio-3d-print</code>. STL/G-code previews appear in the gallery.</div></div>
+    <div class="card"><div class="name">VR build</div><div class="desc">Godot 4.7 OpenXR room at <code>~/media-stack/vr-godot</code>; Windows SteamVR export + <code>optimize_glb.sh</code>. Skill <code>studio-vr</code>.</div></div>
+  </div>
+  <div class="row" style="margin-top:14px"><h2 style="margin:0">Meshes &amp; prints</h2><button onclick="loadGallery('3d')">Refresh</button></div>
+  <div class="gal" id="gal-3d"></div>
+</section>
+
+<!-- SOUND -->
+<section class="tab" id="tab-sound"><div class="two">
+  <div>
+    <div class="card"><div class="name">Sound effect</div>
+      <label>describe the sound</label><textarea id="sx-prompt">heavy wooden door creaks open slowly, stone hall reverb</textarea>
+      <div class="fields">
+        <div><label>model</label><select id="sx-model"><option value="sao">Stable Audio Open 1.0 · 50 steps</option><option value="sa3">Stable Audio 3 medium · 8 steps, up to 150 s</option></select></div>
+        <div><label>seconds</label><input id="sx-sec" value="8"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="runJob('sfx',{prompt:v('sx-prompt'),model:v('sx-model'),seconds:v('sx-sec')})">Generate SFX</button></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">Music <span class="tag">ACE-Step 1.5</span></div>
+      <label>style tags</label><input id="mu-tags" value="lo-fi hip hop, warm rhodes, vinyl crackle, mellow">
+      <label>lyrics ([Verse] [Chorus] … or [inst])</label><textarea id="mu-lyrics">[inst]</textarea>
+      <div class="fields">
+        <div><label>seconds</label><input id="mu-sec" value="60"></div><div><label>bpm</label><input id="mu-bpm" value="85"></div>
+        <div class="full"><label>key</label><input id="mu-key" value="C major"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="runJob('music',{prompt:v('mu-tags'),lyrics:v('mu-lyrics'),seconds:v('mu-sec'),bpm:v('mu-bpm'),key:v('mu-key')})">Generate music</button></div>
+      <div class="hint">Also: <code>stack music "caption"</code> (MiniMax-Music via mlx-audio).</div>
+    </div>
+    <div id="jobs-sound" class="card" style="margin-top:12px"></div>
+  </div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('sound')">Refresh</button></div><div class="gal" id="gal-sound"></div></div>
+</div></section>
+
+<!-- VOICE -->
+<section class="tab" id="tab-voice"><div class="two">
+  <div>
+    <div class="card"><div class="name">Speak <span class="tag">Kokoro</span></div>
+      <label>text</label><textarea id="vo-text">Voice cloning on Apple Silicon works entirely offline.</textarea>
+      <label>voice</label><select id="vo-voice"><option>af_heart</option></select>
+      <div class="btns"><button class="primary" onclick="runJob('say',{text:v('vo-text'),voice:v('vo-voice')})">Speak</button></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">Clone a voice <span class="tag">Qwen3-TTS</span></div>
+      <label>reference wav path (5–15 s of the voice)</label><input id="vo-ref" placeholder="/Users/dcruse/…/ref.wav">
+      <label>what the reference says (transcript; blank = auto-transcribe first)</label><input id="vo-reftext">
+      <div class="btns"><button class="primary" onclick="cloneJob()">Clone &amp; speak the text above</button></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">Transcribe <span class="tag">Whisper</span></div>
+      <label>audio / video path</label><input id="vo-file"><div class="btns"><button onclick="runJob('transcribe',{file:v('vo-file')})">Transcribe</button><button onclick="runJob('transcribe',{file:v('vo-file'),srt:true})">→ SRT</button></div>
+    </div>
+    <div id="jobs-voice" class="card" style="margin-top:12px"></div>
+  </div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('voice')">Refresh</button></div><div class="gal" id="gal-voice"></div></div>
+</div></section>
+
+<!-- MODELS -->
+<section class="tab" id="tab-models">
+  <div class="card" id="inv-summary"></div>
+  <div id="inv-groups"></div>
+  <h2>Audio models (mlx-audio, HF cache)</h2><div class="card" id="inv-audio"></div>
+  <h2>Tools</h2><div class="card" id="inv-tools"></div>
+</section>
+
+<!-- SERVICES -->
+<section class="tab" id="tab-services">
+  <div class="grid" id="services"></div>
+  <h2>Quick reference</h2>
+  <div class="card"><pre style="margin:0;max-height:none">stack status | start comfy | start audio | stop comfy | free | logs comfy
+gen status | gen image "…" | gen video "…" | gen sfx "…" | gen music "…" | gen upscale f.png
+voice say "…" | voice clone --ref r.wav "…" | voice transcribe f.wav
+vid trim in.mp4 out.mp4 --start 1 --end 3      fetch-models --list
+skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-print · studio-vr · local-media-stack</pre></div>
+</section>
+
+<!-- RESOURCES -->
+<section class="tab" id="tab-resources">
+  <div class="stats" id="stats"></div>
+  <h2>Top processes by memory</h2>
+  <div class="card"><table id="procs"><thead><tr><th>process</th><th class="r">pid</th><th class="r">rss</th><th class="r">cpu%</th></tr></thead><tbody></tbody></table></div>
+  <h2>Disk</h2><div class="card"><div class="row"><div class="desc">data volume</div><div class="meta" id="disk" style="margin:0"></div></div><div class="bar"><i id="diskbar"></i></div></div>
+</section>
+</main>
+
+<div id="modal" onclick="if(event.target.id==='modal')closeModal()"><div class="box"><div class="hd"><span id="modal-title"></span><button onclick="closeModal()">close</button></div><div class="ct" id="modal-ct"></div></div></div>
+
+<script>
+const $=id=>document.getElementById(id), GB=1024**3, MB=1024**2;
+const v=id=>$(id).value.trim(); const sz=id=>v(id).split('x').map(Number);
+const fmtB=b=>b>GB?(b/GB).toFixed(2)+' GB':b>MB?(b/MB).toFixed(1)+' MB':(b/1024).toFixed(0)+' KB';
+function flash(m){const d=document.createElement('div');d.textContent=m;d.style.cssText='position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1d2229;border:1px solid #2c323c;padding:8px 14px;border-radius:8px;font-size:12px;z-index:30';document.body.appendChild(d);setTimeout(()=>d.remove(),2600);}
+
+// tabs
+let current='image';
+const KIND_TAB={image:'image',control:'image',upscale:'image',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice'};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.dataset.tab;
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
+  document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('active',s.id==='tab-'+current));
+  onTab(current);});
+function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='models') loadInventory(); if(t==='services') refreshServices(); if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
+
+// progress
+async function refreshProgress(){
+  try{
+    const p=await (await fetch('/api/studio/progress')).json();
+    const el=$('progress'); let pct=p.max?Math.round(100*p.value/p.max):0;
+    if(!p.connected){ el.innerHTML='<span class="dot off"></span><b>ComfyUI</b> <span class="desc">not reachable — start it in Services</span>'; return; }
+    if(p.status==='running'){
+      el.innerHTML=`<div class="row"><div><span class="dot warn"></span><b>ComfyUI running</b> <span class="desc">node ${p.node??'…'} · ${p.elapsed??0}s · ${p.queue_remaining} queued</span></div><span class="desc">${p.max?pct+'% · step '+p.value+'/'+p.max:'loading model…'}</span></div><div class="bar ${p.max?'':'pulse'}"><i style="width:${p.max?pct:100}%"></i></div>`;
+    } else {
+      const tone=p.status==='error'?'bad':p.status==='done'?'on':'on';
+      el.innerHTML=`<div class="row"><div><span class="dot ${tone}"></span><b>ComfyUI ${p.status==='idle'?'idle':p.status}</b> <span class="desc">${p.queue_remaining?p.queue_remaining+' queued':'queue empty'}</span></div></div><div class="bar g"><i style="width:${p.status==='done'?100:0}%"></i></div>`;
+    }
+  }catch(e){}
+}
+
+// jobs
+async function runJob(kind,args){
+  for(const k in args) if(args[k]===''||args[k]===undefined) delete args[k];
+  const r=await fetch('/api/studio/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,args})});
+  const j=await r.json();
+  if(!j.ok){ flash(j.detail||'failed'); return; }
+  flash('started: '+j.cmd.slice(0,3).join(' ')+' …'); refreshJobs();
+}
+async function cloneJob(){ runJob('clone',{ref:v('vo-ref'),ref_text:v('vo-reftext'),text:v('vo-text')}); }
+async function cancelJob(id){ await fetch('/api/studio/jobs/'+id+'/cancel',{method:'POST'}); flash('cancel sent'); refreshJobs(); }
+let lastJobStates={};
+async function refreshJobs(){
+  const j=await (await fetch('/api/studio/jobs?limit=30')).json();
+  const byTab={};
+  for(const job of j.jobs){ const t=KIND_TAB[job.kind]||'image'; (byTab[t]=byTab[t]||[]).push(job);
+    if(lastJobStates[job.id] && lastJobStates[job.id]!==job.status && job.status!=='running'){ flash(`${job.kind} ${job.status} (${job.elapsed}s)`); loadGallery(t); }
+    lastJobStates[job.id]=job.status; }
+  for(const t of ['image','video','sound','voice']){
+    const el=$('jobs-'+t); if(!el) continue; const list=(byTab[t]||[]).slice(0,6);
+    el.innerHTML='<div class="name" style="font-size:13px">Jobs</div>'+(list.length?list.map(job=>`<div class="job"><span class="chip ${job.status==='running'?'run':job.status}">${job.status}</span>
+      <span style="flex:1"><code>${job.kind}</code> ${(job.args.prompt||job.args.text||job.args.image||job.args.file||'').toString().slice(0,60)}</span>
+      <span class="desc">${job.elapsed}s</span>${job.status==='running'?`<button onclick="cancelJob('${job.id}')">cancel</button>`:''}
+      ${job.status==='failed'?`<button onclick="showLog('${job.id}')">log</button>`:''}</div>`
+      +(job.status==='failed'?`<pre id="log-${job.id}" style="display:none">${(job.log_tail||'').replace(/</g,'&lt;')}</pre>`:'')).join(''):'<div class="desc">no jobs yet this session</div>');
+  }
+}
+function showLog(id){const p=$('log-'+id); p.style.display=p.style.display==='none'?'block':'none';}
+
+// galleries
+function thumb(it,kind){
+  const e=it.ext;
+  if(['png','jpg','jpeg','webp','gif'].includes(e)) return `<img src="${it.url}" loading="lazy">`;
+  if(['mp4','webm','mov'].includes(e)) return `<video src="${it.url}#t=0.5" muted preload="metadata"></video>`;
+  if(['glb','gltf'].includes(e)) return `<div class="ph">◈</div>`;
+  if(['stl','obj'].includes(e)) return `<div class="ph">▲</div>`;
+  return `<div class="ph">♪</div>`;
+}
+function openItem(it){
+  const e=it.ext, ct=$('modal-ct'); $('modal-title').textContent=it.path;
+  if(['png','jpg','jpeg','webp','gif'].includes(e)) ct.innerHTML=`<img src="${it.url}">`;
+  else if(['mp4','webm','mov'].includes(e)) ct.innerHTML=`<video src="${it.url}" controls autoplay loop></video>`;
+  else if(['glb','gltf','stl','obj'].includes(e)) ct.innerHTML=`<iframe src="/vr/view.html?src=${encodeURIComponent(it.url)}"></iframe>`;
+  else ct.innerHTML=`<audio src="${it.url}" controls autoplay style="width:80%"></audio>`;
+  $('modal').classList.add('open');
+}
+function closeModal(){ $('modal').classList.remove('open'); $('modal-ct').innerHTML=''; }
+const galCache={};
+async function loadGallery(kind){
+  const j=await (await fetch('/api/studio/outputs?kind='+kind)).json(); galCache[kind]=j.items;
+  const el=$('gal-'+kind); if(!j.items.length){ el.innerHTML='<div class="desc">nothing generated yet</div>'; return; }
+  el.innerHTML=j.items.map((it,i)=>{
+    const audio=['wav','flac','mp3','ogg','opus'].includes(it.ext)?`<audio src="${it.url}" controls preload="none"></audio>`:'';
+    const is3d=['glb','gltf'].includes(it.ext);
+    return `<div class="it"><div class="th" onclick="openItem(galCache['${kind}'][${i}])">${thumb(it,kind)}<span class="pill">${it.ext}</span></div>
+      <div class="bd"><div class="fn">${it.name}</div><div class="kv">${fmtB(it.bytes)} · ${it.when}</div>${audio}
+      <div class="acts"><button onclick="openItem(galCache['${kind}'][${i}])">preview</button>
+        ${kind==='image'?`<button onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
+        ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
+        ${kind==='video'||kind==='image'?`<button onclick="$('vd-img').value='${it.path}';flash('start image set')">→ video</button>`:''}
+        ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button>`:''}
+        <button onclick="window.open('${it.url}','_blank')">open</button></div></div></div>`;}).join('');
+}
+async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }
+async function refreshVr(){ const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
+
+// inventory
+async function loadInventory(){
+  const inv=await (await fetch('/api/studio/inventory')).json();
+  $('inv-summary').innerHTML=`<div class="row"><div><div class="name">ComfyUI models</div><div class="desc">${inv.present_gb} of ${inv.total_gb} GB present · manifest <code>~/media-stack/models/manifest.json</code> · missing → <code>fetch-models</code></div></div></div><div class="bar g"><i style="width:${100*inv.present_gb/inv.total_gb}%"></i></div>`;
+  $('inv-groups').innerHTML=inv.groups.map(g=>`<h2>${g.label}</h2><div class="card"><table><thead><tr><th>model</th><th>role</th><th class="r">size</th><th class="r">state</th></tr></thead><tbody>${g.models.map(m=>`<tr><td><code>${m.id}</code><div class="desc" style="font-size:10px">${m.path}</div></td><td class="desc">${m.role}</td><td class="r">${m.gb} GB</td><td class="r">${m.present?'<span class="tag ok">present</span>':m.downloading?`<span class="tag dl">downloading ${m.part_gb}/${m.gb}</span>`:'<span class="tag">missing</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
+  $('inv-audio').innerHTML=`<table><tbody>${inv.audio.map(m=>`<tr><td><code>${m.id}</code></td><td class="desc">${m.role}</td><td class="r">${m.present?'<span class="tag ok">cached</span>':'<span class="tag">on demand</span>'}</td></tr>`).join('')}</tbody></table>`;
+  $('inv-tools').innerHTML=`<table><tbody>${inv.tools.map(t=>`<tr><td><span class="dot ${t.present?'on':'off'}"></span><code>${t.name}</code></td><td class="desc">${t.desc}</td><td class="desc" style="font-size:10px">${t.path}</td></tr>`).join('')}</tbody></table>`;
+}
+
+// services + resources (same API as before)
+async function act(path){ const j=await (await fetch('/api/'+path,{method:'POST'})).json(); if(j.message) flash(j.message); setTimeout(refreshServices,500); }
+async function refreshServices(){
+  const s=await (await fetch('/api/status')).json();
+  $('services').innerHTML=Object.entries(s.services).map(([k,x])=>{const cls=x.responding?'on':(x.running?'warn':'off');const st=x.responding?'running':(x.running?'starting':'stopped');
+    return `<div class="card"><div class="row"><div><div class="name">${x.label}</div><div class="desc">${x.desc}</div></div><div style="font-size:12px"><span class="dot ${cls}"></span>${st}</div></div>
+    <div class="meta">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div><div class="btns"><button class="primary" onclick="act('start/${k}')">Start</button><button onclick="act('restart/${k}')">Restart</button><button class="danger" onclick="act('stop/${k}')">Stop</button>${k==='comfy'?'<button onclick="act(\'comfy/free\')">Free VRAM</button>':''}<button onclick="svcLog('${k}')">Log</button></div><pre id="slog-${k}" style="display:none"></pre></div>`;}).join('')
+    +`<div class="card"><div class="name">panel</div><div class="desc">this page · :8787 · <a href="/legacy" style="color:var(--mut)">legacy view</a></div><div class="meta">PANEL_HOST=0.0.0.0 stack panel exposes it to the LAN (WebXR still needs localhost/HTTPS)</div></div>`;
+}
+async function svcLog(n){const p=$('slog-'+n);const j=await (await fetch('/api/logs/'+n+'?lines=60')).json();p.textContent=j.text||'(empty)';p.style.display=p.style.display==='none'?'block':'none';}
+function bar(pct,tone){const x=Math.max(0,Math.min(100,pct));const t=tone||(x>88?'r':x>70?'a':x>40?'':'g');return `<div class="bar ${t}"><i style="width:${x}%"></i></div>`;}
+async function refreshResources(){
+  const r=await (await fetch('/api/resources')).json(); const c=r.cpu||{},m=r.mem||{},g=r.gpu||{},d=r.disk||{};
+  const memPct=m.total?m.used/m.total*100:0, swapPct=m.swap_total?m.swap_used/m.swap_total*100:0;
+  $('stats').innerHTML=`<div class="card stat"><div class="k">CPU</div><div class="v">${c.busy??'–'}<small>%</small></div>${bar(c.busy||0)}<div class="meta">${r.cores} cores · load ${(c.load||[]).map(x=>x.toFixed(2)).join(' / ')}</div></div>
+  <div class="card stat"><div class="k">GPU</div><div class="v">${g.available&&g.util!==undefined?g.util+'<small>%</small>':'<small>n/a</small>'}</div>${bar(g.util||0)}<div class="meta">${g.available?`renderer ${g.renderer??'–'}% · tiler ${g.tiler??'–'}%`:'not exposed'}</div></div>
+  <div class="card stat"><div class="k">Memory</div><div class="v">${(m.used/GB).toFixed(1)}<small> / ${(m.total/GB).toFixed(0)} GB</small></div>${bar(memPct)}<div class="meta">wired ${(m.wired/GB).toFixed(1)} GB · compressed ${(m.compressed/GB).toFixed(1)} GB</div></div>
+  <div class="card stat"><div class="k">Swap</div><div class="v">${(m.swap_used/MB).toFixed(0)}<small> / ${(m.swap_total/MB).toFixed(0)} MB</small></div>${bar(swapPct,'a')}<div class="meta">${swapPct>50?'pressure — models evicting':'healthy'}</div></div>`;
+  $('procs').querySelector('tbody').innerHTML=(r.procs||[]).map(p=>`<tr><td><code>${p.comm}</code></td><td class="r">${p.pid}</td><td class="r">${p.rss>GB?(p.rss/GB).toFixed(2)+' GB':(p.rss/MB).toFixed(0)+' MB'}</td><td class="r">${p.cpu.toFixed(1)}</td></tr>`).join('');
+  $('disk').textContent=`${(d.used/GB).toFixed(0)} / ${(d.total/GB).toFixed(0)} GB used · ${(d.free/GB).toFixed(0)} GB free`; $('diskbar').style.width=(d.total?d.used/d.total*100:0)+'%';
+}
+async function loadVoices(){ try{const j=await (await fetch('/api/studio/voices')).json(); if(j.voices&&j.voices.length) $('vo-voice').innerHTML=j.voices.map(x=>`<option${x==='af_heart'?' selected':''}>${x}</option>`).join('');}catch(e){} }
+
+refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
+setInterval(refreshProgress,1500); setInterval(refreshJobs,3000);
+setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); },2500);
+</script></body></html>

@@ -1,0 +1,396 @@
+"""studio.py — the Studio page for the media-stack panel.
+
+Adds to panel.py (one origin, :8787):
+  tabs per modality (Image / Video / 3D & VR / Sound / Voice) with a run form, a live
+  progress bar for the current ComfyUI job, and an inline preview gallery of outputs;
+  plus Models (manifest inventory) and Tools (what is installed) views.
+
+API:
+  GET  /api/studio/inventory         manifest models present/missing, tools, services
+  GET  /api/studio/outputs?kind=     recent output files for a modality, with preview URLs
+  GET  /api/studio/progress          current ComfyUI job progress (from its websocket)
+  POST /api/studio/run               {"kind": "image", "args": {...}}  -> job id
+  GET  /api/studio/jobs              recent jobs (status, result, log tail)
+  POST /api/studio/jobs/{id}/cancel
+
+Jobs shell out to the same CLIs an agent uses (`gen`, `voice`, `vid`), so the page and
+the skills never drift apart.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import signal
+import subprocess
+import threading
+import time
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Body, HTTPException
+
+HOME = Path.home()
+STACK = HOME / "media-stack"
+OUT = STACK / "output"
+COMFY_OUT = STACK / "ComfyUI" / "output"
+MODELS = STACK / "ComfyUI" / "models"
+MANIFEST = STACK / "models" / "manifest.json"
+JOBS_LOG = STACK / "logs" / "studio-jobs.jsonl"
+GEN = STACK / "tools" / "comfy" / "gen"
+VOICE = STACK / "tools" / "voice" / "voice"
+VID = STACK / "tools" / "video" / "vid"
+FFMPEG = next((p for p in (HOME / ".hermes" / "tools").glob("ffmpeg-*/ffmpeg")), None)
+
+router = APIRouter(prefix="/api/studio")
+
+# ───────────────────────── inventory ─────────────────────────
+TOOLS = [
+    ("gen", GEN, "ComfyUI pipelines: image / control / upscale / video / sfx / music"),
+    ("voice", VOICE, "TTS, voice clone, transcribe, enhance (mlx-audio)"),
+    ("vid", VID, "ffmpeg wrapper: trim / concat / captions / gif / loudness"),
+    ("vse_build.py", STACK / "tools" / "video" / "vse_build.py", "Blender VSE timeline assembler"),
+    ("slice", STACK / "tools" / "print" / "slice", "OrcaSlicer CLI: STL → G-code / 3MF (bambu | generic)"),
+    ("meshcheck.py", STACK / "tools" / "print" / "meshcheck.py", "watertight / volume / repair check for STL"),
+    ("optimize_glb.sh", STACK / "tools" / "vr" / "optimize_glb.sh", "gltf-transform: decimate + resize textures for VR"),
+    ("blender", STACK / "bin" / "blender", "Blender 5.2 headless wrapper"),
+    ("fetch-models", STACK / "bin" / "fetch-models", "download missing manifest models"),
+    ("Godot", Path("/Applications/Godot.app"), "Godot 4.7 OpenXR room (~/media-stack/vr-godot)"),
+    ("OrcaSlicer", Path("/Applications/OrcaSlicer.app"), "slicer GUI + CLI"),
+    ("Krita", Path("/Applications/Krita.app"), "raster painting"),
+    ("Inkscape", Path("/Applications/Inkscape.app"), "vector editing / SVG for laser & print"),
+    ("Audacity", Path("/Applications/Audacity 4.app"), "audio editing"),
+    ("OpenSCAD", Path("/Applications/OpenSCAD.app"), "code-CAD (.scad)"),
+    ("MeshLab", Path("/Applications/MeshLab2025.07.app"), "mesh inspection / repair"),
+    ("ffmpeg", FFMPEG or Path("/nonexistent"), "bundled ffmpeg 9"),
+]
+
+GROUPS = [
+    ("Image", ["flux1-dev-fp8", "z-image-turbo", "z-image-te", "z-image-vae", "z-image-controlnet-union",
+               "flux2-klein-4b", "flux2-vae", "qwen-image-edit-2509", "qwen-2.5-vl-7b", "qwen-image-vae",
+               "4x-ultrasharp", "realesrgan-x4plus", "seedvr2-3b-int8", "seedvr2-vae"]),
+    ("Video", ["wan2.2-ti2v-5b", "wan2.2-vae", "umt5-xxl-fp8"]),
+    ("3D", ["trellis2-int8", "trellis2-shape-vae", "trellis2-texture-vae", "dinov3-L", "birefnet"]),
+    ("Sound", ["stable-audio-open-1.0", "t5-base", "stable-audio-3-medium", "t5gemma-b-b-ul2", "ace-step-1.5-turbo-aio"]),
+]
+
+AUDIO_MODELS = [
+    ("mlx-community/Kokoro-82M-bf16", "TTS (50+ voices)"),
+    ("mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16", "voice cloning"),
+    ("mlx-community/chatterbox-turbo-fp16", "voice cloning (fallback)"),
+    ("mlx-community/whisper-large-v3-turbo-asr-fp16", "speech-to-text"),
+    ("mlx-community/MiniMax-Music3-8bit", "music (mlx, `stack music`)"),
+]
+
+
+def _hf_cached(repo: str) -> bool:
+    d = HOME / ".cache" / "huggingface" / "hub" / ("models--" + repo.replace("/", "--"))
+    return d.exists() and any(d.glob("snapshots/*/*"))
+
+
+@router.get("/inventory")
+def inventory():
+    man = json.load(open(MANIFEST))["models"] if MANIFEST.exists() else []
+    by_id = {m["id"]: m for m in man}
+    groups = []
+    for label, ids in GROUPS:
+        rows = []
+        for i in ids:
+            m = by_id.get(i)
+            if not m:
+                continue
+            p = MODELS / m["path"]
+            part = Path(str(p) + ".part")
+            rows.append({"id": i, "role": m["role"], "gb": m["gb"], "path": m["path"],
+                         "present": p.exists(), "downloading": part.exists(),
+                         "part_gb": round(part.stat().st_size / 1e9, 2) if part.exists() else 0})
+        groups.append({"label": label, "models": rows})
+    known = {i for _, ids in GROUPS for i in ids}
+    extra = [{"id": m["id"], "role": m["role"], "gb": m["gb"], "path": m["path"],
+              "present": (MODELS / m["path"]).exists(), "downloading": False, "part_gb": 0}
+             for m in man if m["id"] not in known]
+    if extra:
+        groups.append({"label": "Other", "models": extra})
+    audio = [{"id": r, "role": n, "present": _hf_cached(r)} for r, n in AUDIO_MODELS]
+    tools = [{"name": n, "path": str(p), "present": p.exists(), "desc": d} for n, p, d in TOOLS]
+    present_gb = sum(m["gb"] for g in groups for m in g["models"] if m["present"])
+    total_gb = sum(m["gb"] for g in groups for m in g["models"])
+    return {"groups": groups, "audio": audio, "tools": tools,
+            "present_gb": round(present_gb, 1), "total_gb": round(total_gb, 1)}
+
+
+# ───────────────────────── outputs ─────────────────────────
+EXT = {
+    "image": {".png", ".jpg", ".jpeg", ".webp"},
+    "video": {".mp4", ".webm", ".mov", ".gif"},
+    "sound": {".wav", ".flac", ".mp3", ".ogg", ".opus"},
+    "voice": {".wav", ".flac", ".mp3"},
+    "3d": {".glb", ".gltf", ".obj", ".stl"},
+}
+# where each modality's files live; (dir, url mount)
+ROOTS = {
+    "image": [(OUT / "image", "/files/output/image"), (OUT / "control", "/files/output/control"),
+              (OUT / "upscale", "/files/output/upscale"), (COMFY_OUT, "/files/comfy_output")],
+    "video": [(OUT / "video", "/files/output/video"), (COMFY_OUT / "video", "/files/comfy_output/video"),
+              (STACK / "scratch" / "video-test", "/files/scratch/video-test")],
+    "sound": [(OUT / "sfx", "/files/output/sfx"), (OUT / "music", "/files/output/music"),
+              (COMFY_OUT / "audio", "/files/comfy_output/audio"), (STACK / "scratch", "/files/scratch")],
+    "voice": [(OUT / "voice", "/files/output/voice"), (STACK / "scratch" / "voice-test", "/files/scratch/voice-test")],
+    "3d": [(STACK / "vr", "/vr"), (COMFY_OUT / "3d", "/files/comfy_output/3d"), (OUT / "3d", "/files/output/3d"),
+           (STACK / "scratch" / "print-test", "/files/scratch/print-test"), (STACK / "scratch" / "vr-test", "/files/scratch/vr-test")],
+}
+
+
+@router.get("/outputs")
+def outputs(kind: str = "image", limit: int = 48):
+    if kind not in ROOTS:
+        raise HTTPException(400, "unknown kind")
+    exts = EXT[kind]
+    seen, items = set(), []
+    for d, mount in ROOTS[kind]:
+        if not d.is_dir():
+            continue
+        for p in d.rglob("*"):
+            if not p.is_file() or p.suffix.lower() not in exts or ".part" in p.name:
+                continue
+            rp = p.resolve()
+            if rp in seen:
+                continue
+            seen.add(rp)
+            st = p.stat()
+            rel = p.relative_to(d).as_posix()
+            items.append({"name": p.name, "path": str(p), "url": f"{mount}/{rel}", "bytes": st.st_size,
+                          "mtime": st.st_mtime, "when": time.strftime("%m-%d %H:%M", time.localtime(st.st_mtime)),
+                          "ext": p.suffix.lower().lstrip(".")})
+    items.sort(key=lambda x: -x["mtime"])
+    return {"kind": kind, "items": items[:limit]}
+
+
+# ───────────────────────── ComfyUI progress (websocket listener) ─────────────────────────
+# ComfyUI sends execution_start / executing / progress only to the socket whose clientId
+# submitted the prompt. `gen` and the Hermes image_gen plugin both submit as "gen-cli", so
+# the panel connects under that id and receives their step-by-step progress.
+_progress = {"connected": False, "prompt_id": None, "node": None, "value": 0, "max": 0,
+             "status": "idle", "started": None, "updated": None, "queue_remaining": 0, "last_node_type": None}
+_plock = threading.Lock()
+
+
+def _ws_loop():
+    try:
+        import websocket  # websocket-client
+    except Exception:
+        return
+    while True:
+        try:
+            ws = websocket.create_connection("ws://127.0.0.1:8188/ws?clientId=gen-cli", timeout=5)
+            ws.settimeout(30)
+            with _plock:
+                _progress["connected"] = True
+            while True:
+                try:
+                    raw = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    continue
+                if not isinstance(raw, str):
+                    continue
+                msg = json.loads(raw)
+                t, d = msg.get("type"), msg.get("data", {})
+                now = time.time()
+                with _plock:
+                    _progress["updated"] = now
+                    if t == "status":
+                        _progress["queue_remaining"] = d.get("status", {}).get("exec_info", {}).get("queue_remaining", 0)
+                        if _progress["queue_remaining"] == 0 and _progress["status"] != "running":
+                            _progress["status"] = "idle"
+                    elif t == "execution_start":
+                        _progress.update(prompt_id=d.get("prompt_id"), status="running", started=now, value=0, max=0, node=None)
+                    elif t == "executing":
+                        if d.get("node") is None:
+                            _progress.update(status="done", node=None, value=_progress["max"] or 1, max=_progress["max"] or 1)
+                        else:
+                            _progress["node"] = d.get("node")
+                    elif t == "progress":
+                        _progress.update(value=d.get("value", 0), max=d.get("max", 0), node=d.get("node"), status="running")
+                    elif t in ("execution_error",):
+                        _progress.update(status="error", node=None)
+                    elif t == "execution_interrupted":
+                        _progress.update(status="interrupted", node=None)
+        except Exception:
+            with _plock:
+                _progress["connected"] = False
+            time.sleep(3)
+
+
+threading.Thread(target=_ws_loop, daemon=True, name="comfy-ws").start()
+
+
+@router.get("/progress")
+def progress():
+    with _plock:
+        p = dict(_progress)
+    # Jobs submitted by other clients (ComfyUI's own UI, e.g. TRELLIS runs) only reach us
+    # as queue counts: show them as running with an indeterminate bar.
+    if p["status"] != "running":
+        try:
+            import urllib.request as u
+            q = json.loads(u.urlopen("http://127.0.0.1:8188/queue", timeout=2).read())
+            if q.get("queue_running"):
+                p.update(status="running", value=0, max=0, node="(external client)", prompt_id=q["queue_running"][0][1])
+                p["started"] = p["started"] if p.get("started") and p["status"] == "running" else None
+        except Exception:
+            pass
+    p["elapsed"] = round(time.time() - p["started"], 1) if p.get("started") and p["status"] == "running" else None
+    return p
+
+
+# ───────────────────────── jobs ─────────────────────────
+_jobs: dict[str, dict] = {}
+_jlock = threading.Lock()
+
+
+def _env() -> dict:
+    env = os.environ.copy()
+    if FFMPEG:
+        env["PATH"] = f"{FFMPEG.parent}:{env['PATH']}"
+    return env
+
+
+def _build_cmd(kind: str, a: dict) -> list[str]:
+    def flag(name, key=None, cast=str):
+        v = a.get(key or name.lstrip("-").replace("-", "_"))
+        return [name, str(cast(v))] if v not in (None, "", False) else []
+
+    if kind == "image":
+        return [str(GEN), "image", a["prompt"], "--model", a.get("model", "zimage"),
+                *flag("--w", cast=int), *flag("--h", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int), *flag("--n", cast=int)]
+    if kind == "control":
+        return [str(GEN), "control", a["prompt"], "--image", a["image"], "--mode", a.get("mode", "canny"),
+                *flag("--strength", cast=float), *flag("--steps", cast=int), *flag("--seed", cast=int), "--save-control"]
+    if kind == "upscale":
+        return [str(GEN), "upscale", a["image"], "--method", a.get("method", "esrgan"), *flag("--scale", cast=float)]
+    if kind == "video":
+        return [str(GEN), "video", a["prompt"], *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
+                *flag("--frames", cast=int), *flag("--fps", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int)]
+    if kind == "sfx":
+        return [str(GEN), "sfx", a["prompt"], "--model", a.get("model", "sao"), *flag("--seconds", cast=float),
+                *flag("--steps", cast=int), *flag("--seed", cast=int)]
+    if kind == "music":
+        cmd = [str(GEN), "music", a["prompt"], *flag("--seconds", cast=float), *flag("--bpm", cast=int),
+               *flag("--key"), *flag("--seed", cast=int)]
+        if a.get("lyrics"):
+            cmd += ["--lyrics", a["lyrics"]]
+        return cmd
+    if kind == "say":
+        out = OUT / "voice" / f"say_{int(time.time())}.wav"
+        return [str(VOICE), "say", a["text"], "--voice", a.get("voice", "af_heart"), "--out", str(out)]
+    if kind == "clone":
+        out = OUT / "voice" / f"clone_{int(time.time())}.wav"
+        cmd = [str(VOICE), "clone", "--ref", a["ref"], a["text"], "--out", str(out)]
+        if a.get("ref_text"):
+            cmd += ["--ref-text", a["ref_text"]]
+        return cmd
+    if kind == "transcribe":
+        return [str(VOICE), "transcribe", a["file"]] + (["--srt"] if a.get("srt") else [])
+    raise HTTPException(400, f"unknown kind {kind}")
+
+
+def _run_job(job: dict):
+    log = STACK / "logs" / f"studio-job-{job['id']}.log"
+    with open(log, "w") as lf:
+        proc = subprocess.Popen(job["cmd"], stdout=lf, stderr=subprocess.STDOUT, env=_env(),
+                                cwd=str(STACK), start_new_session=True)
+        with _jlock:
+            job["pid"] = proc.pid
+        rc = proc.wait()
+    text = log.read_text(errors="replace")
+    result = None
+    for line in reversed(text.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                result = json.loads(line)
+                break
+            except Exception:
+                pass
+    files = []
+    if result and result.get("files"):
+        files = result["files"]
+    elif rc == 0:
+        for line in text.splitlines():  # voice CLI prints the path
+            s = line.strip().split(" ")[0]
+            if s.startswith("/") and Path(s).exists():
+                files.append(s)
+    with _jlock:
+        job.update(status="done" if rc == 0 and (result is None or result.get("ok", True)) else "failed",
+                   rc=rc, finished=time.time(), result=result, files=files,
+                   log_tail=text[-1500:], pid=None)
+    with open(JOBS_LOG, "a") as f:
+        f.write(json.dumps({k: v for k, v in job.items() if k != "log_tail"}) + "\n")
+
+
+@router.post("/run")
+def run(payload: dict = Body(...)):
+    kind = payload.get("kind")
+    args = payload.get("args") or {}
+    cmd = _build_cmd(kind, args)
+    (OUT / "voice").mkdir(parents=True, exist_ok=True)
+    job = {"id": uuid.uuid4().hex[:8], "kind": kind, "args": args, "cmd": cmd, "status": "running",
+           "started": time.time(), "finished": None, "pid": None, "result": None, "files": [], "log_tail": ""}
+    with _jlock:
+        _jobs[job["id"]] = job
+    threading.Thread(target=_run_job, args=(job,), daemon=True).start()
+    return {"ok": True, "id": job["id"], "cmd": cmd}
+
+
+@router.get("/jobs")
+def jobs(limit: int = 20):
+    with _jlock:
+        js = sorted(_jobs.values(), key=lambda j: -j["started"])[:limit]
+        out = []
+        for j in js:
+            d = dict(j)
+            d["elapsed"] = round((j["finished"] or time.time()) - j["started"], 1)
+            d["files"] = [{"path": f, "url": _url_for(f)} for f in j.get("files", [])]
+            out.append(d)
+    return {"jobs": out}
+
+
+def _url_for(path: str) -> str | None:
+    p = Path(path)
+    for kind, roots in ROOTS.items():
+        for d, mount in roots:
+            try:
+                rel = p.resolve().relative_to(d.resolve())
+                return f"{mount}/{rel.as_posix()}"
+            except Exception:
+                continue
+    return None
+
+
+@router.post("/jobs/{jid}/cancel")
+def cancel(jid: str):
+    with _jlock:
+        j = _jobs.get(jid)
+    if not j:
+        raise HTTPException(404)
+    if j.get("pid"):
+        try:
+            os.killpg(j["pid"], signal.SIGTERM)
+        except Exception:
+            pass
+    # also interrupt the ComfyUI job
+    try:
+        import urllib.request as u
+        u.urlopen(u.Request("http://127.0.0.1:8188/interrupt", method="POST", data=b""), timeout=3)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.get("/voices")
+def voices():
+    try:
+        out = subprocess.run([str(VOICE), "voices"], capture_output=True, text=True, timeout=20, env=_env()).stdout
+        return {"voices": [w.strip() for w in out.replace(",", "\n").split() if w.strip() and "_" in w]}
+    except Exception as exc:
+        return {"voices": ["af_heart"], "error": str(exc)}

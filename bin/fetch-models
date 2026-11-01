@@ -51,7 +51,8 @@ while IFS='|' read -r id path url gb role; do
       mkdir -p "$(dirname "$dest")"
       echo "[$(date '+%F %T')] fetching $id -> $path ($gb GB)" | tee -a "$LOG"
       # download to .part, rename on success so a half file never looks present
-      if curl -L -C - --retry 5 --retry-delay 5 --fail --progress-bar -o "$dest.part" "$url" 2>>"$LOG"; then
+      # quiet download: progress is the growing .part file (panel Models tab shows it)
+      if curl -L -C - --retry 5 --retry-delay 5 --fail -sS -o "$dest.part" "$url" 2>>"$LOG"; then
         mv "$dest.part" "$dest"
         echo "[$(date '+%F %T')] done $id ($(du -h "$dest" | cut -f1))" | tee -a "$LOG"
       else

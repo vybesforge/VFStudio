@@ -1,6 +1,46 @@
 # Project state — read this first
 
-Last updated: 2026-10-31 (desktop session)
+Last updated: 2026-11-01 (desktop session) — **studio build-out**
+
+## 2026-11-01: one-stop studio (image · video · 3D · VR · print · sound · music · voice)
+
+Entry point for any agent: **skill `studio`** (router) → `studio-video-edit`, `studio-voice`,
+`studio-3d-print`, `studio-vr`, `local-media-stack` (deep 3D reference). Panel at
+http://127.0.0.1:8787 is now the Studio page (tabs per modality, run forms, live ComfyUI
+progress bar, output galleries with inline preview, Models inventory). Legacy page at `/legacy`.
+
+| Area | Tool | Models | Verified |
+|---|---|---|---|
+| Image | `gen image` (Z-Image-Turbo default, FLUX.2 klein 4B, Flux dev) + Hermes `image_generate` | manifest | Z-Image 53 s incl. load under I/O load; klein pending |
+| Control | `gen control` (Z-Image Fun ControlNet Union, canny or raw map) | ✓ downloaded | not yet run |
+| Upscale | `gen upscale` esrgan / ultrasharp / seedvr2 | ESRGAN+UltraSharp ✓, SeedVR2 downloading | 8 s for 4× |
+| Video | `gen video` (Wan 2.2 TI2V 5B) | ✓ | 832×480×49f, 20 steps: 372 s (14 s/step) |
+| Video edit | `vid`, `vse_build.py` (Blender 5.2 VSE), `transcribe_srt.py` | — | all subcommands tested |
+| SFX | `gen sfx` (Stable Audio Open 1.0 / Stable Audio 3 medium) | SAO ✓, t5-base + SA3 downloading | pending |
+| Music | `gen music` (ACE-Step 1.5 turbo AIO) | ✓ | 30 s track in 72 s |
+| Voice | `voice say/clone/transcribe/enhance` (Kokoro, Qwen3-TTS clone, Whisper) | ✓ HF cache | clone 2 s warm; transcript matched |
+| 3D | TRELLIS.2 via UI (unchanged gold path); Hunyuan checkpoints **removed from disk** | ✓ | — |
+| Print | build123d examples, `meshcheck.py`, `slice --preset bambu|generic` (OrcaSlicer 2.4.2 CLI) | — | sliced 3 parts both presets |
+| VR | Godot 4.7.2 OpenXR room `vr-godot/`, Windows .exe export, `optimize_glb.sh`, `vr/view.html` | — | headless load + exports OK; headset untested |
+
+GUI apps added via Homebrew: Krita, Audacity 4, Inkscape, OpenSCAD (snapshot), MeshLab; plus
+OrcaSlicer and Godot (direct). `sox` via brew. Tools venv `tools/.venv` (3.12): build123d,
+trimesh, pymeshfix, moviepy, pedalboard, librosa.
+
+Model manifest: `models/manifest.json` (~136 GB total). `fetch-models --list` shows state.
+Hermes `image_gen.model` = `z-image-turbo`; plugin rewritten (explicit model table — audio
+checkpoints in `models/checkpoints` are no longer mistaken for SDXL).
+
+ComfyUI progress on the panel works because `gen` and the Hermes plugin submit with
+`client_id: gen-cli` and the panel's websocket listens under that id (ComfyUI only sends
+per-step progress to the submitting client). UI-submitted jobs show an indeterminate bar.
+
+Open items: measure klein/control/SFX/SeedVR2 once downloads land (`references/benchmarks.md`
+in the `studio` skill); test the Godot Windows build on the 4080 box; the panel's Voice
+clone form needs a reference wav path (use the gallery "as ref" button).
+
+---
+
 
 Handoff note so any surface (desktop, Telegram, another bot) can pick up where the
 last one stopped. Update this file at the end of significant work.

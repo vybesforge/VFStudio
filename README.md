@@ -1,202 +1,87 @@
-# media-stack
+# media-stack — a one-stop local studio for Apple Silicon
 
-Local generation stack on this Mac (M3 Max, 64 GB unified, 40-core GPU).
-Everything here runs offline on the GPU. Hermes routes to it.
+Image · video · 3D · VR · 3D-print · sound FX · music · voice, all generated **on the
+machine** (no cloud inference), all drivable by an AI agent through plain CLIs and a web panel.
+Built and measured on an M3 Max / 64 GB; see [INSTALL.md](INSTALL.md) to reproduce it elsewhere.
 
 ```
-~/media-stack/
-├── bin/stack                 # CLI: start/stop/restart/status/logs/panel
-├── control/panel.py          # web panel  → http://127.0.0.1:8787
-├── audio/.venv               # mlx-audio  → :8000  (TTS, STT, music, SFX)
-├── ComfyUI/.venv             # ComfyUI    → :8188  (image, video)
-├── ComfyUI/models/checkpoints
-├── logs/                     # per-service logs
-├── run/                      # pid files
-└── scratch/                  # test output
+./install.sh [--all-models] [--hermes]      # fresh Mac → working studio
+stack panel                                  # http://127.0.0.1:8787
 ```
+
+## What's inside
+
+| Need | Command | Engine (local) |
+|---|---|---|
+| Image, fast | `gen image "prompt"` | Z-Image-Turbo (8 steps) · FLUX.2 klein 4B (`--model klein`) |
+| Image, best | `gen image "prompt" --model flux` | Flux dev fp8 |
+| Image, guided | `gen control "prompt" --image sketch.png` | Z-Image + Fun ControlNet Union (canny / raw map) |
+| Image edit / turnarounds | ComfyUI UI template | Qwen-Image-Edit 2509 (+ multi-angle LoRA) |
+| Upscale | `gen upscale in.png --method esrgan\|ultrasharp\|seedvr2` | RealESRGAN · 4x-UltraSharp · SeedVR2 3B |
+| Video | `gen video "prompt" [--image start.png]` | Wan 2.2 TI2V 5B (720p) |
+| Video edit | `vid trim\|concat\|overlay-text\|add-audio\|subtitles\|…`, `vse_build.py` | ffmpeg 9 · Blender 5.2 VSE |
+| Sound FX | `gen sfx "prompt" [--model sa3]` | Stable Audio Open 1.0 · Stable Audio 3 medium |
+| Music | `gen music "tags" --lyrics "…"` · `stack music "caption"` | ACE-Step 1.5 · MiniMax-Music (mlx) |
+| Voice | `voice say\|clone\|transcribe\|enhance` | Kokoro · Qwen3-TTS (clone) · Whisper large-v3-turbo |
+| Photo → 3D | ComfyUI TRELLIS.2 template (`scratch/run_trellis2.py`) | TRELLIS.2 + DINOv3 + BiRefNet |
+| Mesh repair / rig / render | `bin/blender -b -P …` | Blender 5.2 |
+| CAD → STL → G-code | `tools/print/cad_examples/*.py` · `meshcheck.py` · `slice --preset bambu\|generic` | build123d · trimesh · OrcaSlicer 2.4 CLI |
+| VR | `vr-godot/` · `tools/vr/optimize_glb.sh` · WebXR room `vr/` | Godot 4.7 OpenXR · gltf-transform · Three.js |
+
+Every `gen` call prints one JSON line (`{"ok":true,"files":[…],"seconds":…}`), waits for an idle
+GPU queue, and fails loudly when ComfyUI reports success without writing a file.
+
+## The panel (`control/`)
+
+http://127.0.0.1:8787 — one origin, tabs per modality:
+
+| Tab | Contents |
+|---|---|
+| Image / Video / Sound / Voice | run form (same args as the CLI) · jobs list with cancel · gallery with inline preview |
+| 3D & VR | WebXR room (iframe + full screen) · joint picker · GLB/STL viewer · meshes & prints gallery · "set in room" |
+| Models | manifest inventory: present / downloading / missing per model, HF-cached audio models, tool checklist |
+| Services | start / stop / restart / logs / Free VRAM for ComfyUI and mlx-audio |
+| Resources | CPU, GPU (IOAccelerator), memory, swap, disk, top processes |
+
+The header shows the **live ComfyUI progress bar** (step N/M, elapsed, queue depth). It works
+because `gen` and the Hermes plugin submit with `client_id: gen-cli` and the panel's websocket
+listens under the same id — ComfyUI only sends per-step progress to the submitting client.
 
 ## Daily use
 
 ```bash
-stack panel          # open the control panel (starts it if needed)
-stack status         # what's running + which models are installed
-stack start audio    # mlx-audio  on :8000
-stack start comfy    # ComfyUI    on :8188
-stack stop comfy     # free the unified memory again
-stack restart audio
-stack logs comfy 100 # tail 100 lines
-stack free           # unload ComfyUI models, release VRAM
-stack music "jazz trio, brushed drums"   # text -> music (local)
-stack vr             # open the panel on the VR Room tab
+stack status | start comfy | start audio | stop comfy | free | logs comfy 100 | panel
+gen status                      # which model sets are installed + queue
+fetch-models --list             # ✓/✗ per manifest entry;  fetch-models  downloads the ✗
+voice voices                    # Kokoro voice list
 ```
 
-The panel at **http://127.0.0.1:8787** is the single origin for everything:
+Outputs: `output/<kind>/` (gen), `ComfyUI/output/` (raw), `scratch/` (experiments).
 
-| Tab | What it does |
-|---|---|
-| Services | start/stop/restart, per-service logs, installed models, Free VRAM |
-| VR Room | the WebXR asset test room, served from `/vr/` |
-| Assets | every GLB and generated image, with tri counts and a "Set in room" button |
-| Resources | live CPU, GPU, memory, swap, disk and per-process RSS |
+## For AI agents (Hermes)
 
-## VR asset test room
-
-`~/media-stack/vr/` is a self-contained WebXR scene (Three.js vendored locally —
-no CDN, no external requests). It loads `pig.glb` from the same folder, sits it
-on the floor and centres it whatever units the model uses, and gives you a 1 m
-grid plus a 1.8 m height reference so scale is obvious in headset.
-
-Controls: wireframe, rotate, grid on/off, brightness.
-
-**Testing on the Windows / RTX 4080 box:**
-
-1. Either copy the `vr/` folder to the Windows box, **or** serve it from the Mac
-   over the LAN:
-   ```bash
-   PANEL_HOST=0.0.0.0 stack panel   # then browse to http://<mac-ip>:8787 from Windows
-   ```
-   Loopback-only by default; opt in to LAN exposure deliberately.
-2. Open it in **Chrome or Edge** — Firefox has no WebXR on Windows.
-3. Click **Open full screen**, then **Enter VR**. SteamVR must be running;
-   Chrome bridges to it through OpenXR.
-4. The embedded iframe is for desktop inspection only — WebXR in an iframe is
-   unreliable, so use the full-screen button for anything real.
-
-Drop any `.glb` beside `index.html` (rename to `pig.glb`, or edit the loader
-line) and it appears in the room.
-
-
-## Image → 3D (all local)
-
-ComfyUI ships Hunyuan3D 2.1 natively. Weights: `Comfy-Org/Hunyuan-3D-2.1` →
-`hunyuan_3d_v2.1.safetensors` in `models/checkpoints` (7.4 GB, all-in-one:
-MODEL + CLIP_VISION + VAE).
-
-```bash
-# bare geometry, ~146 s
-python scratch/make_pig_3d.py reference.png
-
-# decimate -> unwrap -> bake the reference as base colour, ~233 s
-python scratch/make_pig_3d.py --decimate 120000 \
-  --texture reference.png reference.png
-
-# 4 consistent views (front right back left)
-python scratch/make_pig_3d.py front.png right.png back.png left.png
-```
-
-Output lands in `ComfyUI/output/3d/` and is copied to `vr/pig.glb`.
-
-**Hard-won limits:**
-
-- ComfyUI only rescans `models/checkpoints` **at startup** — restart after
-  downloading weights.
-- `UnwrapMesh` on a dense mesh **OOMs the server**: a 256-octree pig produced
-  381,878 UV charts and ComfyUI died at 78% of packing. Decimate first —
-  120k faces → 69,751 charts → fine.
-- `ApplyTextureToMesh` **requires UVs** (`mesh has no UVs`), so unwrap is
-  mandatory before texturing; there's no shortcut.
-- Native Hunyuan3D is **geometry only** — no texture stage. Texturing here is a
-  base-colour projection from your reference, not true multi-view PBR paint.
-- Output is normalised to ~[-1, 1] units; scale in the scene.
-
-## Blender repair pass
-
-ComfyUI's GLB has no `NORMAL` attribute and a near-empty projected texture, so it
-renders as a faceted blank toy. `scratch/blender_repair.py` fixes both:
-
-```bash
-~/media-stack/bin/blender -b --python scratch/blender_repair.py -- \
-  vr/pig.glb vr/pig_clean.glb reference.png 120000 2048
-```
-
-Clear split normals → weld → Smart UV Project → triplanar BOX projection →
-bake base colour + AO at 2048 → smooth shade → export.
-
-```bash
-# compare two assets from the same camera
-~/media-stack/bin/blender -b --python scratch/render_asset.py -- \
-  vr/pig_clean.glb /abs/path/render.png 900
-```
-
-Never symlink Blender into PATH — use the wrapper in `bin/blender`, which execs
-the binary inside the .app and unsets `PYTHONHOME`.
+`hermes/` holds the `image_gen` plugin and the skills; `bin/sync-hermes install|export`
+moves them in and out of `~/.hermes`. The **`studio`** skill is the entry point and routes
+to `studio-video-edit`, `studio-voice`, `studio-3d-print`, `studio-vr` and
+`local-media-stack` (deep 3D/TRELLIS/Blender/QC reference). Skills are written for a
+weaker model: exact commands, exact paths, expected output, measured pitfalls.
 
 ## Services
 
-| Service | Port | What it does |
+| Service | Port | Protocol |
 |---|---|---|
-| mlx-audio | 8000 | OpenAI-compatible `/v1/audio/speech` (TTS), `/v1/audio/transcriptions` (STT), music + SFX models. Models load on demand and stay warm. |
-| ComfyUI | 8188 | Diffusion image/video generation. `POST /prompt`, `GET /history/{id}`, `GET /view`. |
+| ComfyUI | 8188 | `POST /prompt`, `GET /history/{id}`, `GET /queue`, `POST /free`, `ws /ws?clientId=` |
+| mlx-audio | 8000 | OpenAI-compatible `/v1/audio/speech`, `/v1/audio/transcriptions`; models by HF repo id, loaded on demand |
+| panel | 8787 | FastAPI; `PANEL_HOST=0.0.0.0 stack panel` exposes it to the LAN (WebXR still needs localhost/HTTPS) |
 
-### mlx-audio models
+## Hard-won constraints
 
-Models are chosen per request by HF repo id — no server restart needed.
-
-| Kind | Repo | Notes |
-|---|---|---|
-| TTS | `mlx-community/Kokoro-82M-bf16` | default, 8 languages, ~130 ms warm |
-| TTS | `mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16` | voice design, multilingual |
-| TTS | `mlx-community/chatterbox-multilingual-v3` | expressive, 23 languages |
-| STT | `mlx-community/whisper-large-v3-turbo-asr-fp16` | default, 99 languages |
-| STT | `mlx-community/parakeet-tdt-0.6b-v3` | faster, EN + 25 EU |
-| Music | `mlx-community/MiniMax-Music3-8bit` | full songs with lyrics, 44.1 kHz stereo |
-
-First call for a model pays a load cost (Kokoro ~45 s, Whisper ~18 s); after
-that it stays resident.
-
-CLI for one-offs (bypasses the server):
-
-```bash
-~/media-stack/audio/.venv/bin/mlx_audio.tts.generate \
-  --model mlx-community/Kokoro-82M-bf16 --text "hello" --voice af_heart --play
-```
-
-## Hermes routing
-
-`~/.hermes/config.yaml`:
-
-```yaml
-tts:
-  provider: openai
-  openai: {base_url: http://127.0.0.1:8000/v1, api_key: not-needed,
-           model: mlx-community/Kokoro-82M-bf16, voice: af_heart}
-stt:
-  enabled: true
-  provider: openai
-  openai: {base_url: http://127.0.0.1:8000/v1,
-           model: mlx-community/whisper-large-v3-turbo-asr-fp16}
-image_gen:
-  provider: comfyui
-```
-
-Image gen goes through the plugin at
-`~/.hermes/plugins/image_gen/comfyui/` — it reads
-`ComfyUI/models/checkpoints` live, so any checkpoint you drop in becomes a
-selectable model in `hermes tools`.
-
-**If a service is stopped, the corresponding tool fails with a clear
-"not running" error** rather than silently falling back to a cloud provider.
-
-## Adding models
-
-Images/video — drop into the right folder, no config edit:
-
-```bash
-cd ~/media-stack/ComfyUI/models
-# checkpoints/  flux, sdxl, sd15
-# loras/        any LoRA
-# vae/          standalone VAE
-# clip/         text encoders
-# unet/         split-flux bundles
-```
-
-Audio — nothing to do; the server pulls any HF repo id on first request.
-
-## Notes
-
-- 64 GB unified means Flux fp16/GGUF-Q8 and SDXL fit fully; video models
-  (Wan/AnimateDiff) fit but are slow — expect minutes per clip, not seconds.
-- Only one ComfyUI job runs at a time. Queue extra prompts in the UI.
-- `stack free` is the fast way to hand memory back to the OS.
-- ComfyUI's own outputs also land in `ComfyUI/output/`; the Hermes plugin
-  copies each result into `~/.hermes/cache/generated/images/`.
+- One GPU, shared by every session: poll `GET :8188/queue` before submitting (`gen` does).
+- Never benchmark while `fetch-models` is writing — disk contention inflates timings 2–3×.
+- Switching model families reloads weights (Flux dev 27 GB, Qwen-Edit 30 GB, Z-Image 21 GB);
+  `stack free` hands memory back without stopping the server.
+- Never symlink Blender into PATH — use `bin/blender` (sets up the bundled Python).
+- `UnwrapMesh` OOMs on dense meshes: decimate first, watch UV *chart count*, not face count.
+- Hunyuan3D / `SaveGLB` write no `NORMAL` attribute — the Blender repair pass fixes it.
+- Full history, measurements and the approved gold-standard asset recipe: `STATE.md` and the
+  `local-media-stack` skill.

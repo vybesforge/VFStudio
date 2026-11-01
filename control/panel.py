@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Local media-stack control panel — one origin, three tabs.
+"""Local media-stack control panel — one origin (:8787).
 
-  Services   start/stop the local services and see installed models
-  VR Room    the WebXR asset test room (served from /vr/)
-  Resources  live CPU / GPU / memory / swap / disk, and per-process RSS
+  /          Studio page (control/studio.html + studio.py): Image / Video / 3D & VR /
+             Sound / Voice run forms, live ComfyUI progress bar, output galleries with
+             inline preview, Models inventory, Services, Resources
+  /legacy    the original four-tab page (kept for reference)
+  /vr/       WebXR asset room, joint picker (rig.html), GLB/STL viewer (view.html)
 
 Run:  ~/media-stack/audio/.venv/bin/python ~/media-stack/control/panel.py
 """
@@ -613,14 +615,30 @@ def api_comfy_job():
 
 app.mount("/vr", StaticFiles(directory=str(VR), html=True), name="vr")
 for _mount, _dir in (("/files/out3d", COMFY / "output" / "3d"),
-                     ("/files/images", HOME / ".hermes" / "cache" / "generated" / "images")):
+                     ("/files/images", HOME / ".hermes" / "cache" / "generated" / "images"),
+                     ("/files/output", STACK / "output"),
+                     ("/files/comfy_output", COMFY / "output"),
+                     ("/files/scratch", STACK / "scratch")):
     # Create on first boot: a missing directory makes StaticFiles raise at import time.
     _dir.mkdir(parents=True, exist_ok=True)
     app.mount(_mount, StaticFiles(directory=str(_dir)), name=_mount.strip("/").replace("/", "_"))
 
 
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+import studio as _studio  # noqa: E402  (Studio tabs: run forms, progress, galleries, inventory)
+app.include_router(_studio.router)
+STUDIO_HTML = Path(__file__).parent / "studio.html"
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
+    # Re-read each request so edits to studio.html show on reload without a restart.
+    return STUDIO_HTML.read_text()
+
+
+@app.get("/legacy", response_class=HTMLResponse)
+def legacy():
     return PAGE
 
 

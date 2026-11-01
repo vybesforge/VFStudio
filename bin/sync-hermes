@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# sync-hermes — copy the Hermes integration (image_gen plugin + studio skills) between
+# this repo and ~/.hermes so the repo stays self-contained for a fresh install.
+#   bin/sync-hermes export   # ~/.hermes  -> repo/hermes/   (run before committing)
+#   bin/sync-hermes install  # repo/hermes -> ~/.hermes     (run by install.sh --hermes)
+set -euo pipefail
+STACK="$(cd "$(dirname "$0")/.." && pwd)"
+H="${HERMES_HOME:-$HOME/.hermes}"
+SKILLS=(studio/studio studio/studio-video-edit studio/studio-voice studio/studio-3d-print studio/studio-vr media/local-media-stack blender)
+case "${1:-}" in
+  export)
+    mkdir -p "$STACK/hermes/plugins/image_gen" "$STACK/hermes/skills"
+    rsync -a --delete --exclude __pycache__ "$H/plugins/image_gen/comfyui/" "$STACK/hermes/plugins/image_gen/comfyui/"
+    for s in "${SKILLS[@]}"; do
+      [ -d "$H/skills/$s" ] || { echo "skip $s (not installed)"; continue; }
+      mkdir -p "$STACK/hermes/skills/$s"; rsync -a --delete --exclude __pycache__ "$H/skills/$s/" "$STACK/hermes/skills/$s/"
+    done
+    echo "exported to $STACK/hermes/" ;;
+  install)
+    mkdir -p "$H/plugins/image_gen" "$H/skills"
+    rsync -a "$STACK/hermes/plugins/image_gen/comfyui/" "$H/plugins/image_gen/comfyui/"
+    for s in "${SKILLS[@]}"; do
+      [ -d "$STACK/hermes/skills/$s" ] || continue
+      mkdir -p "$H/skills/$s"; rsync -a "$STACK/hermes/skills/$s/" "$H/skills/$s/"
+    done
+    if command -v hermes >/dev/null 2>&1; then
+      hermes plugins enable image_gen/comfyui >/dev/null 2>&1 || true
+      hermes config set image_gen.provider comfyui --force >/dev/null 2>&1 || true
+      hermes config set image_gen.model z-image-turbo --force >/dev/null 2>&1 || true
+      hermes config set tts.provider openai --force >/dev/null 2>&1 || true
+      hermes config set tts.openai.base_url http://127.0.0.1:8000/v1 --force >/dev/null 2>&1 || true
+      hermes config set tts.openai.api_key not-needed --force >/dev/null 2>&1 || true
+      hermes config set tts.openai.model mlx-community/Kokoro-82M-bf16 --force >/dev/null 2>&1 || true
+      hermes config set tts.openai.voice af_heart --force >/dev/null 2>&1 || true
+      hermes config set stt.enabled true --force >/dev/null 2>&1 || true
+      hermes config set stt.provider openai --force >/dev/null 2>&1 || true
+      hermes config set stt.openai.base_url http://127.0.0.1:8000/v1 --force >/dev/null 2>&1 || true
+      hermes config set stt.openai.model mlx-community/whisper-large-v3-turbo-asr-fp16 --force >/dev/null 2>&1 || true
+      echo "Hermes configured: image_gen -> ComfyUI (z-image-turbo), tts/stt -> mlx-audio"
+    else
+      echo "hermes CLI not found; plugin + skills copied, config not changed"
+    fi ;;
+  *) echo "usage: sync-hermes export|install" >&2; exit 1 ;;
+esac

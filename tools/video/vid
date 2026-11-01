@@ -14,14 +14,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-FFMPEG_DIR = Path.home() / ".hermes/tools/ffmpeg-9.0.1-darwin-arm64"
+def _find_ffmpeg(name="ffmpeg"):
+    """FFMPEG env var > PATH > Hermes-bundled build. Portable across machines."""
+    import os, shutil, glob
+    env = os.environ.get(name.upper())
+    if env and os.path.exists(env):
+        return env
+    w = shutil.which(name)
+    if w:
+        return w
+    hits = sorted(glob.glob(os.path.expanduser(f"~/.hermes/tools/ffmpeg-*/{name}")))
+    return hits[-1] if hits else name
 
 
 def _bin(name):
-    p = FFMPEG_DIR / name
-    if p.exists():
-        return str(p)
-    return name  # fall back to PATH
+    return _find_ffmpeg(name)
 
 
 FFMPEG = _bin("ffmpeg")
