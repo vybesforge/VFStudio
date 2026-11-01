@@ -18,6 +18,32 @@
   #meta{color:#777;font-size:11px;margin-top:8px;font-variant-numeric:tabular-nums}
   #err{position:fixed;bottom:12px;left:12px;right:12px;z-index:10;color:#f88;font-size:12px;
        background:#200a0a;border:1px solid #622;border-radius:8px;padding:8px 12px;display:none}
+  /* ── rig mode ─────────────────────────────────────────────────────── */
+  #rig{position:fixed;top:12px;right:12px;bottom:12px;width:300px;z-index:11;display:none;
+       background:#000c;border:1px solid #333;border-radius:10px;padding:12px;
+       backdrop-filter:blur(6px);overflow-y:auto}
+  #rig.open{display:block}
+  #rig h2{margin:0 0 2px;font-size:12px;font-weight:600}
+  #rig .s{color:#888;font-size:11px;margin-bottom:8px}
+  #rig .grp{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#777;margin:10px 0 4px}
+  #rig button{background:#1c1c1c;color:#eee;border:1px solid #333;border-radius:6px;
+              padding:5px 9px;font-size:11px;cursor:pointer;font-family:inherit;margin:2px 2px 0 0}
+  #rig button:hover{background:#262626}
+  #rig button.primary{background:#1f6feb;border-color:#1f6feb}
+  #rig button:disabled{opacity:.45;cursor:default}
+  #rig .j{display:flex;gap:7px;align-items:center;padding:4px 6px;border-radius:6px;cursor:pointer;
+          border:1px solid transparent;font-size:11.5px}
+  #rig .j:hover{background:#1c1c1c}
+  #rig .j.armed{background:#22304d;border-color:#3d5fa8}
+  #rig .dot{width:8px;height:8px;border-radius:50%;background:#3a4150;flex:0 0 8px}
+  #rig .j.set .dot{background:#38d17a}
+  #rig .j.armed .dot{background:#ffd166}
+  #rig .nm{flex:1}
+  #rig .vv{color:#777;font-variant-numeric:tabular-nums;font-size:10px}
+  #riglog{max-height:150px;overflow:auto;background:#0a0d11;border:1px solid #232830;border-radius:6px;
+          padding:7px;font:10.5px/1.4 ui-monospace,monospace;color:#9aa3b2;white-space:pre-wrap;
+          margin-top:8px;display:none}
+  #rigstatus{margin-top:8px;font-size:11px;color:#8b93a1;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -29,7 +55,23 @@
   <button id="rot">Rotate</button>
   <button id="grid" class="on">Grid</button>
   <button id="light">Bright</button>
+  <button id="rigtoggle">Rig</button>
   <div id="meta">loading…</div>
+</div>
+<div id="rig">
+  <h2>Rig — pick joints</h2>
+  <div class="s">Click a joint, then click the model. Saved per asset, so every
+    future project keeps its own joint set.</div>
+  <div class="grp">Body</div><div id="rig-body"></div>
+  <div class="grp">Legs</div><div id="rig-legs"></div>
+  <div style="margin-top:10px">
+    <button id="rigsave">Save joints</button>
+    <button id="rigbuild" class="primary" disabled>Build rig</button>
+    <button id="rigundo">Undo</button>
+    <button id="rigclear">Clear</button>
+  </div>
+  <div id="rigstatus"></div>
+  <div id="riglog"></div>
 </div>
 <div id="err"></div>
 
@@ -92,8 +134,11 @@ const holder = new THREE.Group();
 scene.add(holder);
 
 const loader = new GLTFLoader();
+let mixer = null;
+let roomModel = null;   // rig mode needs the asset's own local space
 loader.load('./pig.glb', (gltf) => {
   const obj = gltf.scene;
+  roomModel = obj;
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3());
   // Sit it on the floor and centre it, whatever its native units.
@@ -102,7 +147,13 @@ loader.load('./pig.glb', (gltf) => {
   obj.position.x -= c.x; obj.position.z -= c.z;
   holder.add(obj);
   const tris = (() => { let n = 0; obj.traverse(o => { if (o.isMesh) n += o.geometry.index ? o.geometry.index.count/3 : o.geometry.attributes.position.count/3; }); return n; })();
-  meta.textContent = `pig.glb · ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)} m · ${Math.round(tris).toLocaleString()} tris`;
+  // Play any skeletal animation the asset ships with.
+  if (gltf.animations && gltf.animations.length) {
+    mixer = new THREE.AnimationMixer(obj);
+    mixer.clipAction(gltf.animations[0]).play();
+  }
+  const anim = gltf.animations && gltf.animations.length ? ` · anim: ${gltf.animations[0].name || 'clip 1'}` : ' · no anim';
+  meta.textContent = `pig.glb · ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)} m · ${Math.round(tris).toLocaleString()} tris${anim}`;
 }, undefined, (e) => {
   meta.textContent = 'pig.glb not found — drop it beside this file';
   err('pig.glb missing. Put the exported GLB next to this HTML and reload.');
@@ -153,11 +204,166 @@ document.getElementById('light').addEventListener('click', (ev) => {
   ev.target.classList.toggle('on', bright);
 });
 
+// ── rig mode: pick joints on whatever asset is loaded ───────────────────
+// Baked into the room so every future asset can be rigged here, not on a one-off
+// page. Joint sets are stored per asset by the panel, so a new project starts clean
+// instead of inheriting the hog's anatomy.
+const RJ = [
+  ['neck', 'Neck / base of head', 'body'], ['head', 'Snout tip', 'body'],
+  ['spine', 'Mid-back', 'body'], ['hips', 'Rear centre', 'body'],
+  ['FL_hip', 'Front left — shoulder', 'leg'], ['FL_knee', 'Front left — knee', 'leg'],
+  ['FL_hoof', 'Front left — hoof', 'leg'],
+  ['FR_hip', 'Front right — shoulder', 'leg'], ['FR_knee', 'Front right — knee', 'leg'],
+  ['FR_hoof', 'Front right — hoof', 'leg'],
+  ['BL_hip', 'Back left — hip', 'leg'], ['BL_knee', 'Back left — knee', 'leg'],
+  ['BL_hoof', 'Back left — hoof', 'leg'],
+  ['BR_hip', 'Back right — hip', 'leg'], ['BR_knee', 'Back right — knee', 'leg'],
+  ['BR_hoof', 'Back right — hoof', 'leg'],
+];
+const rigState = {};
+let rigArmed = null, rigMode = false;
+const rigMarkers = new Map();
+const ASSET = 'pig';
+
+const rigEl = document.getElementById('rig');
+const rigStatus = document.getElementById('rigstatus');
+const rigLog = document.getElementById('riglog');
+const rigBuildBtn = document.getElementById('rigbuild');
+
+function rigRender() {
+  const body = document.getElementById('rig-body'), legs = document.getElementById('rig-legs');
+  body.innerHTML = ''; legs.innerHTML = '';
+  for (const [name, label, kind] of RJ) {
+    const el = document.createElement('div');
+    el.className = 'j' + (rigState[name] ? ' set' : '') + (rigArmed === name ? ' armed' : '');
+    const p = rigState[name];
+    el.innerHTML = `<span class="dot"></span><span class="nm">${label}</span>`
+      + `<span class="vv">${p ? [p.x, p.y, p.z].map(v => v.toFixed(2)).join(',') : '—'}</span>`;
+    el.onclick = () => { rigArmed = rigArmed === name ? null : name; rigRender(); };
+    (kind === 'body' ? body : legs).appendChild(el);
+  }
+  rigBuildBtn.disabled = !RJ.every(([n]) => rigState[n]);
+}
+
+function rigAdvance() {
+  const i = RJ.findIndex(([n]) => n === rigArmed);
+  for (let k = 1; k <= RJ.length; k++) {
+    const [n] = RJ[(i + k) % RJ.length];
+    if (!rigState[n]) { rigArmed = n; return; }
+  }
+  rigArmed = null;
+  rigStatus.textContent = 'all joints placed — save, then build';
+}
+
+function rigMarker(name, localPoint) {
+  let m = rigMarkers.get(name);
+  if (!m) {
+    m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd166, depthTest: false }));
+    m.renderOrder = 999;
+    holder.add(m);
+    rigMarkers.set(name, m);
+  }
+  m.position.copy(localPoint);
+  m.scale.setScalar(0.02);
+}
+
+const rigRay = new THREE.Raycaster();
+const rigNdc = new THREE.Vector2();
+let rigDown = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { rigDown = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!rigMode || !rigArmed || !roomModel) return;
+  if (rigDown && Math.hypot(e.clientX - rigDown[0], e.clientY - rigDown[1]) > 4) return;
+  rigNdc.x = (e.clientX / innerWidth) * 2 - 1;
+  rigNdc.y = -(e.clientY / innerHeight) * 2 + 1;
+  rigRay.setFromCamera(rigNdc, camera);
+  const hits = rigRay.intersectObject(roomModel, true);
+  if (!hits.length) { rigStatus.textContent = 'missed — click on the model surface'; return; }
+  // Store in the asset's own space so Blender can use it after its Y-up -> Z-up swap.
+  const p = roomModel.worldToLocal(hits[0].point.clone());
+  rigState[rigArmed] = { x: +p.x.toFixed(4), y: +p.y.toFixed(4), z: +p.z.toFixed(4) };
+  rigMarker(rigArmed, p);
+  rigAdvance(); rigRender();
+});
+
+document.getElementById('rigtoggle').onclick = async (ev) => {
+  rigMode = !rigMode;
+  rigEl.classList.toggle('open', rigMode);
+  ev.target.classList.toggle('on', rigMode);
+  spinning = false;
+  if (rigMode) {
+    try {
+      const j = await (await fetch(`/api/rig/joints?asset=${ASSET}`)).json();
+      Object.assign(rigState, j.joints || {});
+    } catch (e) { /* offline */ }
+    rigArmed = RJ.find(([n]) => !rigState[n])?.[0] || null;
+    rigRender();
+    rigStatus.textContent = Object.keys(rigState).length
+      ? 'loaded saved joints' : 'no saved joints — start clicking';
+  }
+};
+
+document.getElementById('rigsave').onclick = async () => {
+  rigStatus.textContent = 'saving…';
+  try {
+    const r = await (await fetch('/api/rig/joints', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset: ASSET, joints: rigState }),
+    })).json();
+    rigStatus.textContent = r.ok ? `saved ${r.saved} joints (${r.asset})` : JSON.stringify(r);
+  } catch (e) { rigStatus.textContent = 'save error: ' + e.message; }
+};
+
+document.getElementById('rigundo').onclick = () => {
+  const set = RJ.map(([n]) => n).filter(n => rigState[n]);
+  if (!set.length) return;
+  const last = set[set.length - 1];
+  delete rigState[last];
+  const m = rigMarkers.get(last); if (m) { holder.remove(m); rigMarkers.delete(last); }
+  rigArmed = last; rigRender();
+};
+
+document.getElementById('rigclear').onclick = () => {
+  for (const n of Object.keys(rigState)) {
+    const m = rigMarkers.get(n); if (m) { holder.remove(m); rigMarkers.delete(n); }
+    delete rigState[n];
+  }
+  rigArmed = RJ[0][0]; rigRender();
+};
+
+rigBuildBtn.onclick = async () => {
+  rigStatus.textContent = 'building…';
+  rigLog.style.display = 'block'; rigLog.textContent = '';
+  try {
+    const r = await (await fetch('/api/rig/build', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset: ASSET, source: 'vr/hog_trellis2.glb',
+                             dest: 'vr/hog_rigged.glb', scale_to: 2.0 }),
+    })).json();
+    if (!r.ok) { rigStatus.textContent = 'build failed: ' + JSON.stringify(r); return; }
+    rigStatus.textContent = `building (pid ${r.pid}) → ${r.dest}`;
+    for (let i = 0; i < 120; i++) {
+      await new Promise(res => setTimeout(res, 3000));
+      const s = await (await fetch(`/api/rig/build/status?asset=${ASSET}`)).json();
+      rigLog.textContent = s.log || '';
+      rigLog.scrollTop = rigLog.scrollHeight;
+      if (/wrote |done:|Traceback/.test(s.log || '')) {
+        rigStatus.textContent = /Traceback/.test(s.log) ? 'build errored — see log'
+                                                        : 'build finished — reload to see it';
+        return;
+      }
+    }
+    rigStatus.textContent = 'still running — check the log';
+  } catch (e) { rigStatus.textContent = 'build error: ' + e.message; }
+};
+
 // ── loop ─────────────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   if (spinning) holder.rotation.y += dt * 0.5;
+  if (mixer) mixer.update(dt);
   controls.update();
   renderer.render(scene, camera);
 });

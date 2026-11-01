@@ -1,0 +1,20 @@
+{
+  "output": {"width": 1280, "height": 720, "fps": 30, "quality": "MEDIUM"},
+  "fade_in": 0.5,
+  "fade_out": 0.5,
+  "timeline": [
+    {"type": "clip", "path": "~/media-stack/scratch/video-test/a.mp4", "in": 1.0, "out": 4.0, "volume": 1.0,
+     "transition": {"type": "cross", "duration": 0.5}},
+    {"type": "clip", "path": "~/media-stack/scratch/video-test/b.mp4", "in": 0.0, "out": 2.0, "mute": true,
+     "transition": {"type": "cross", "duration": 0.5}},
+    {"type": "image", "path": "~/media-stack/scratch/video-test/still.png", "duration": 2.0},
+    {"type": "color", "color": [0.1, 0.1, 0.1], "duration": 1.5}
+  ],
+  "audio": [
+    {"path": "~/media-stack/scratch/video-test/music.wav", "start": 0.0, "volume": 0.4, "fade_in": 0.5, "fade_out": 1.5}
+  ],
+  "titles": [
+    {"text": "VSE Build Demo", "start": 0.3, "duration": 2.5, "size": 96, "position": "center", "box": true, "fade": 0.4},
+    {"text": "lower third caption", "start": 3.0, "duration": 3.0, "size": 48, "position": "bottom", "color": [1, 0.9, 0.3, 1]}
+  ]
+}

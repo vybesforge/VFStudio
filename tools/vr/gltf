@@ -1,0 +1,6 @@
+#!/bin/bash
+# Wrapper for @gltf-transform/cli installed with the Hermes-bundled node/npm.
+# Usage: ~/media-stack/tools/vr/gltf <command> [args]   e.g.  gltf inspect in.glb
+NODE_BIN="$HOME/.hermes/tools/node-26.12.1-darwin-arm64/bin"
+export PATH="$NODE_BIN:$PATH"
+exec "$NODE_BIN/gltf-transform" "$@"

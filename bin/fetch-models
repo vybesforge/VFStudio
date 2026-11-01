@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# fetch-models — download every model in models/manifest.json that is missing.
+# Resumable (curl -C -), sequential (one GPU box: don't saturate disk I/O while
+# a render runs), logs to logs/fetch-models.log.
+#
+#   fetch-models            # fetch everything missing
+#   fetch-models --list     # show manifest with present/missing
+#   fetch-models wan2.2-ti2v-5b z-image-turbo   # only these ids
+#   fetch-models --check    # exit 1 if anything is missing (for scripts)
+set -uo pipefail
+STACK="$HOME/media-stack"
+MANIFEST="$STACK/models/manifest.json"
+MODELS="$STACK/ComfyUI/models"
+LOG="$STACK/logs/fetch-models.log"
+PY="$STACK/audio/.venv/bin/python"
+mkdir -p "$STACK/logs"
+
+mode="fetch"; ids=()
+for a in "$@"; do
+  case "$a" in
+    --list) mode="list" ;;
+    --check) mode="check" ;;
+    *) ids+=("$a") ;;
+  esac
+done
+
+# id|path|url|gb  (filtered by ids if given)
+rows=$("$PY" - "$MANIFEST" "${ids[@]+"${ids[@]}"}" <<'EOF'
+import json, sys
+m = json.load(open(sys.argv[1]))["models"]
+want = set(sys.argv[2:])
+for e in m:
+    if want and e["id"] not in want: continue
+    print(f'{e["id"]}|{e["path"]}|{e["url"]}|{e["gb"]}|{e["role"]}')
+EOF
+)
+
+missing=0
+while IFS='|' read -r id path url gb role; do
+  [ -z "$id" ] && continue
+  dest="$MODELS/$path"
+  if [ -s "$dest" ]; then
+    [ "$mode" != "fetch" ] && printf "  ✓ %-28s %6s GB  %s\n" "$id" "$gb" "$role"
+    continue
+  fi
+  missing=$((missing+1))
+  case "$mode" in
+    list)  printf "  ✗ %-28s %6s GB  %s\n" "$id" "$gb" "$role" ;;
+    check) echo "missing: $id ($path)" ;;
+    fetch)
+      mkdir -p "$(dirname "$dest")"
+      echo "[$(date '+%F %T')] fetching $id -> $path ($gb GB)" | tee -a "$LOG"
+      # download to .part, rename on success so a half file never looks present
+      if curl -L -C - --retry 5 --retry-delay 5 --fail --progress-bar -o "$dest.part" "$url" 2>>"$LOG"; then
+        mv "$dest.part" "$dest"
+        echo "[$(date '+%F %T')] done $id ($(du -h "$dest" | cut -f1))" | tee -a "$LOG"
+      else
+        echo "[$(date '+%F %T')] FAILED $id (left $dest.part for resume)" | tee -a "$LOG"
+      fi ;;
+  esac
+done <<< "$rows"
+
+if [ "$mode" = "check" ]; then [ "$missing" -eq 0 ] && echo "all models present"; exit $(( missing > 0 )); fi
+[ "$mode" = "fetch" ] && echo "fetch complete — restart ComfyUI so it rescans model dirs: stack restart comfy"
+exit 0

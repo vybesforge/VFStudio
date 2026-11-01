@@ -21,7 +21,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -471,6 +471,95 @@ def api_vr_asset():
 @app.get("/api/assets")
 def api_assets():
     return {"assets": scan_assets()}
+
+
+# ── rig joints: hand-picked anatomy beats any bbox heuristic ─────────────
+RIG = Path.home() / "media-stack" / "rig"
+
+
+def _rig_slug(asset: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", (asset or "pig")).strip("-").lower()
+    return slug[:60] or "pig"
+
+
+def _rig_file(asset: str) -> Path:
+    return RIG / f"joints_{_rig_slug(asset)}.json"
+
+
+@app.get("/api/rig/assets")
+def api_rig_assets():
+    """Which assets already have a joint set saved."""
+    RIG.mkdir(parents=True, exist_ok=True)
+    out = []
+    for p in sorted(RIG.glob("joints_*.json")):
+        try:
+            n = len(json.loads(p.read_text()))
+        except Exception:
+            n = 0
+        out.append({"asset": p.stem.replace("joints_", ""), "joints": n})
+    return {"assets": out}
+
+
+@app.get("/api/rig/joints")
+def api_rig_get(asset: str = "pig"):
+    p = _rig_file(asset)
+    if not p.exists():
+        return {"joints": {}, "asset": _rig_slug(asset)}
+    try:
+        return {"joints": json.loads(p.read_text()), "asset": _rig_slug(asset)}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+
+
+@app.post("/api/rig/joints")
+def api_rig_save(payload: dict = Body(...)):
+    asset = payload.get("asset", "pig")
+    joints = payload.get("joints", {})
+    p = _rig_file(asset)
+    RIG.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(joints, indent=1))
+    return {"ok": True, "saved": len(joints), "asset": _rig_slug(asset), "path": str(p)}
+
+
+@app.post("/api/rig/build")
+def api_rig_build(payload: dict = Body(default={})):
+    """Rebuild a rigged GLB from the saved joints, in the background."""
+    asset = payload.get("asset", "pig")
+    jf = _rig_file(asset)
+    if not jf.exists():
+        return JSONResponse({"ok": False, "message": "no joints saved yet"}, status_code=400)
+
+    def _resolve(p):
+        """Relative paths are relative to the stack root, not the panel's cwd."""
+        q = Path(p)
+        return q if q.is_absolute() else (Path.home() / "media-stack" / q)
+
+    src = _resolve(payload.get("source") or (VR / "hog_trellis2.glb"))
+    dst = _resolve(payload.get("dest") or (VR / "hog_rigged.glb"))
+    if not src.is_file():
+        return JSONResponse({"ok": False, "message": f"missing {src}"}, status_code=400)
+    RIG.mkdir(parents=True, exist_ok=True)
+    log = RIG / f"build_{_rig_slug(asset)}.log"
+    blender = Path.home() / "media-stack" / "bin" / "blender"
+    cmd = [str(blender), "-b", "--python",
+           str(Path.home() / "media-stack" / "scratch" / "rig_from_joints.py"),
+           "--", str(src), str(dst), str(jf)]
+    scale = payload.get("scale_to")
+    if scale:
+        cmd += ["--scale-to", str(scale)]
+    with open(log, "wb") as fh:
+        proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    return {"ok": True, "pid": proc.pid, "log": str(log), "dest": str(dst),
+            "asset": _rig_slug(asset)}
+
+
+@app.get("/api/rig/build/status")
+def api_rig_build_status(asset: str = "pig"):
+    log = RIG / f"build_{_rig_slug(asset)}.log"
+    txt = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+    running = "Traceback" not in txt and "done:" not in txt and bool(txt)
+    return {"log": txt, "likely_running": running, "asset": _rig_slug(asset)}
 
 
 @app.post("/api/assets/use")

@@ -1,0 +1,508 @@
+#!/Users/dcruse/media-stack/tools/.venv/bin/python
+"""vid — ffmpeg wrapper CLI for common video edits. Fully local; no network.
+
+Every subcommand prints the exact ffmpeg command it runs (prefixed with "$ ")
+to stderr, then runs it. Exit code is ffmpeg's exit code.
+
+Usage: vid <subcommand> [options]   (vid <subcommand> -h for options)
+"""
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+FFMPEG_DIR = Path.home() / ".hermes/tools/ffmpeg-9.0.1-darwin-arm64"
+
+
+def _bin(name):
+    p = FFMPEG_DIR / name
+    if p.exists():
+        return str(p)
+    return name  # fall back to PATH
+
+
+FFMPEG = _bin("ffmpeg")
+FFPROBE = _bin("ffprobe")
+
+
+def run(cmd, capture=False):
+    print("$ " + " ".join(shlex.quote(c) for c in cmd), file=sys.stderr)
+    if capture:
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    else:
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        tail = "\n".join(r.stderr.strip().splitlines()[-8:])
+        print(f"ffmpeg failed (exit {r.returncode}):\n{tail}", file=sys.stderr)
+        sys.exit(r.returncode)
+    return r
+
+
+def ff(*args, y=True):
+    cmd = [FFMPEG, "-hide_banner", "-loglevel", "error"]
+    if y:
+        cmd.append("-y")
+    cmd += [str(a) for a in args]
+    return run(cmd)
+
+
+def probe(path):
+    """Return an ffprobe-like dict {"format": {...}, "streams": [...]}.
+
+    Uses ffprobe when present; otherwise parses `ffmpeg -i` (the bundled
+    ffmpeg build on this machine ships without ffprobe)."""
+    import re, shutil
+    if os.path.exists(FFPROBE) or shutil.which(FFPROBE):
+        r = run([FFPROBE, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)], capture=True)
+        return json.loads(r.stdout)
+    cmd = [FFMPEG, "-hide_banner", "-i", str(path)]
+    print("$ " + " ".join(shlex.quote(c) for c in cmd), file=sys.stderr)
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    txt = r.stderr
+    if "Invalid data" in txt or "No such file" in txt:
+        print(txt.strip().splitlines()[-1], file=sys.stderr)
+        sys.exit(1)
+    fmt = {"size": str(os.path.getsize(path)) if os.path.exists(path) else "0"}
+    m = re.search(r"Input #0, (.+?), from '", txt)
+    fmt["format_name"] = m.group(1) if m else None
+    m = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", txt)
+    if m:
+        fmt["duration"] = str(int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)))
+    streams = []
+    for line in txt.splitlines():
+        line = line.strip()
+        if not line.startswith("Stream #"):
+            continue
+        if ": Video: " in line:
+            body = line.split(": Video: ", 1)[1]
+            s = {"codec_type": "video", "codec_name": body.split()[0].rstrip(",")}
+            m = re.search(r"(\d{2,5})x(\d{2,5})", body)
+            if m:
+                s["width"], s["height"] = int(m.group(1)), int(m.group(2))
+            m = re.search(r"([\d.]+) fps", body)
+            if m:
+                s["avg_frame_rate"] = f"{m.group(1)}/1"
+            m = re.search(r", (yuv\w+|rgb\w+|gray\w*|pal8|bgr\w+)", body)
+            if m:
+                s["pix_fmt"] = m.group(1)
+            streams.append(s)
+        elif ": Audio: " in line:
+            body = line.split(": Audio: ", 1)[1]
+            s = {"codec_type": "audio", "codec_name": body.split()[0].rstrip(",")}
+            m = re.search(r"(\d+) Hz", body)
+            if m:
+                s["sample_rate"] = m.group(1)
+            if "mono" in body:
+                s["channels"] = 1
+            elif "stereo" in body:
+                s["channels"] = 2
+            else:
+                m = re.search(r"(\d+)\.(\d+)", body.split("Hz")[-1] if "Hz" in body else "")
+                s["channels"] = int(m.group(1)) + int(m.group(2)) if m else None
+            streams.append(s)
+        elif ": Subtitle: " in line:
+            streams.append({"codec_type": "subtitle", "codec_name": line.split(": Subtitle: ", 1)[1].split()[0].rstrip(",")})
+    return {"format": fmt, "streams": streams}
+
+
+def has_audio(path):
+    return any(s.get("codec_type") == "audio" for s in probe(path)["streams"])
+
+
+def duration(path):
+    return float(probe(path)["format"].get("duration", 0))
+
+
+def esc_text(s):
+    """Escape text for drawtext filter."""
+    return s.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace("%", "%%")
+
+
+def esc_path(p):
+    """Escape a filesystem path for use inside a filtergraph option."""
+    return str(p).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
+def done(out):
+    print(f"wrote {out}")
+
+
+# ---------------------------------------------------------------- subcommands
+
+def cmd_info(a):
+    d = probe(a.input)
+    f = d["format"]
+    summary = {"file": a.input, "duration_s": round(float(f.get("duration", 0)), 3),
+               "size_bytes": int(f.get("size", 0)), "format": f.get("format_name"), "streams": []}
+    for s in d["streams"]:
+        if s["codec_type"] == "video":
+            fr = s.get("avg_frame_rate", "0/1")
+            try:
+                n, m = fr.split("/"); fps = round(float(n) / float(m), 3) if float(m) else 0
+            except Exception:
+                fps = fr
+            summary["streams"].append({"type": "video", "codec": s.get("codec_name"), "width": s.get("width"),
+                                       "height": s.get("height"), "fps": fps, "pix_fmt": s.get("pix_fmt"),
+                                       "frames": s.get("nb_frames")})
+        elif s["codec_type"] == "audio":
+            summary["streams"].append({"type": "audio", "codec": s.get("codec_name"),
+                                       "sample_rate": s.get("sample_rate"), "channels": s.get("channels")})
+        else:
+            summary["streams"].append({"type": s["codec_type"], "codec": s.get("codec_name")})
+    print(json.dumps(summary, indent=2))
+
+
+def cmd_trim(a):
+    args = ["-ss", a.start, "-i", a.input]
+    if a.end:
+        args += ["-to", a.end]
+    elif a.duration:
+        args += ["-t", a.duration]
+    if a.copy:
+        args += ["-c", "copy"]
+    else:
+        args += ["-c:v", "libx264", "-preset", "fast", "-crf", str(a.crf), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"]
+    args += ["-movflags", "+faststart", a.output]
+    ff(*args)
+    done(a.output)
+
+
+def cmd_concat(a):
+    inputs = a.inputs
+    n = len(inputs)
+    if n < 2:
+        sys.exit("concat needs at least 2 inputs")
+    if a.copy:
+        listfile = Path(a.output).with_suffix(".concat.txt")
+        listfile.write_text("".join(f"file '{os.path.abspath(p)}'\n" for p in inputs))
+        ff("-f", "concat", "-safe", "0", "-i", listfile, "-c", "copy", "-movflags", "+faststart", a.output)
+        listfile.unlink()
+    else:
+        # Re-encode path: normalise every clip to the same size/fps/sar and audio, then concat filter.
+        w, h, fps = a.width, a.height, a.fps
+        audio = all(has_audio(p) for p in inputs)
+        args = []
+        for p in inputs:
+            args += ["-i", p]
+        parts = []
+        for i in range(n):
+            parts.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p[v{i}]")
+            if audio:
+                parts.append(f"[{i}:a]aformat=sample_rates=48000:channel_layouts=stereo[a{i}]")
+        chain = "".join(f"[v{i}]" + (f"[a{i}]" if audio else "") for i in range(n))
+        parts.append(f"{chain}concat=n={n}:v=1:a={1 if audio else 0}[v]" + ("[a]" if audio else ""))
+        fc = ";".join(parts)
+        args += ["-filter_complex", fc, "-map", "[v]"]
+        if audio:
+            args += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        args += ["-c:v", "libx264", "-preset", "fast", "-crf", str(a.crf), "-movflags", "+faststart", a.output]
+        ff(*args)
+    done(a.output)
+
+
+def cmd_resize(a):
+    if a.width and a.height:
+        if a.mode == "fit":
+            vf = f"scale={a.width}:{a.height}:force_original_aspect_ratio=decrease,pad={a.width}:{a.height}:(ow-iw)/2:(oh-ih)/2"
+        elif a.mode == "crop":
+            vf = f"scale={a.width}:{a.height}:force_original_aspect_ratio=increase,crop={a.width}:{a.height}"
+        else:
+            vf = f"scale={a.width}:{a.height}"
+    elif a.width:
+        vf = f"scale={a.width}:-2"
+    elif a.height:
+        vf = f"scale=-2:{a.height}"
+    else:
+        sys.exit("resize needs --width and/or --height")
+    vf += ",setsar=1"
+    if a.fps:
+        vf += f",fps={a.fps}"
+    args = ["-i", a.input, "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", str(a.crf), "-pix_fmt", "yuv420p"]
+    args += ["-c:a", "copy"] if has_audio(a.input) else ["-an"]
+    args += ["-movflags", "+faststart", a.output]
+    ff(*args)
+    done(a.output)
+
+
+def cmd_speed(a):
+    f = a.factor
+    if f <= 0:
+        sys.exit("--factor must be > 0")
+    parts = [f"[0:v]setpts={1.0 / f:.6f}*PTS[v]"]
+    maps = ["-map", "[v]"]
+    if has_audio(a.input) and not a.mute:
+        # atempo supports 0.5..100 per instance; chain for slower values
+        chain, rem = [], f
+        while rem < 0.5:
+            chain.append("atempo=0.5"); rem /= 0.5
+        chain.append(f"atempo={rem:.6f}")
+        parts.append(f"[0:a]{','.join(chain)}[a]")
+        maps += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+    else:
+        maps += ["-an"]
+    ff("-i", a.input, "-filter_complex", ";".join(parts), *maps, "-c:v", "libx264", "-preset", "fast", "-crf", str(a.crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart", a.output)
+    done(a.output)
+
+
+POSITIONS = {
+    "top": ("(w-text_w)/2", "h*0.08"),
+    "center": ("(w-text_w)/2", "(h-text_h)/2"),
+    "bottom": ("(w-text_w)/2", "h-text_h-h*0.08"),
+    "top-left": ("w*0.04", "h*0.08"),
+    "top-right": ("w-text_w-w*0.04", "h*0.08"),
+    "bottom-left": ("w*0.04", "h-text_h-h*0.08"),
+    "bottom-right": ("w-text_w-w*0.04", "h-text_h-h*0.08"),
+}
+
+
+def cmd_overlay_text(a):
+    x, y = POSITIONS[a.position]
+    # Text goes through a temp file with expansion=none, so %, :, ' and \ need no escaping at all.
+    txtfile = Path(a.output).with_suffix(".drawtext.txt")
+    txtfile.write_text(a.text)
+    opts = [f"textfile='{esc_path(txtfile)}'", "expansion=none", f"fontsize={a.size}", f"fontcolor={a.color}", f"x={x}", f"y={y}"]
+    if a.font:
+        opts.append(f"fontfile='{esc_path(a.font)}'")
+    if a.box:
+        opts += ["box=1", f"boxcolor={a.box_color}", f"boxborderw={max(4, a.size // 4)}"]
+    else:
+        opts += ["borderw=2", "bordercolor=black@0.8"]
+    if a.start is not None or a.end is not None:
+        s = a.start if a.start is not None else 0
+        cond = f"gte(t\\,{s})"
+        if a.end is not None:
+            cond = f"between(t\\,{s}\\,{a.end})"
+        opts.append(f"enable='{cond}'")
+    vf = "drawtext=" + ":".join(opts)
+    args = ["-i", a.input, "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", str(a.crf), "-pix_fmt", "yuv420p"]
+    args += ["-c:a", "copy"] if has_audio(a.input) else ["-an"]
+    args += ["-movflags", "+faststart", a.output]
+    try:
+        ff(*args)
+    finally:
+        txtfile.unlink(missing_ok=True)
+    done(a.output)
+
+
+def cmd_add_audio(a):
+    vid_has_audio = has_audio(a.video)
+    args = ["-i", a.video]
+    if a.loop:
+        args += ["-stream_loop", "-1"]
+    args += ["-i", a.audio]
+    if a.mode == "replace" or not vid_has_audio:
+        fc = f"[1:a]volume={a.music_volume},aformat=sample_rates=48000:channel_layouts=stereo[a]"
+    elif a.mode == "mix":
+        fc = (f"[1:a]volume={a.music_volume}[m];"
+              f"[0:a]volume={a.voice_volume}[o];[o][m]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]")
+    else:  # duck: music ducks under the original audio via sidechaincompress
+        fc = (f"[1:a]volume={a.music_volume},aformat=sample_rates=48000:channel_layouts=stereo[m];"
+              f"[0:a]volume={a.voice_volume},aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[o][sc];"
+              f"[m][sc]sidechaincompress=threshold={a.duck_threshold}:ratio={a.duck_ratio}:attack=20:release={a.duck_release}:makeup=1[ducked];"
+              f"[o][ducked]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]")
+    args += ["-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", a.output]
+    ff(*args)
+    done(a.output)
+
+
+def cmd_extract_audio(a):
+    ext = Path(a.output).suffix.lower()
+    if ext == ".wav":
+        codec = ["-c:a", "pcm_s16le"]
+    elif ext == ".mp3":
+        codec = ["-c:a", "libmp3lame", "-q:a", "2"]
+    elif ext in (".m4a", ".aac"):
+        codec = ["-c:a", "aac", "-b:a", "192k"]
+    elif ext == ".flac":
+        codec = ["-c:a", "flac"]
+    else:
+        codec = []
+    args = ["-i", a.input, "-vn"]
+    if a.mono:
+        args += ["-ac", "1"]
+    if a.rate:
+        args += ["-ar", str(a.rate)]
+    ff(*args, *codec, a.output)
+    done(a.output)
+
+
+def cmd_to_gif(a):
+    args = []
+    if a.start:
+        args += ["-ss", a.start]
+    if a.duration:
+        args += ["-t", a.duration]
+    args += ["-i", a.input]
+    vf = (f"fps={a.fps},scale={a.width}:-1:flags=lanczos,split[s0][s1];"
+          f"[s0]palettegen=max_colors={a.colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle")
+    ff(*args, "-filter_complex", vf, "-loop", "0", a.output)
+    done(a.output)
+
+
+def cmd_frames(a):
+    os.makedirs(a.outdir, exist_ok=True)
+    pattern = os.path.join(a.outdir, f"frame_%05d.{a.format}")
+    args = []
+    if a.start:
+        args += ["-ss", a.start]
+    if a.duration:
+        args += ["-t", a.duration]
+    args += ["-i", a.input]
+    if a.fps:
+        args += ["-vf", f"fps={a.fps}"]
+    if a.format in ("jpg", "jpeg"):
+        args += ["-q:v", "2"]
+    ff(*args, pattern)
+    n = len([f for f in os.listdir(a.outdir) if f.startswith("frame_")])
+    print(f"wrote {n} frames to {a.outdir} ({pattern})")
+
+
+def cmd_from_frames(a):
+    args = ["-framerate", str(a.fps)]
+    if a.glob:
+        args += ["-pattern_type", "glob", "-i", a.pattern]
+    else:
+        args += ["-i", a.pattern]
+    if a.audio:
+        args += ["-i", a.audio, "-c:a", "aac", "-b:a", "192k", "-shortest"]
+    args += ["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", "-c:v", "libx264", "-preset", "fast", "-crf", str(a.crf), "-r", str(a.fps), "-movflags", "+faststart", a.output]
+    ff(*args)
+    done(a.output)
+
+
+def cmd_subtitles(a):
+    style = f"FontSize={a.size},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,MarginV={a.margin}"
+    if a.font:
+        style += f",FontName={a.font}"
+    vf = f"subtitles='{esc_path(a.srt)}':force_style='{style}'"
+    args = ["-i", a.input, "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", str(a.crf), "-pix_fmt", "yuv420p"]
+    args += ["-c:a", "copy"] if has_audio(a.input) else ["-an"]
+    args += ["-movflags", "+faststart", a.output]
+    ff(*args)
+    done(a.output)
+
+
+def cmd_thumbnail(a):
+    if a.at is None:
+        # use ffmpeg's scene-based thumbnail picker over the first N frames
+        vf = "thumbnail=100"
+        if a.width:
+            vf += f",scale={a.width}:-2"
+        ff("-i", a.input, "-vf", vf, "-frames:v", "1", "-q:v", "2", a.output)
+    else:
+        args = ["-ss", a.at, "-i", a.input, "-frames:v", "1", "-q:v", "2"]
+        if a.width:
+            args += ["-vf", f"scale={a.width}:-2"]
+        ff(*args, a.output)
+    done(a.output)
+
+
+def cmd_normalize_loudness(a):
+    tgt = f"I={a.lufs}:TP={a.tp}:LRA={a.lra}"
+    if a.two_pass:
+        r = run([FFMPEG, "-hide_banner", "-nostats", "-i", a.input, "-af", f"loudnorm={tgt}:print_format=json", "-f", "null", "-"], capture=True)
+        txt = r.stderr
+        j = json.loads(txt[txt.rfind("{"):txt.rfind("}") + 1])
+        print(f"measured: input_i={j['input_i']} LUFS, input_tp={j['input_tp']} dBTP, input_lra={j['input_lra']}", file=sys.stderr)
+        af = (f"loudnorm={tgt}:measured_I={j['input_i']}:measured_TP={j['input_tp']}:measured_LRA={j['input_lra']}"
+              f":measured_thresh={j['input_thresh']}:offset={j['target_offset']}:linear=true:print_format=summary")
+    else:
+        af = f"loudnorm={tgt}"
+    ext = Path(a.output).suffix.lower()
+    if ext in (".wav",):
+        codec = ["-c:a", "pcm_s16le"]
+    elif ext == ".mp3":
+        codec = ["-c:a", "libmp3lame", "-q:a", "2"]
+    else:
+        codec = ["-c:a", "aac", "-b:a", "192k"]
+    args = ["-i", a.input, "-af", af, "-ar", "48000"]
+    if ext in (".wav", ".mp3", ".m4a", ".flac"):
+        args += ["-vn"]
+    else:
+        args += ["-c:v", "copy"]
+    ff(*args, *codec, a.output)
+    done(a.output)
+
+
+# ---------------------------------------------------------------- parser
+
+def build_parser():
+    p = argparse.ArgumentParser(prog="vid", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sp = p.add_subparsers(dest="cmd", required=True)
+
+    def crf(x):
+        x.add_argument("--crf", type=int, default=20, help="x264 quality, lower=better (default 20)")
+
+    s = sp.add_parser("info", help="print stream/format summary as JSON"); s.add_argument("input"); s.set_defaults(fn=cmd_info)
+
+    s = sp.add_parser("trim", help="cut a time range"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--start", default="0", help="start time (seconds or HH:MM:SS.ms)")
+    g = s.add_mutually_exclusive_group(); g.add_argument("--end", help="end time"); g.add_argument("--duration", help="length")
+    s.add_argument("--copy", action="store_true", help="stream copy (fast, cuts on keyframes, imprecise)"); crf(s); s.set_defaults(fn=cmd_trim)
+
+    s = sp.add_parser("concat", help="join clips"); s.add_argument("inputs", nargs="+", help="input clips then OUTPUT last")
+    s.add_argument("--copy", action="store_true", help="stream copy (all inputs must share codec/size/fps)")
+    s.add_argument("--width", type=int, default=1920); s.add_argument("--height", type=int, default=1080); s.add_argument("--fps", type=int, default=30); crf(s)
+    s.set_defaults(fn=lambda a: (setattr(a, "output", a.inputs.pop()), cmd_concat(a)))
+
+    s = sp.add_parser("resize", help="scale / letterbox / crop"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--width", type=int); s.add_argument("--height", type=int)
+    s.add_argument("--mode", choices=["fit", "crop", "stretch"], default="fit", help="when both dims given: fit=letterbox, crop=center-crop, stretch")
+    s.add_argument("--fps", type=int); crf(s); s.set_defaults(fn=cmd_resize)
+
+    s = sp.add_parser("speed", help="change playback speed (pitch-preserving audio)"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--factor", type=float, required=True, help="2.0 = twice as fast, 0.5 = half speed")
+    s.add_argument("--mute", action="store_true"); crf(s); s.set_defaults(fn=cmd_speed)
+
+    s = sp.add_parser("overlay-text", help="burn a text caption/title"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--text", required=True); s.add_argument("--position", choices=list(POSITIONS), default="bottom")
+    s.add_argument("--size", type=int, default=48); s.add_argument("--color", default="white")
+    s.add_argument("--font", help="path to a .ttf file (optional)"); s.add_argument("--box", action="store_true", help="draw a background box")
+    s.add_argument("--box-color", default="black@0.5"); s.add_argument("--start", type=float, help="show from t seconds"); s.add_argument("--end", type=float, help="hide after t seconds")
+    crf(s); s.set_defaults(fn=cmd_overlay_text)
+
+    s = sp.add_parser("add-audio", help="replace, mix, or duck music under a video's audio"); s.add_argument("video"); s.add_argument("audio"); s.add_argument("output")
+    s.add_argument("--mode", choices=["replace", "mix", "duck"], default="replace")
+    s.add_argument("--music-volume", type=float, default=1.0, help="gain for the added audio (0.3 = quiet bed)")
+    s.add_argument("--voice-volume", type=float, default=1.0, help="gain for the video's original audio")
+    s.add_argument("--duck-threshold", default="0.05", help="sidechain threshold (linear, default 0.05)")
+    s.add_argument("--duck-ratio", type=float, default=8); s.add_argument("--duck-release", type=int, default=400, help="ms")
+    s.add_argument("--loop", action="store_true", help="loop the audio file to cover the video"); s.set_defaults(fn=cmd_add_audio)
+
+    s = sp.add_parser("extract-audio", help="audio track -> wav/mp3/m4a/flac (by extension)"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--mono", action="store_true"); s.add_argument("--rate", type=int, help="sample rate, e.g. 16000 for STT"); s.set_defaults(fn=cmd_extract_audio)
+
+    s = sp.add_parser("to-gif", help="palette-optimised GIF"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--start"); s.add_argument("--duration"); s.add_argument("--fps", type=int, default=12)
+    s.add_argument("--width", type=int, default=480); s.add_argument("--colors", type=int, default=128); s.set_defaults(fn=cmd_to_gif)
+
+    s = sp.add_parser("frames", help="extract frames to a directory"); s.add_argument("input"); s.add_argument("outdir")
+    s.add_argument("--fps", type=float, help="frames per second to extract (default: every frame)")
+    s.add_argument("--start"); s.add_argument("--duration"); s.add_argument("--format", choices=["png", "jpg"], default="png"); s.set_defaults(fn=cmd_frames)
+
+    s = sp.add_parser("from-frames", help="image sequence -> mp4"); s.add_argument("pattern", help="e.g. dir/frame_%%05d.png, or a glob with --glob")
+    s.add_argument("output"); s.add_argument("--fps", type=float, default=30); s.add_argument("--glob", action="store_true", help="treat pattern as a shell glob like 'dir/*.png'")
+    s.add_argument("--audio", help="optional audio file to mux"); crf(s); s.set_defaults(fn=cmd_from_frames)
+
+    s = sp.add_parser("subtitles", help="burn an .srt into the picture"); s.add_argument("input"); s.add_argument("srt"); s.add_argument("output")
+    s.add_argument("--size", type=int, default=24); s.add_argument("--margin", type=int, default=30); s.add_argument("--font", help="font NAME (not a path), e.g. Helvetica"); crf(s); s.set_defaults(fn=cmd_subtitles)
+
+    s = sp.add_parser("thumbnail", help="single frame -> jpg/png"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--at", help="timestamp (default: auto-pick a representative frame)"); s.add_argument("--width", type=int); s.set_defaults(fn=cmd_thumbnail)
+
+    s = sp.add_parser("normalize-loudness", help="EBU R128 loudnorm (default -16 LUFS, -1.5 dBTP)"); s.add_argument("input"); s.add_argument("output")
+    s.add_argument("--lufs", type=float, default=-16); s.add_argument("--tp", type=float, default=-1.5); s.add_argument("--lra", type=float, default=11)
+    s.add_argument("--two-pass", action="store_true", help="measure first, then apply linear normalisation (more accurate)"); s.set_defaults(fn=cmd_normalize_loudness)
+    return p
+
+
+def main():
+    a = build_parser().parse_args()
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()

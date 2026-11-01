@@ -1,0 +1,60 @@
+[gd_scene load_steps=8 format=3 uid="uid://b0vrroom0main"]
+
+[ext_resource type="Script" path="res://main.gd" id="1_main"]
+[ext_resource type="Script" path="res://desktop_camera.gd" id="2_cam"]
+[ext_resource type="Shader" path="res://grid.gdshader" id="3_grid"]
+
+[sub_resource type="ShaderMaterial" id="GridMat"]
+shader = ExtResource("3_grid")
+
+[sub_resource type="PlaneMesh" id="FloorMesh"]
+material = SubResource("GridMat")
+size = Vector2(20, 20)
+
+[sub_resource type="BoxMesh" id="HandMesh"]
+size = Vector3(0.04, 0.04, 0.12)
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 1
+background_color = Color(0.08, 0.09, 0.11, 1)
+ambient_light_source = 1
+ambient_light_color = Color(0.5, 0.5, 0.55, 1)
+ambient_light_energy = 0.8
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 4, 0)
+shadow_enabled = true
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+mesh = SubResource("FloorMesh")
+
+[node name="XROrigin3D" type="XROrigin3D" parent="."]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+
+[node name="LeftHand" type="XRController3D" parent="XROrigin3D"]
+tracker = &"left_hand"
+pose = &"aim"
+
+[node name="Mesh" type="MeshInstance3D" parent="XROrigin3D/LeftHand"]
+mesh = SubResource("HandMesh")
+
+[node name="RightHand" type="XRController3D" parent="XROrigin3D"]
+tracker = &"right_hand"
+pose = &"aim"
+
+[node name="Mesh" type="MeshInstance3D" parent="XROrigin3D/RightHand"]
+mesh = SubResource("HandMesh")
+
+[node name="DesktopCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 2.5)
+script = ExtResource("2_cam")
+
+[node name="Model" type="Node3D" parent="."]

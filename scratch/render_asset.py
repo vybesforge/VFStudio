@@ -35,10 +35,24 @@ cam_data = bpy.data.cameras.new("cam")
 cam = bpy.data.objects.new("cam", cam_data)
 scene.collection.objects.link(cam)
 dist = span * 2.6
-cam.location = (cx + dist * 0.55, cy + dist * 1.05, cz + dist * 0.38)
+if "--top" in sys.argv:
+    cam.location = (cx, cy, cz + dist * 1.4)
+elif "--front" in sys.argv:
+    # glTF imports face -Y, so the default 3/4 camera at +Y photographs the BACK.
+    cam.location = (cx, cy - dist * 1.15, cz + dist * 0.10)
+elif "--side" in sys.argv:
+    cam.location = (cx + dist * 1.15, cy, cz + dist * 0.10)
+else:
+    cam.location = (cx + dist * 0.55, cy + dist * 1.05, cz + dist * 0.38)
 # aim at the asset
 import mathutils
 direction = mathutils.Vector((cx, cy, cz)) - cam.location
+# --head: close-up on the top 16% of the bbox so facial detail is judged at size.
+if "--head" in sys.argv:
+    tz = max(zs) - (max(zs) - min(zs)) * 0.09
+    cam.location = (cx, cy - span * 0.9, tz)
+    cam_data.lens = 85
+    direction = mathutils.Vector((cx, cy, tz)) - cam.location
 cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 scene.camera = cam
 
@@ -85,6 +99,9 @@ scene.render.resolution_y = SIZE
 scene.render.film_transparent = False
 scene.render.filepath = OUT
 scene.render.image_settings.file_format = "PNG"
+
+if "--frame" in sys.argv:
+    scene.frame_set(int(sys.argv[sys.argv.index("--frame") + 1]))
 
 bpy.ops.render.render(write_still=True)
 print(f"[render] wrote {OUT}")

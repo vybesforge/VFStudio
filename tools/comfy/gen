@@ -1,0 +1,391 @@
+#!/Users/dcruse/media-stack/tools/.venv/bin/python
+"""gen — one CLI for every ComfyUI generation pipeline on this Mac.
+
+  gen image  "prompt" [--model zimage|klein|flux] [--w 1024 --h 1024] [--steps N] [--seed N] [--n 1]
+  gen control "prompt" --image ref.png [--mode canny|raw] [--strength 1.0]      (Z-Image + ControlNet Union)
+  gen upscale in.png [--method esrgan|ultrasharp|seedvr2] [--scale 4]
+  gen video  "prompt" [--image start.png] [--w 1280 --h 704] [--frames 121] [--fps 24] [--steps 20]  (Wan 2.2 5B)
+  gen sfx    "prompt" [--seconds 10] [--model sao|sa3]                             (Stable Audio Open 1.0 / Stable Audio 3)
+  gen music  "style tags" [--lyrics "..." | --lyrics-file f.txt] [--seconds 120] [--bpm 120]  (ACE-Step 1.5)
+  gen status                                                                        (server + queue + which models are present)
+
+Every subcommand: waits for an idle queue (--now skips), submits an API-format prompt,
+polls /history, copies outputs into --out (default ~/media-stack/output/<kind>/) and
+prints one JSON line: {"ok": true, "files": [...], "seconds": 12.3, "prompt_id": "..."}.
+Nothing here calls a cloud API; all inference is the local ComfyUI on :8188.
+"""
+import argparse, json, os, random, shutil, sys, time, urllib.request, urllib.parse, uuid
+
+HOST = os.environ.get("COMFY_HOST", "http://127.0.0.1:8188")
+STACK = os.path.expanduser("~/media-stack")
+MODELS = f"{STACK}/ComfyUI/models"
+COMFY_OUT = f"{STACK}/ComfyUI/output"
+OUT_ROOT = f"{STACK}/output"
+
+# ---- model table: filename -> (folder). gen status reports which are present ----
+FILES = {
+    "zimage": ["diffusion_models/z_image_turbo_bf16.safetensors", "text_encoders/qwen_3_4b.safetensors", "vae/ae.safetensors"],
+    "klein": ["diffusion_models/flux-2-klein-4b.safetensors", "text_encoders/qwen_3_4b.safetensors", "vae/flux2-vae.safetensors"],
+    "flux": ["checkpoints/flux1-dev-fp8.safetensors"],
+    "control": ["controlnet/Z-Image-Turbo-Fun-Controlnet-Union.safetensors"],
+    "esrgan": ["upscale_models/RealESRGAN_x4plus.pth"],
+    "ultrasharp": ["upscale_models/4x-UltraSharp.pth"],
+    "seedvr2": ["diffusion_models/seedvr2_3b_int8_convrot.safetensors", "vae/seedvr2_ema_vae_fp16.safetensors"],
+    "video": ["diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan2.2_vae.safetensors"],
+    "sao": ["checkpoints/stable-audio-open-1.0.safetensors", "text_encoders/t5-base.safetensors"],
+    "sa3": ["checkpoints/stable_audio_3_medium.safetensors", "text_encoders/t5gemma_b_b_ul2.safetensors"],
+    "music": ["checkpoints/ace_step_1.5_turbo_aio.safetensors"],
+}
+
+
+def have(key):
+    return all(os.path.exists(f"{MODELS}/{p}") for p in FILES[key])
+
+
+def need(key):
+    missing = [p for p in FILES[key] if not os.path.exists(f"{MODELS}/{p}")]
+    if missing:
+        die(f"missing model files for '{key}': {missing}. Run: fetch-models  (then: stack restart comfy)")
+
+
+def die(msg, code=2):
+    print(json.dumps({"ok": False, "error": msg}))
+    sys.exit(code)
+
+
+# ---------------- HTTP ----------------
+def http(method, path, payload=None, timeout=30):
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(HOST + path, data=data, method=method,
+                                 headers={"Content-Type": "application/json"} if data else {})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        body = r.read()
+        return json.loads(body) if body else {}
+
+
+def server_up():
+    try:
+        http("GET", "/system_stats", timeout=3)
+        return True
+    except Exception:
+        return False
+
+
+def wait_idle(now=False):
+    if now:
+        return
+    t0 = time.time()
+    while True:
+        q = http("GET", "/queue")
+        if not q["queue_running"] and not q["queue_pending"]:
+            return
+        if time.time() - t0 > 7200:
+            die("queue busy for 2 h; giving up")
+        time.sleep(5)
+
+
+def upload_image(path):
+    import mimetypes
+    boundary = uuid.uuid4().hex
+    name = os.path.basename(path)
+    ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\n"
+            f"Content-Type: {ctype}\r\n\r\n").encode() + open(path, "rb").read() + \
+           f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(HOST + "/upload/image", data=body, method="POST",
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read())["name"]
+
+
+def run(prompt, kind, out_dir, timeout, now=False):
+    if not server_up():
+        die(f"ComfyUI is not running at {HOST}. Start it: stack start comfy")
+    wait_idle(now)
+    t0 = time.time()
+    res = http("POST", "/prompt", {"prompt": prompt, "client_id": "gen-cli"})
+    if "prompt_id" not in res:
+        die(f"submit rejected: {json.dumps(res)[:800]}")
+    pid = res["prompt_id"]
+    while True:
+        time.sleep(2)
+        h = http("GET", f"/history/{pid}")
+        if pid in h:
+            entry = h[pid]
+            break
+        if time.time() - t0 > timeout:
+            die(f"timed out after {timeout}s (prompt {pid} still running — check {HOST}/queue)")
+    st = entry.get("status", {})
+    if st.get("status_str") == "error":
+        msgs = [m for m in st.get("messages", []) if m[0] == "execution_error"]
+        die(f"execution error: {json.dumps(msgs)[:1200]}")
+    files = []
+    os.makedirs(out_dir, exist_ok=True)
+    for node_out in entry.get("outputs", {}).values():
+        for key in ("images", "audio", "video", "gifs"):
+            for item in node_out.get(key, []) or []:
+                if item.get("type") != "output":
+                    continue
+                src = os.path.join(COMFY_OUT, item.get("subfolder", ""), item["filename"])
+                if os.path.exists(src):
+                    dst = os.path.join(out_dir, item["filename"])
+                    shutil.copy2(src, dst)
+                    files.append(dst)
+    if not files:
+        die(f"prompt {pid} finished with status '{st.get('status_str')}' but wrote no output files — treat as failed")
+    print(json.dumps({"ok": True, "kind": kind, "files": files, "seconds": round(time.time() - t0, 1), "prompt_id": pid}))
+
+
+def seed_of(a):
+    return a.seed if a.seed is not None and a.seed >= 0 else random.randint(0, 2**53)
+
+
+# ---------------- graph builders (API format) ----------------
+def g_image(a):
+    s = seed_of(a)
+    if a.model == "zimage":
+        need("zimage")
+        steps = a.steps or 8
+        return {
+            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "z_image_turbo_bf16.safetensors", "weight_dtype": "default"}},
+            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b.safetensors", "type": "lumina2", "device": "default"}},
+            "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+            "4": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
+            "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
+            "6": {"class_type": "EmptySD3LatentImage", "inputs": {"width": a.w, "height": a.h, "batch_size": a.n}},
+            "7": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 3.0}},
+            "8": {"class_type": "KSampler", "inputs": {"model": ["7", 0], "positive": ["4", 0], "negative": ["5", 0], "latent_image": ["6", 0],
+                                                     "seed": s, "steps": steps, "cfg": 1.0, "sampler_name": "res_multistep", "scheduler": "simple", "denoise": 1.0}},
+            "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+            "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "gen/zimage"}},
+        }
+    if a.model == "klein":
+        need("klein")
+        steps = a.steps or 4
+        return {
+            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "flux-2-klein-4b.safetensors", "weight_dtype": "default"}},
+            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b.safetensors", "type": "flux2", "device": "default"}},
+            "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
+            "4": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
+            "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
+            "6": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": a.w, "height": a.h, "batch_size": a.n}},
+            "7": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+            "8": {"class_type": "Flux2Scheduler", "inputs": {"steps": steps, "width": a.w, "height": a.h}},
+            "9": {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0], "cfg": 1.0}},
+            "10": {"class_type": "RandomNoise", "inputs": {"noise_seed": s}},
+            "11": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["10", 0], "guider": ["9", 0], "sampler": ["7", 0], "sigmas": ["8", 0], "latent_image": ["6", 0]}},
+            "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}},
+            "13": {"class_type": "SaveImage", "inputs": {"images": ["12", 0], "filename_prefix": "gen/klein"}},
+        }
+    if a.model == "flux":
+        need("flux")
+        steps = a.steps or 20
+        return {
+            "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "flux1-dev-fp8.safetensors"}},
+            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["1", 1]}},
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["1", 1]}},
+            "4": {"class_type": "EmptyLatentImage", "inputs": {"width": a.w, "height": a.h, "batch_size": a.n}},
+            "5": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0],
+                                                     "seed": s, "steps": steps, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+            "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+            "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "gen/flux"}},
+        }
+    die("unknown --model")
+
+
+def g_control(a):
+    need("zimage"); need("control")
+    img = upload_image(a.image)
+    s = seed_of(a)
+    g = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "z_image_turbo_bf16.safetensors", "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b.safetensors", "type": "lumina2", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+        "4": {"class_type": "ModelPatchLoader", "inputs": {"name": "Z-Image-Turbo-Fun-Controlnet-Union.safetensors"}},
+        "5": {"class_type": "LoadImage", "inputs": {"image": img}},
+        "6": {"class_type": "ImageScaleToMaxDimension", "inputs": {"image": ["5", 0], "upscale_method": "lanczos", "largest_size": a.max_dim}},
+        "8": {"class_type": "GetImageSize", "inputs": {"image": ["7", 0]}},
+        "9": {"class_type": "QwenImageDiffsynthControlnet", "inputs": {"model": ["1", 0], "model_patch": ["4", 0], "vae": ["3", 0], "image": ["7", 0], "strength": a.strength}},
+        "10": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["9", 0], "shift": 3.0}},
+        "11": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
+        "12": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["11", 0]}},
+        "13": {"class_type": "EmptySD3LatentImage", "inputs": {"width": ["8", 0], "height": ["8", 1], "batch_size": 1}},
+        "14": {"class_type": "KSampler", "inputs": {"model": ["10", 0], "positive": ["11", 0], "negative": ["12", 0], "latent_image": ["13", 0],
+                                                  "seed": s, "steps": a.steps or 8, "cfg": 1.0, "sampler_name": "res_multistep", "scheduler": "simple", "denoise": 1.0}},
+        "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["3", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["15", 0], "filename_prefix": "gen/control"}},
+    }
+    if a.mode == "canny":
+        g["7"] = {"class_type": "Canny", "inputs": {"image": ["6", 0], "low_threshold": 0.1, "high_threshold": 0.32}}
+    else:  # raw: the supplied image IS the control map (depth, pose, hed, canny made elsewhere)
+        g["7"] = {"class_type": "ImageScaleToMaxDimension", "inputs": {"image": ["6", 0], "upscale_method": "lanczos", "largest_size": a.max_dim}}
+    if a.save_control:
+        g["17"] = {"class_type": "SaveImage", "inputs": {"images": ["7", 0], "filename_prefix": "gen/control_map"}}
+    return g
+
+
+def g_upscale(a):
+    img = upload_image(a.image)
+    if a.method in ("esrgan", "ultrasharp"):
+        need(a.method)
+        model = "RealESRGAN_x4plus.pth" if a.method == "esrgan" else "4x-UltraSharp.pth"
+        g = {
+            "1": {"class_type": "LoadImage", "inputs": {"image": img}},
+            "2": {"class_type": "UpscaleModelLoader", "inputs": {"model_name": model}},
+            "3": {"class_type": "ImageUpscaleWithModel", "inputs": {"upscale_model": ["2", 0], "image": ["1", 0]}},
+        }
+        last = "3"
+        if a.scale != 4:  # models are 4x; rescale afterwards to the requested factor
+            g["4"] = {"class_type": "ImageScaleBy", "inputs": {"image": ["3", 0], "upscale_method": "lanczos", "scale_by": a.scale / 4.0}}
+            last = "4"
+        g["9"] = {"class_type": "SaveImage", "inputs": {"images": [last, 0], "filename_prefix": "gen/upscale"}}
+        return g
+    need("seedvr2")
+    return {
+        "1": {"class_type": "LoadImage", "inputs": {"image": img}},
+        "2": {"class_type": "UNETLoader", "inputs": {"unet_name": "seedvr2_3b_int8_convrot.safetensors", "weight_dtype": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "seedvr2_ema_vae_fp16.safetensors"}},
+        "4": {"class_type": "ImageScaleBy", "inputs": {"image": ["1", 0], "upscale_method": "lanczos", "scale_by": float(a.scale)}},
+        "5": {"class_type": "SeedVR2Preprocess", "inputs": {"resized_images": ["4", 0]}},
+        "6": {"class_type": "VAEEncodeTiled", "inputs": {"pixels": ["5", 0], "vae": ["3", 0], "tile_size": 512, "overlap": 128, "temporal_size": 4096, "temporal_overlap": 8}},
+        "7": {"class_type": "SeedVR2Conditioning", "inputs": {"model": ["2", 0], "vae_conditioning": ["6", 0]}},
+        "8": {"class_type": "KSampler", "inputs": {"model": ["2", 0], "positive": ["7", 0], "negative": ["7", 1], "latent_image": ["6", 0],
+                                                 "seed": seed_of(a), "steps": 1, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+        "9": {"class_type": "VAEDecodeTiled", "inputs": {"samples": ["8", 0], "vae": ["3", 0], "tile_size": 512, "overlap": 128, "temporal_size": 4096, "temporal_overlap": 8}},
+        "10": {"class_type": "SeedVR2PostProcessing", "inputs": {"images": ["9", 0], "original_resized_images": ["4", 0], "color_correction_method": "lab"}},
+        "11": {"class_type": "SaveImage", "inputs": {"images": ["10", 0], "filename_prefix": "gen/upscale_seedvr2"}},
+    }
+
+
+NEG_WAN = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，"
+           "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
+
+
+def g_video(a):
+    need("video")
+    g = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan2.2_ti2v_5B_fp16.safetensors", "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
+        "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8.0}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": a.negative or NEG_WAN, "clip": ["2", 0]}},
+        "7": {"class_type": "Wan22ImageToVideoLatent", "inputs": {"vae": ["3", 0], "width": a.w, "height": a.h, "length": a.frames, "batch_size": 1}},
+        "8": {"class_type": "KSampler", "inputs": {"model": ["4", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0],
+                                                 "seed": seed_of(a), "steps": a.steps, "cfg": 5.0, "sampler_name": "uni_pc", "scheduler": "simple", "denoise": 1.0}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": float(a.fps)}},
+        "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": "gen/wan", "format": "auto", "codec": "auto"}},
+    }
+    if a.image:
+        g["12"] = {"class_type": "LoadImage", "inputs": {"image": upload_image(a.image)}}
+        g["7"]["inputs"]["start_image"] = ["12", 0]
+    return g
+
+
+def g_sfx(a):
+    if a.model == "sao":
+        need("sao")
+        return {
+            "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "stable-audio-open-1.0.safetensors"}},
+            "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "t5-base.safetensors", "type": "stable_audio", "device": "default"}},
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
+            "4": {"class_type": "CLIPTextEncode", "inputs": {"text": a.negative or "", "clip": ["2", 0]}},
+            "5": {"class_type": "EmptyLatentAudio", "inputs": {"seconds": float(a.seconds), "batch_size": 1}},
+            "6": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["3", 0], "negative": ["4", 0], "latent_image": ["5", 0],
+                                                     "seed": seed_of(a), "steps": a.steps or 50, "cfg": 4.98, "sampler_name": "dpmpp_3m_sde", "scheduler": "exponential", "denoise": 1.0}},
+            "7": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["6", 0], "vae": ["1", 2]}},
+            "8": {"class_type": "SaveAudio", "inputs": {"audio": ["7", 0], "filename_prefix": "gen/sfx"}},
+        }
+    need("sa3")
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "stable_audio_3_medium.safetensors"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "t5gemma_b_b_ul2.safetensors", "type": "stable_audio", "device": "default"}},
+        "3": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": a.negative or "", "clip": ["2", 0]}},
+        "5": {"class_type": "EmptyLatentAudio", "inputs": {"seconds": float(a.seconds), "batch_size": 1}},
+        "6": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["3", 0], "negative": ["4", 0], "latent_image": ["5", 0],
+                                                 "seed": seed_of(a), "steps": a.steps or 8, "cfg": 1.0, "sampler_name": "lcm", "scheduler": "simple", "denoise": 1.0}},
+        "7": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["6", 0], "vae": ["1", 2]}},
+        "8": {"class_type": "SaveAudio", "inputs": {"audio": ["7", 0], "filename_prefix": "gen/sa3"}},
+    }
+
+
+def g_music(a):
+    need("music")
+    lyrics = a.lyrics or ""
+    if a.lyrics_file:
+        lyrics = open(a.lyrics_file).read()
+    if not lyrics.strip():
+        lyrics = "[inst]"
+    s = seed_of(a)
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "ace_step_1.5_turbo_aio.safetensors"}},
+        "2": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 3.0}},
+        "3": {"class_type": "TextEncodeAceStepAudio1.5", "inputs": {"clip": ["1", 1], "tags": a.prompt, "lyrics": lyrics, "seed": s, "bpm": a.bpm,
+                                                                "duration": float(a.seconds), "timesignature": a.timesig, "language": a.language, "keyscale": a.key,
+                                                                "generate_audio_codes": True, "cfg_scale": 2.0, "temperature": 0.85, "top_p": 0.9, "top_k": 0, "min_p": 0.0}},
+        "4": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["3", 0]}},
+        "5": {"class_type": "EmptyAceStep1.5LatentAudio", "inputs": {"seconds": float(a.seconds), "batch_size": 1}},
+        "6": {"class_type": "KSampler", "inputs": {"model": ["2", 0], "positive": ["3", 0], "negative": ["4", 0], "latent_image": ["5", 0],
+                                                 "seed": s, "steps": a.steps or 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+        "7": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["6", 0], "vae": ["1", 2]}},
+        "8": {"class_type": "SaveAudio", "inputs": {"audio": ["7", 0], "filename_prefix": "gen/music"}},
+    }
+
+
+def cmd_status(a):
+    up = server_up()
+    info = {"server": HOST, "up": up, "models": {k: have(k) for k in FILES}}
+    if up:
+        q = http("GET", "/queue")
+        info["queue"] = {"running": len(q["queue_running"]), "pending": len(q["queue_pending"])}
+    print(json.dumps(info, indent=2))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="gen", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def common(sp, kind):
+        sp.add_argument("--out", default=f"{OUT_ROOT}/{kind}")
+        sp.add_argument("--seed", type=int, default=None)
+        sp.add_argument("--steps", type=int, default=None)
+        sp.add_argument("--now", action="store_true", help="do not wait for an idle queue")
+        sp.add_argument("--timeout", type=int, default=None)
+
+    s = sub.add_parser("image"); s.add_argument("prompt"); s.add_argument("--model", choices=["zimage", "klein", "flux"], default="zimage")
+    s.add_argument("--w", type=int, default=1024); s.add_argument("--h", type=int, default=1024); s.add_argument("--n", type=int, default=1); common(s, "image")
+
+    s = sub.add_parser("control"); s.add_argument("prompt"); s.add_argument("--image", required=True); s.add_argument("--mode", choices=["canny", "raw"], default="canny")
+    s.add_argument("--strength", type=float, default=1.0); s.add_argument("--max-dim", type=int, default=1024); s.add_argument("--save-control", action="store_true"); common(s, "control")
+
+    s = sub.add_parser("upscale"); s.add_argument("image"); s.add_argument("--method", choices=["esrgan", "ultrasharp", "seedvr2"], default="esrgan")
+    s.add_argument("--scale", type=float, default=4); common(s, "upscale")
+
+    s = sub.add_parser("video"); s.add_argument("prompt"); s.add_argument("--image"); s.add_argument("--negative")
+    s.add_argument("--w", type=int, default=1280); s.add_argument("--h", type=int, default=704); s.add_argument("--frames", type=int, default=121)
+    s.add_argument("--fps", type=int, default=24); common(s, "video"); s.set_defaults(steps=20)
+
+    s = sub.add_parser("sfx"); s.add_argument("prompt"); s.add_argument("--model", choices=["sao", "sa3"], default="sao")
+    s.add_argument("--seconds", type=float, default=10); s.add_argument("--negative"); common(s, "sfx")
+
+    s = sub.add_parser("music"); s.add_argument("prompt", help="style tags, e.g. 'lo-fi hip hop, warm rhodes, vinyl crackle, 85 bpm'")
+    s.add_argument("--lyrics"); s.add_argument("--lyrics-file"); s.add_argument("--seconds", type=float, default=120); s.add_argument("--bpm", type=int, default=120)
+    s.add_argument("--timesig", default="4"); s.add_argument("--language", default="en"); s.add_argument("--key", default="C major"); common(s, "music")
+
+    sub.add_parser("status")
+    a = p.parse_args()
+
+    if a.cmd == "status":
+        return cmd_status(a)
+    builders = {"image": g_image, "control": g_control, "upscale": g_upscale, "video": g_video, "sfx": g_sfx, "music": g_music}
+    default_timeout = {"image": 900, "control": 900, "upscale": 1800, "video": 7200, "sfx": 900, "music": 1800}[a.cmd]
+    if a.cmd == "video" and a.steps is None:
+        a.steps = 20
+    prompt = builders[a.cmd](a)
+    run(prompt, a.cmd, a.out, a.timeout or default_timeout, now=a.now)
+
+
+if __name__ == "__main__":
+    main()

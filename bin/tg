@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Send a Telegram message to Dylan's DM. Usage: tg "message"  |  tg -f file
+set -euo pipefail
+
+ENV_FILE="$HOME/.hermes/.env"
+TOKEN=$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$ENV_FILE" | tr -d '"'"'" | xargs)
+CHAT="${TG_CHAT:-8473685304}"
+
+if [ "${1:-}" = "-f" ]; then
+  MSG=$(cat "$2")
+elif [ -n "${1:-}" ]; then
+  MSG="$1"
+else
+  MSG=$(cat)
+fi
+
+[ -z "${TOKEN:-}" ] && { echo "no TELEGRAM_BOT_TOKEN in $ENV_FILE" >&2; exit 1; }
+
+curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+  -d "chat_id=${CHAT}" -d "disable_web_page_preview=true" \
+  --data-urlencode "text=${MSG}" \
+  | /Users/dcruse/media-stack/audio/.venv/bin/python -c \
+    "import json,sys; d=json.load(sys.stdin); print('tg ok' if d.get('ok') else d)"

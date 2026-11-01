@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Restore the last known-good pig pipeline state.
+#
+# Snapshots live in ~/media-stack/known-good/<timestamp>/ and contain the vetted
+# asset, its reference image, the scripts that produced it, and a SHA256SUMS file.
+#
+# Usage:
+#   restore-known-good            # list snapshots and restore the newest
+#   restore-known-good <stamp>    # restore a specific snapshot
+#   restore-known-good --list     # list only
+set -euo pipefail
+
+STACK="$HOME/media-stack"
+KG="$STACK/known-good"
+
+if [ ! -d "$KG" ]; then echo "no snapshots under $KG" >&2; exit 1; fi
+
+snaps=($(ls -1 "$KG" | sort))
+if [ ${#snaps[@]} -eq 0 ]; then echo "no snapshots" >&2; exit 1; fi
+
+if [ "${1:-}" = "--list" ]; then
+  for s in "${snaps[@]}"; do
+    n=$(ls "$KG/$s/assets"/*.glb 2>/dev/null | wc -l | tr -d ' ')
+    printf "  %s  (%s glb)\n" "$s" "$n"
+  done
+  exit 0
+fi
+
+target="${1:-${snaps[-1]}}"
+SRC="$KG/$target"
+if [ ! -d "$SRC" ]; then echo "no such snapshot: $target" >&2; exit 1; fi
+
+echo "restoring $target"
+
+# verify before writing anything
+if [ -f "$SRC/SHA256SUMS" ]; then
+  ( cd "$SRC" && shasum -a 256 -c SHA256SUMS --quiet ) \
+    && echo "  checksums OK" \
+    || { echo "  checksum mismatch — aborting" >&2; exit 1; }
+fi
+
+mkdir -p "$STACK/vr" "$STACK/scratch"
+for f in "$SRC"/assets/*.glb; do
+  base=$(basename "$f")
+  cp "$f" "$STACK/vr/$base"
+  echo "  asset -> vr/$base"
+done
+# the room loads pig.glb, so the snapshot's vetted asset becomes the room asset
+if [ -f "$SRC/assets/pig_clean.glb" ]; then
+  cp "$SRC/assets/pig_clean.glb" "$STACK/vr/pig.glb"
+  echo "  room asset -> vr/pig.glb"
+fi
+for f in "$SRC"/scripts/*.py; do
+  cp "$f" "$STACK/scratch/"
+  echo "  script -> scratch/$(basename "$f")"
+done
+
+echo "done. Reload the VR tab."

@@ -1,0 +1,257 @@
+#!/Users/dcruse/media-stack/tools/.venv/bin/python
+"""slice - headless OrcaSlicer wrapper: STL/3MF -> G-code + sliced 3MF + stats.
+
+Usage:
+  slice MODEL.stl [MODEL2.stl ...] --preset bambu|generic [--out DIR] [--name NAME]
+        [--arrange] [--set key=value ...] [--machine F] [--process F] [--filament F]
+        [--list-presets] [--json]
+
+What it does:
+  1. Resolves the preset's machine/process/filament JSON from OrcaSlicer's bundled
+     profiles (inside OrcaSlicer.app) and FLATTENS the `inherits` chain into
+     standalone JSON files (the CLI does not resolve inheritance itself).
+  2. Runs OrcaSlicer CLI:  --slice 0 --export-3mf NAME.3mf --outputdir OUT
+  3. Renames plate_1.gcode -> NAME.gcode and prints layer count, estimated
+     time, filament length/volume/grams parsed from the gcode header.
+
+Output dir layout (default ./sliced/NAME/):
+  NAME.gcode          - send to generic printers (Klipper/Marlin/OctoPrint)
+  NAME.3mf            - sliced project incl. gcode; Bambu printers accept this
+                        via Bambu Studio / Bambu Handy / SD card (rename to NAME.gcode.3mf)
+  profiles/*.json     - the flattened profiles actually used (reproducibility)
+  orca.log            - raw OrcaSlicer CLI output
+
+Exit codes: 0 ok, 1 slice failed, 2 bad arguments / profile not found.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ORCA = Path("/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer")
+PROFILES = Path("/Applications/OrcaSlicer.app/Contents/Resources/profiles")
+
+# preset -> (vendor, machine, process, filament)   (names == file names without .json)
+PRESETS = {
+    "bambu": {
+        "desc": "Bambu Lab P1S/X1C, 0.4 nozzle, Bambu PLA Basic, 0.20mm Standard, Textured PEI plate",
+        "machine": ("BBL", "Bambu Lab P1S 0.4 nozzle"),
+        "process": ("BBL", "0.20mm Standard @BBL X1C"),
+        "filament": ("BBL", "Bambu PLA Basic @BBL X1C"),
+        "defaults": ["curr_bed_type=Textured PEI Plate"],   # stock P1S/X1C plate; PLA bed 55C
+    },
+    "bambu-x1c": {
+        "desc": "Bambu Lab X1 Carbon, 0.4 nozzle, Bambu PLA Basic, 0.20mm Standard, Textured PEI plate",
+        "machine": ("BBL", "Bambu Lab X1 Carbon 0.4 nozzle"),
+        "process": ("BBL", "0.20mm Standard @BBL X1C"),
+        "filament": ("BBL", "Bambu PLA Basic @BBL X1C"),
+        "defaults": ["curr_bed_type=Textured PEI Plate"],
+    },
+    "generic": {
+        "desc": "Generic Marlin printer, 0.4 nozzle, 250x250x250 bed, Generic PLA, 0.20mm Standard",
+        "machine": ("Custom", "MyMarlin 0.4 nozzle"),
+        "process": ("Custom", "0.20mm Standard @MyMarlin"),
+        "filament": ("OrcaFilamentLibrary", "Generic PLA @System"),
+    },
+    "generic-klipper": {
+        "desc": "Generic Klipper printer, 0.4 nozzle, 250x250x250 bed, Generic PLA, 0.20mm Standard",
+        "machine": ("Custom", "MyKlipper 0.4 nozzle"),
+        "process": ("Custom", "0.20mm Standard @MyKlipper"),
+        "filament": ("OrcaFilamentLibrary", "Generic PLA @System"),
+    },
+}
+KIND_DIR = {"machine": "machine", "process": "process", "filament": "filament"}
+
+
+def die(msg, code=2):
+    print(f"ERROR: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def find_profile(vendor: str, kind: str, name: str) -> Path:
+    """Locate NAME.json under <vendor>/<kind>/, falling back to any vendor."""
+    p = PROFILES / vendor / KIND_DIR[kind] / f"{name}.json"
+    if p.exists():
+        return p
+    hits = list(PROFILES.glob(f"*/{KIND_DIR[kind]}/{name}.json"))
+    if hits:
+        return hits[0]
+    die(f"profile not found: {kind} '{name}' (looked in {PROFILES}/{vendor}/{KIND_DIR[kind]}/)")
+
+
+def flatten(vendor: str, kind: str, name: str, _seen=None) -> dict:
+    """Resolve the `inherits` chain: parent values first, child overrides."""
+    _seen = _seen or set()
+    if name in _seen:
+        die(f"inheritance loop at {name}")
+    _seen.add(name)
+    src = find_profile(vendor, kind, name)
+    with open(src) as f:
+        data = json.load(f)
+    parent_name = data.pop("inherits", None)
+    merged = flatten(vendor, kind, parent_name, _seen) if parent_name else {}
+    merged.update(data)
+    return merged
+
+
+def write_flat(merged: dict, dest: Path):
+    # keys the CLI refuses as overrides are fine inside a loaded file, but drop the
+    # inheritance bookkeeping so OrcaSlicer treats the file as a standalone preset.
+    for k in ("inherits", "inherits_group", "instantiation"):
+        merged.pop(k, None)
+    dest.write_text(json.dumps(merged, indent=1))
+
+
+def parse_gcode_stats(gcode: Path) -> dict:
+    s = {"gcode": str(gcode), "size_bytes": gcode.stat().st_size}
+    head = []
+    with open(gcode, errors="replace") as f:
+        for i, line in enumerate(f):
+            if line.startswith(";"):
+                head.append(line.rstrip("\n"))
+            if i > 1500:
+                break
+        # filament totals live at the END of the file
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - 65536))
+        tail = f.read().splitlines()
+    text = "\n".join(head + tail)
+    pats = {
+        "layers": r"; total layer number: (\d+)",
+        "model_time": r"; model printing time: ([^;]+?);",
+        "estimated_time": r"total estimated time: (.+)",
+        "estimated_time_alt": r"; estimated printing time \(normal mode\) = (.+)",
+        "max_z_mm": r"; max_z_height: ([\d.]+)",
+        "filament_mm": r"; filament used \[mm\] = ([\d.]+)",
+        "filament_cm3": r"; filament used \[cm3\] = ([\d.]+)",
+        "filament_g": r"; filament used \[g\] = ([\d.]+)",
+        "filament_cost": r"; filament cost = ([\d.]+)",
+        "printer_model": r"; printer_model = (.+)",
+        "nozzle_temp": r"; nozzle_temperature = (\d+)",
+        "bed_type": r"; curr_bed_type = (.+)",
+        "layer_height": r"; layer_height = ([\d.]+)",
+        "filament_density": r"; filament_density = ([\d.]+)",
+    }
+    for k, pat in pats.items():
+        m = re.search(pat, text)
+        if m:
+            v = m.group(1).strip()
+            s[k] = v
+    if "estimated_time" not in s and "estimated_time_alt" in s:
+        s["estimated_time"] = s["estimated_time_alt"]
+    s.pop("estimated_time_alt", None)
+    if "filament_g" not in s and "filament_cm3" in s and float(s.get("filament_density", 0)) > 0:
+        s["filament_g"] = f"{float(s['filament_cm3']) * float(s['filament_density']):.2f}"
+    return s
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("models", nargs="*", help="STL/3MF/OBJ/STEP files")
+    ap.add_argument("--preset", "-p", default="bambu", choices=sorted(PRESETS), help="printer preset (default bambu)")
+    ap.add_argument("--out", "-o", help="output directory (default ./sliced/<name>)")
+    ap.add_argument("--name", "-n", help="base name for outputs (default: first model's stem)")
+    ap.add_argument("--arrange", action="store_true", help="auto-arrange objects on the plate (needed for >1 model)")
+    ap.add_argument("--set", action="append", default=[], metavar="key=value",
+                    help="override any OrcaSlicer setting, e.g. --set sparse_infill_density=25%% --set wall_loops=3")
+    ap.add_argument("--machine", help="path to a flat machine JSON (overrides preset)")
+    ap.add_argument("--process", help="path to a flat process JSON (overrides preset)")
+    ap.add_argument("--filament", help="path to a flat filament JSON (overrides preset)")
+    ap.add_argument("--no-3mf", action="store_true", help="skip 3MF export")
+    ap.add_argument("--json", action="store_true", help="print stats as JSON")
+    ap.add_argument("--list-presets", action="store_true")
+    a = ap.parse_args()
+
+    if a.list_presets:
+        for k, v in PRESETS.items():
+            print(f"{k:16s} {v['desc']}")
+        return
+    if not a.models:
+        ap.print_usage()
+        die("no model given")
+    if not ORCA.exists():
+        die(f"OrcaSlicer not found at {ORCA}")
+    models = [Path(m).resolve() for m in a.models]
+    for m in models:
+        if not m.exists():
+            die(f"model not found: {m}")
+
+    name = a.name or models[0].stem
+    out = Path(a.out).resolve() if a.out else (Path.cwd() / "sliced" / name).resolve()
+    prof_dir = out / "profiles"
+    prof_dir.mkdir(parents=True, exist_ok=True)
+    for stale in out.glob("plate_*.gcode"):
+        stale.unlink()
+
+    preset = PRESETS[a.preset]
+    paths = {}
+    for kind in ("machine", "process", "filament"):
+        override = getattr(a, kind)
+        if override:
+            paths[kind] = Path(override).resolve()
+            if not paths[kind].exists():
+                die(f"{kind} file not found: {override}")
+        else:
+            vendor, pname = preset[kind]
+            dest = prof_dir / f"{kind}.json"
+            write_flat(flatten(vendor, kind, pname), dest)
+            paths[kind] = dest
+
+    cmd = [str(ORCA),
+           "--load-settings", f"{paths['machine']};{paths['process']}",
+           "--load-filaments", str(paths["filament"]),
+           "--slice", "0",
+           "--outputdir", str(out)]
+    if a.arrange or len(models) > 1:
+        cmd += ["--arrange", "1"]
+    if not a.no_3mf:
+        cmd += ["--export-3mf", f"{name}.3mf"]   # bare filename: Orca prefixes --outputdir itself
+    overrides = list(preset.get("defaults", [])) + a.set   # user --set wins (applied last)
+    for kv in overrides:
+        if "=" not in kv:
+            die(f"--set expects key=value, got {kv}")
+        k, v = kv.split("=", 1)
+        cmd.append(f"--{k.replace('_', '-')}={v}")
+    cmd += [str(m) for m in models]
+
+    log = out / "orca.log"
+    with open(log, "w") as lf:
+        lf.write(" ".join(cmd) + "\n\n")
+        lf.flush()
+        rc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=str(out)).returncode
+
+    plates = sorted(out.glob("plate_*.gcode"))
+    if rc != 0 or not plates:
+        print(f"SLICE FAILED (exit {rc}). Last log lines from {log}:", file=sys.stderr)
+        print("\n".join(log.read_text(errors="replace").splitlines()[-15:]), file=sys.stderr)
+        sys.exit(1)
+
+    results = []
+    for i, plate in enumerate(plates, 1):
+        target = out / (f"{name}.gcode" if len(plates) == 1 else f"{name}_plate{i}.gcode")
+        shutil.move(str(plate), target)
+        results.append(parse_gcode_stats(target))
+
+    summary = {"preset": a.preset, "out": str(out), "plates": results,
+               "threemf": str(out / f"{name}.3mf") if not a.no_3mf and (out / f"{name}.3mf").exists() else None}
+    if a.json:
+        print(json.dumps(summary, indent=2))
+    else:
+        print(f"preset   : {a.preset}  ({preset['desc']})")
+        for r in results:
+            print(f"gcode    : {r['gcode']}")
+            print(f"layers   : {r.get('layers','?')}   layer_height {r.get('layer_height','?')} mm   max_z {r.get('max_z_mm','?')} mm")
+            print(f"time     : {r.get('estimated_time','?')}  (model only {r.get('model_time','?')})")
+            print(f"filament : {r.get('filament_g','?')} g   {r.get('filament_mm','?')} mm   {r.get('filament_cm3','?')} cm3")
+            print(f"printer  : {r.get('printer_model','?')}   nozzle {r.get('nozzle_temp','?')}C   bed '{r.get('bed_type','?')}'")
+        if summary["threemf"]:
+            print(f"3mf      : {summary['threemf']}")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

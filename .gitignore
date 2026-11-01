@@ -6,7 +6,8 @@ logs/
 run/
 
 # model weights (tens of GB, reproducible by download)
-models/
+models/*
+!models/manifest.json
 ComfyUI/models/
 
 # generated output
@@ -26,3 +27,16 @@ vr/*.glb
 
 .DS_Store
 *.log
+# studio additions (2026-11-01)
+output/
+tools/.venv/
+vr-godot/.godot/
+known-good/
+scratch/*/
+scratch/*.stl
+scratch/*.gcode
+scratch/*.3mf
+scratch/*.mp4
+scratch/*.gif
+scratch/*.jpg
+scratch/*.srt

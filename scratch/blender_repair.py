@@ -34,6 +34,48 @@ meshes = [o for o in scene.objects if o.type == "MESH"]
 if not meshes:
     sys.exit("no mesh in GLB")
 
+# ── weld, then strip the backdrop ───────────────────────────────────────
+# Order matters: the raw GLB is split at every UV seam, so "separate by loose
+# parts" on it yields tens of thousands of fragments and no meaningful
+# components. Weld first, and the backdrop becomes one separable sheet.
+bpy.ops.object.select_all(action="DESELECT")
+for o in meshes:
+    o.select_set(True)
+bpy.context.view_layer.objects.active = meshes[0]
+if len(meshes) > 1:
+    bpy.ops.object.join()
+obj = bpy.context.view_layer.objects.active
+
+bpy.ops.object.mode_set(mode="EDIT")
+bpy.ops.mesh.select_all(action="SELECT")
+bpy.ops.mesh.remove_doubles(threshold=0.0001)
+bpy.ops.mesh.separate(type="LOOSE")
+bpy.ops.object.mode_set(mode="OBJECT")
+
+parts = [o for o in scene.objects if o.type == "MESH"]
+keep, dropped = [], []
+for o in parts:
+    bb = [o.matrix_world @ __import__("mathutils").Vector(c) for c in o.bound_box]
+    dims = sorted([
+        max(v.x for v in bb) - min(v.x for v in bb),
+        max(v.y for v in bb) - min(v.y for v in bb),
+        max(v.z for v in bb) - min(v.z for v in bb),
+    ])
+    biggest = dims[2] or 1e-6
+    if dims[0] < biggest * 0.02 and dims[1] > biggest * 0.25:
+        dropped.append((o.name, [round(d, 3) for d in dims]))
+    else:
+        keep.append(o)
+print(f"[repair] components: {len(parts)} total, {len(keep)} kept, {len(dropped)} dropped")
+for name, dims in dropped[:4]:
+    print(f"[repair]   dropped planar sheet {name} dims={dims}")
+for o in parts:
+    if o not in keep:
+        bpy.data.objects.remove(o, do_unlink=True)
+if not keep:
+    sys.exit("every component looked like a sheet — refusing to delete the subject")
+
+meshes = keep
 bpy.ops.object.select_all(action="DESELECT")
 for o in meshes:
     o.select_set(True)
@@ -71,17 +113,29 @@ if TARGET_TRIS and tris_before > TARGET_TRIS:
     tris_after = sum(len(p.vertices) - 2 for p in obj.data.polygons)
     print(f"[repair] decimated to {tris_after:,} tris")
 
-# ── 4. clean UVs ────────────────────────────────────────────────────────
+# ── 4. planar projection UVs ────────────────────────────────────────────
+# The reference is a side profile, so the correct mapping is a straight planar
+# projection along the body's width axis: photo X -> body length, photo Y -> body
+# height. Triplanar/BOX sampling was wrong twice over — it tiled, and it sampled
+# the photo's white background over most of the body.
 while obj.data.uv_layers:
     obj.data.uv_layers.remove(obj.data.uv_layers[0])
-obj.data.uv_layers.new(name="UVMap")
+uv = obj.data.uv_layers.new(name="UVMap")
+me = obj.data
 
-bpy.ops.object.mode_set(mode="EDIT")
-bpy.ops.mesh.select_all(action="SELECT")
-bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.02,
-                         area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
-bpy.ops.object.mode_set(mode="OBJECT")
-print(f"[repair] uv maps={len(obj.data.uv_layers)}")
+bb2 = [obj.matrix_world @ __import__("mathutils").Vector(c) for c in obj.bound_box]
+x0, x1 = min(v.x for v in bb2), max(v.x for v in bb2)
+z0, z1 = min(v.z for v in bb2), max(v.z for v in bb2)
+lx, lz = max(x1 - x0, 1e-6), max(z1 - z0, 1e-6)
+for poly in me.polygons:
+    for li in poly.loop_indices:
+        co = me.vertices[me.loops[li].vertex_index].co
+        u = (co.x - x0) / lx
+        # Blender's V axis already runs bottom-to-top, so do NOT flip it here.
+        # A 1.0-v flip is what rendered the paint upside down.
+        v = (co.z - z0) / lz
+        uv.data[li].uv = (min(max(u, 0.0), 1.0), min(max(v, 0.0), 1.0))
+print(f"[repair] planar UV projection over {lx:.2f} x {lz:.2f} m")
 
 # ── 5. triplanar source material ────────────────────────────────────────
 obj.data.materials.clear()
@@ -95,13 +149,13 @@ bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
 img = nt.nodes.new("ShaderNodeTexImage")
 img.image = bpy.data.images.load(TEX)
 # BOX projection reads from three axes, so seams never stretch one photo flat.
-img.projection = "BOX"
-img.projection_blend = 0.35
+img.projection = "FLAT"
+# REPEAT (the default) tiles the photo across the body — that produced rows of
+# tiny pig silhouettes. EXTEND clamps to the edge instead of repeating.
+img.extension = "EXTEND"
 tex_coord = nt.nodes.new("ShaderNodeTexCoord")
-mapping = nt.nodes.new("ShaderNodeMapping")
-mapping.inputs["Scale"].default_value = (2.2, 2.2, 2.2)
-nt.links.new(tex_coord.outputs["Object"], mapping.inputs["Vector"])
-nt.links.new(mapping.outputs["Vector"], img.inputs["Vector"])
+nt.links.new(tex_coord.outputs["UV"], img.inputs["Vector"])
+print("[repair] texture sampled through planar UVs")
 nt.links.new(img.outputs["Color"], bsdf.inputs["Base Color"])
 bsdf.inputs["Roughness"].default_value = 0.62
 nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])

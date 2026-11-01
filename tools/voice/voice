@@ -1,0 +1,242 @@
+#!/Users/dcruse/media-stack/audio/.venv/bin/python
+"""voice — local TTS / voice-clone / STT / enhance CLI over the mlx-audio server.
+
+Everything runs on this Mac (mlx-audio at 127.0.0.1:8000). No cloud calls.
+
+  voice say "text" [--voice af_heart] [--out f.wav] [--speed 1.0]
+  voice voices
+  voice clone --ref ref.wav --ref-text "transcript of ref" "new text" [--out f.wav]
+  voice clone --ref ref.wav "new text" --model mlx-community/chatterbox-turbo-fp16   (no transcript needed)
+  voice transcribe file.wav [--srt] [--json]
+  voice enhance in.wav out.wav [--lufs -16]
+  voice status
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+import uuid
+
+HOME = os.path.expanduser("~")
+SERVER = os.environ.get("VOICE_SERVER", "http://127.0.0.1:8000")
+KOKORO = "mlx-community/Kokoro-82M-bf16"
+CLONE_MODEL = os.environ.get("VOICE_CLONE_MODEL", "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16")
+WHISPER = "mlx-community/whisper-large-v3-turbo-asr-fp16"
+TOOLS_PY = f"{HOME}/media-stack/tools/.venv/bin/python"
+FFMPEG = f"{HOME}/.hermes/tools/ffmpeg-9.0.1-darwin-arm64/ffmpeg"
+SCRATCH = f"{HOME}/media-stack/scratch/voice"
+
+
+def die(msg, code=1):
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def default_out(prefix):
+    os.makedirs(SCRATCH, exist_ok=True)
+    return f"{SCRATCH}/{prefix}_{time.strftime('%Y%m%d_%H%M%S')}.wav"
+
+
+def post_json(path, payload, timeout=600):
+    req = urllib.request.Request(
+        SERVER + path, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        die(f"server {e.code}: {e.read().decode(errors='replace')[:400]}")
+    except urllib.error.URLError as e:
+        die(f"cannot reach mlx-audio server at {SERVER} ({e.reason}). Start it: stack start audio")
+
+
+def check_server():
+    try:
+        urllib.request.urlopen(SERVER + "/", timeout=3)
+    except Exception as e:
+        die(f"mlx-audio server not responding at {SERVER} ({e}). Start it: stack start audio")
+
+
+def write_audio(data, out):
+    if len(data) < 1000:
+        die(f"server returned {len(data)} bytes — model failed to load? check: stack logs audio")
+    with open(out, "wb") as f:
+        f.write(data)
+
+
+def cmd_say(a):
+    check_server()
+    out = a.out or default_out("say")
+    t0 = time.time()
+    data = post_json("/v1/audio/speech", {
+        "model": KOKORO, "voice": a.voice, "input": a.text,
+        "speed": a.speed, "response_format": "wav"})
+    write_audio(data, out)
+    print(f"{out}  ({len(data)} bytes, {time.time()-t0:.1f}s)")
+
+
+def cmd_voices(a):
+    check_server()
+    with urllib.request.urlopen(f"{SERVER}/v1/audio/voices?model={KOKORO}", timeout=60) as r:
+        d = json.load(r)
+    for v in d.get("data", []):
+        print(v["id"])
+
+
+def cmd_clone(a):
+    check_server()
+    ref = os.path.abspath(a.ref)
+    if not os.path.isfile(ref):
+        die(f"reference audio not found: {ref}")
+    out = a.out or default_out("clone")
+    t0 = time.time()
+    payload = {"model": a.model, "input": a.text, "ref_audio": ref, "response_format": "wav"}
+    if a.ref_text:
+        payload["ref_text"] = a.ref_text
+    elif "qwen3" in a.model.lower():
+        die("--ref-text (exact words spoken in the reference) is required for Qwen3-TTS; "
+            "get it with: voice transcribe <ref.wav>")
+    data = post_json("/v1/audio/speech", payload)
+    write_audio(data, out)
+    print(f"{out}  ({len(data)} bytes, {time.time()-t0:.1f}s, model {a.model})")
+
+
+def multipart(fields, filepath):
+    boundary = uuid.uuid4().hex
+    body = b""
+    for k, v in fields.items():
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").encode()
+    with open(filepath, "rb") as f:
+        fdata = f.read()
+    body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+             f"filename=\"{os.path.basename(filepath)}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
+    body += fdata + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
+def srt_time(s):
+    ms = int(round(s * 1000))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    sec, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
+
+
+def cmd_transcribe(a):
+    check_server()
+    if not os.path.isfile(a.file):
+        die(f"file not found: {a.file}")
+    body, ctype = multipart({"model": WHISPER}, a.file)
+    req = urllib.request.Request(SERVER + "/v1/audio/transcriptions", data=body,
+                                 headers={"Content-Type": ctype}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=1800) as r:
+            d = json.load(r)
+    except urllib.error.HTTPError as e:
+        die(f"server {e.code}: {e.read().decode(errors='replace')[:400]}")
+    if a.json:
+        print(json.dumps(d, indent=1))
+    elif a.srt:
+        for i, seg in enumerate(d.get("segments", []), 1):
+            print(f"{i}\n{srt_time(seg['start'])} --> {srt_time(seg['end'])}\n{seg['text'].strip()}\n")
+    else:
+        print(d.get("text", "").strip())
+
+
+ENHANCE_PY = r'''
+import sys, numpy as np, soundfile as sf
+from pedalboard import Pedalboard, HighpassFilter, Compressor, Limiter
+src, dst = sys.argv[1], sys.argv[2]
+x, sr = sf.read(src, dtype="float32", always_2d=True)
+board = Pedalboard([
+    HighpassFilter(cutoff_frequency_hz=80.0),
+    Compressor(threshold_db=-18.0, ratio=3.0, attack_ms=5.0, release_ms=120.0),
+    Limiter(threshold_db=-1.0, release_ms=100.0),
+])
+y = board(x.T, sr).T
+sf.write(dst, y, sr, subtype="PCM_16")
+'''
+
+
+def cmd_enhance(a):
+    if not os.path.isfile(a.infile):
+        die(f"file not found: {a.infile}")
+    if not os.path.isfile(TOOLS_PY):
+        die(f"tools venv missing: {TOOLS_PY}")
+    if not os.path.isfile(FFMPEG):
+        die(f"ffmpeg missing: {FFMPEG}")
+    tmp = a.outfile + ".stage1.wav"
+    r = subprocess.run([TOOLS_PY, "-c", ENHANCE_PY, a.infile, tmp], capture_output=True, text=True)
+    if r.returncode != 0:
+        die(f"pedalboard stage failed:\n{r.stderr[-800:]}")
+    # two-pass loudnorm: measure, then normalize with measured values (linear mode, accurate to ~0.1 LU)
+    target = f"I={a.lufs}:TP=-1.5:LRA=11"
+    m1 = subprocess.run([FFMPEG, "-v", "info", "-i", tmp, "-af", f"loudnorm={target}:print_format=json",
+                         "-f", "null", "-"], capture_output=True, text=True).stderr
+    af = f"loudnorm={target}"
+    if "input_i" in m1:
+        meas = json.loads(m1[m1.rindex("{"):m1.rindex("}") + 1])
+        af += (f":measured_I={meas['input_i']}:measured_TP={meas['input_tp']}:measured_LRA={meas['input_lra']}"
+               f":measured_thresh={meas['input_thresh']}:offset={meas['target_offset']}:linear=true")
+    r = subprocess.run([FFMPEG, "-y", "-v", "error", "-i", tmp, "-af", af, "-ar", "24000", "-ac", "1",
+                        a.outfile], capture_output=True, text=True)
+    os.unlink(tmp)
+    if r.returncode != 0:
+        die(f"ffmpeg loudnorm failed:\n{r.stderr[-800:]}")
+    # report measured loudness
+    m = subprocess.run([FFMPEG, "-v", "info", "-i", a.outfile, "-af", "loudnorm=print_format=json",
+                        "-f", "null", "-"], capture_output=True, text=True).stderr
+    lufs = "?"
+    if '"input_i"' in m:
+        lufs = m.split('"input_i"')[1].split('"')[1]
+    print(f"{a.outfile}  (highpass 80Hz, comp 3:1, limiter -1dB, loudnorm -> {lufs} LUFS)")
+
+
+def cmd_status(a):
+    try:
+        with urllib.request.urlopen(SERVER + "/v1/models", timeout=3) as r:
+            d = json.load(r)
+        print(f"server: up at {SERVER}")
+        for m in d.get("data", []):
+            print(f"  loaded: {m.get('id')}")
+    except Exception as e:
+        print(f"server: DOWN ({e}). Start it: stack start audio")
+        sys.exit(1)
+
+
+def main():
+    p = argparse.ArgumentParser(prog="voice", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sp = p.add_subparsers(dest="cmd", required=True)
+
+    s = sp.add_parser("say", help="Kokoro TTS via server"); s.add_argument("text")
+    s.add_argument("--voice", default="af_heart"); s.add_argument("--out")
+    s.add_argument("--speed", type=float, default=1.0); s.set_defaults(fn=cmd_say)
+
+    s = sp.add_parser("voices", help="list Kokoro voices"); s.set_defaults(fn=cmd_voices)
+
+    s = sp.add_parser("clone", help="voice clone from reference wav + its transcript")
+    s.add_argument("text"); s.add_argument("--ref", required=True)
+    s.add_argument("--ref-text", dest="ref_text", help="exact words in --ref (required for Qwen3-TTS, optional for Chatterbox)")
+    s.add_argument("--out"); s.add_argument("--model", default=CLONE_MODEL); s.set_defaults(fn=cmd_clone)
+
+    s = sp.add_parser("transcribe", help="Whisper STT via server"); s.add_argument("file")
+    s.add_argument("--srt", action="store_true"); s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_transcribe)
+
+    s = sp.add_parser("enhance", help="highpass/compress/limit + -16 LUFS normalize")
+    s.add_argument("infile"); s.add_argument("outfile")
+    s.add_argument("--lufs", type=float, default=-16.0); s.set_defaults(fn=cmd_enhance)
+
+    s = sp.add_parser("status", help="is the server up / which models are loaded"); s.set_defaults(fn=cmd_status)
+
+    a = p.parse_args()
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()
