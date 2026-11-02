@@ -40,3 +40,9 @@ scratch/*.mp4
 scratch/*.gif
 scratch/*.jpg
 scratch/*.srt
+
+# local assets never go to GitHub (the installer regenerates/downloads; gold-standard stays on this Mac)
+*.glb
+*.gltf
+gold-standard/
+rig/joints_*.json
