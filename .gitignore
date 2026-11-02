@@ -63,3 +63,9 @@ game/*/node_modules/
 game/*/dist/
 game/*/build/
 game/*/.godot/
+
+# games built WITH the studio are not part of the studio: only templates/, tools/ and new_project.sh ship
+game/*
+!game/templates/
+!game/tools/
+!game/new_project.sh
