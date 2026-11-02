@@ -46,8 +46,8 @@ are copy-pasteable as written.
 | Fix / rig / render a mesh | Blender via `~/media-stack/bin/blender -b -P script.py` | `local-media-stack`, `blender` |
 | Parametric part → STL → G-code | `cad_examples/*.py`, `meshcheck.py`, `slice --preset bambu|generic` | `studio-3d-print` |
 | View asset in VR / build SteamVR app | Godot room, `optimize_glb.sh`, WebXR room | `studio-vr` |
-| 2D/3D game prototype, run/export Godot headless | `~/media-stack/game/new_project.sh 2d\|3d Name dest` | `studio-game` |
-| Playable 3D game in the browser (Three.js + TS + Vite) | hand-written `package.json` + `npm install`, procedural textures / WebAudio | `browser-3d-game` |
+| 2D/3D Godot prototype, or a Three.js page | `game/new_project.sh 2d\|3d\|web Name dest` — Godot for desktop physics and export, `web` for the browser | `studio-game` |
+| Gravity, rigid bodies, triggers, raycasts, a baked drop | Godot bodies in the game templates; `tools/physics/rigid_drop.py` for a Blender shot | `studio-physics` |
 | Auto-rig + test cycle → GLB, Grease Pencil 2D, sprite sheets, Krita/Tahoma2D path | `tools/anim/rigify_auto.py`, `gp_anim.py`, `spritesheet.py` | `studio-animation` |
 | Vector / raster hand-editing (human) | Inkscape, Krita, Audacity, OpenSCAD, MeshLab in /Applications | — |
 
