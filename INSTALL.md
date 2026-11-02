@@ -1,4 +1,6 @@
-# Installing the studio on another Mac
+# Installing on Apple Silicon
+
+Any other OS: start with `python3 tools/forge/install.py` (see the README). This file is the Homebrew path.
 
 > Linux / NVIDIA box instead? See [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md).
 

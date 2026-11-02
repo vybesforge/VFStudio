@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -252,6 +253,65 @@ class RuleTests(unittest.TestCase):
         self.assertIn("kokoro-82m", {m["id"] for m in result["hf"]["essentials"]})
         self.assertIn("qwen3.8-27b-writer", {m["id"] for m in result["hf"]["skip"]})
 
+    def test_engines_follow_the_detected_class(self):
+        expect = {
+            "nvidia-32gb": ("cuda", "fp8", "cuda", 0),
+            "nvidia-16gb": ("cuda", "gguf", "cuda", 0),
+            "amd-8gb": ("rocm", "gguf", "cuda", 0),
+            "apple-64gb": ("mlx", "gguf", "mps", None),
+            "cpu": ("cpu", "skip", "cpu", None),
+        }
+        for name, (backend, edit, stems, gpu) in expect.items():
+            eng = run(name)["engines"]
+            self.assertEqual(eng["backend"], backend, name)
+            self.assertEqual(eng["image"]["edit"], edit, name)
+            self.assertEqual(eng["stems"]["device"], stems, name)
+            self.assertEqual(eng["gpu_index"], gpu, name)
+            self.assertEqual(eng["print"]["device"], "cpu")
+        # the second, smaller card is not the one we plan for
+        eng = run("nvidia-32gb")["engines"]
+        self.assertEqual(eng["gpu_name"], "NVIDIA 32 GB")
+
+    def test_uncensored_writer_is_opt_in_off_apple(self):
+        plain = run("nvidia-32gb")
+        row = next(m for tier in plain["hf"].values() for m in tier if m["id"] == "qwen3.8-27b-uncensored-gguf")
+        self.assertEqual(row["bucket"], "skip")
+        self.assertIn("opt-in", row["reason"])
+        machine = rec.fixture_machine("nvidia-32gb")
+        machine["uncensored"] = True
+        chosen = rec.recommend(load(), machine)
+        row = next(m for tier in chosen["hf"].values() for m in tier if m["id"] == "qwen3.8-27b-uncensored-gguf")
+        self.assertEqual(row["bucket"], "quality")
+        self.assertTrue(row["uncensored"])
+        self.assertIn("uncensored", run("apple-64gb")["engines"]["llm"]["note"])
+
+    def test_preflight_blocks_flux_without_a_token(self):
+        ids = rec.ids_for(run("nvidia-32gb"), "recommended")
+        self.assertIn("flux1-dev-fp8", ids)
+        os_token = os.environ.pop("HF_TOKEN", None)
+        os_hub = os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+        os_skip = os.environ.pop("VF_SKIP_GATE", None)
+        try:
+            report = rec.preflight(load(), ids)
+            self.assertFalse(report["ok"])
+            self.assertIn("flux1-dev-fp8", report["blocked"])
+            os.environ["HF_TOKEN"] = "test-token-not-a-secret"
+            self.assertTrue(rec.preflight(load(), ids)["ok"])
+            self.assertNotIn("test-token", json.dumps(rec.preflight(load(), ["realesrgan-x4plus"])))
+        finally:
+            if os_token is None:
+                os.environ.pop("HF_TOKEN", None)
+            else:
+                os.environ["HF_TOKEN"] = os_token
+            if os_hub is None:
+                os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+            else:
+                os.environ["HUGGING_FACE_HUB_TOKEN"] = os_hub
+            if os_skip is None:
+                os.environ.pop("VF_SKIP_GATE", None)
+            else:
+                os.environ["VF_SKIP_GATE"] = os_skip
+
 
 class ProbeTests(unittest.TestCase):
     def test_classify(self):
@@ -291,6 +351,9 @@ class ProbeTests(unittest.TestCase):
             ROOT / "INSTALL.md",
             ROOT / "INSTALL-UBUNTU.md",
             ROOT / "models" / "manifest.json",
+            ROOT / "SMOKE.md",
+            ROOT / "tools" / "forge" / "install.py",
+            ROOT / "install.ps1",
         ]
         for path in files:
             text = path.read_text()
@@ -337,6 +400,13 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(refused.returncode, 2)
         self.assertIn("refusing", refused.stderr)
+
+    def test_install_plan_uses_the_fixture_backend(self):
+        script = ROOT / "tools" / "forge" / "install.py"
+        out = subprocess.check_output([sys.executable, str(script), "--fixture", "amd-8gb"], text=True)
+        self.assertIn("engine   rocm", out)
+        self.assertIn("speaches", out)
+        self.assertNotIn("billie", out)
 
 
 if __name__ == "__main__":

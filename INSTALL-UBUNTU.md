@@ -1,6 +1,8 @@
-# VF Studio on Ubuntu (NVIDIA)
+# CUDA and ROCm stand-ins
 
-The stack was built and measured on an M3 Max Mac. It ports to Ubuntu, but **three of the
+Start with `python3 tools/forge/install.py`. It probes the machine and writes `run/forge-engines.json`. This file is the detail for a discrete GPU: ComfyUI on CUDA or ROCm, speaches for voice, llama-server for the writer and for vision. MLX weights are not loaded here.
+
+The stack was first exercised on Apple Silicon. It ports to Linux, but **three of the
 five services are Apple-only (MLX)** and need CUDA stand-ins. Everything else — ComfyUI, the
 `gen`/`vid`/`slice`/`stems`/`lora` CLIs, the panel, Blender/Godot/OrcaSlicer tooling, the
 skills — is plain Python + ffmpeg and runs unchanged.

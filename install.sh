@@ -31,7 +31,10 @@ for a in "$@"; do case "$a" in
 STACK="$HOME/media-stack"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 [ "$HERE" = "$STACK" ] || { echo "This repo must live at $STACK (found $HERE). mv it there and re-run." >&2; exit 1; }
-[ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ] || { echo "Apple Silicon macOS only." >&2; exit 1; }
+# Apple Silicon keeps the Homebrew path below. Every other OS uses the probe-driven installer.
+if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+  exec python3 "$HERE/tools/forge/install.py" "$@"
+fi
 
 say()  { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
@@ -187,6 +190,7 @@ ok "gen voice vid scribe see stems stack fetch-models forge-recommend blender ->
 
 # ─── 7. models ──────────────────────────────────────────────────────────────────
 say "models"
+python3 "$STACK/tools/forge/install.py" --write-engines || echo "   (engine map not written — bin/forge-recommend still works)"
 if [ "$ALL_MODELS" = 1 ]; then
   "$STACK/bin/fetch-models"
 else
@@ -211,6 +215,7 @@ PY
 fi
 printf '%s\n' "$HF_REPOS" | while read -r repo; do
   [ -z "$repo" ] && continue
+  if [ "${VF_UNCENSORED:-}" != "1" ] && [[ "$repo" == *Uncensored* ]]; then echo "   skip $repo (labeled uncensored — opt in with VF_UNCENSORED=1)"; continue; fi
   if [ "$ALL_MODELS" = 0 ] && [[ "$repo" == *27B* ]]; then echo "   skip $repo (27B writer — fetch with --all-models or: hf download $repo)"; continue; fi
   "$STACK/llm/.venv/bin/hf" download "$repo" >/dev/null 2>&1 && ok "$repo" || echo "   ✗ $repo (re-run install.sh to resume)"
 done

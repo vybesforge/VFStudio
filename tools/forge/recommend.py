@@ -409,9 +409,24 @@ def _disk(path: Path) -> tuple[float, str, str | None]:
 _PROBE_CACHE: dict = {"t": 0.0, "key": None, "machine": None}
 
 
+def _probe_key(stack: Path) -> str:
+    """Changes when the manifest or the visible GPUs change, so a stale probe is not reused."""
+    man = stack / "models" / "manifest.json"
+    try:
+        mtime = str(man.stat().st_mtime_ns)
+    except OSError:
+        mtime = "0"
+    smi = _run([
+        "nvidia-smi", "--query-gpu=index,name,memory.total",
+        "--format=csv,noheader,nounits",
+    ], timeout=2.0).strip()
+    flags = f"{os.environ.get('VF_GPU', '')}|{os.environ.get('VF_UNCENSORED', '')}"
+    return f"{stack}|{mtime}|{smi}|{flags}"
+
+
 def probe(stack: Path | None = None, *, ttl: float = 20.0) -> dict:
     stack = (stack or stack_root()).expanduser()
-    key = str(stack)
+    key = _probe_key(stack)
     now = time.monotonic()
     if _PROBE_CACHE["key"] == key and _PROBE_CACHE["machine"] and now - _PROBE_CACHE["t"] < ttl:
         return copy.deepcopy(_PROBE_CACHE["machine"])
@@ -726,6 +741,8 @@ def recommend(manifest: dict, machine: dict) -> dict:
             "reason": reason,
             "companion": bool(fit.get("companion")),
             "includes": list(fit.get("includes") or []),
+            "gate": fit.get("gate") or "open",
+            "license": fit.get("license") or "",
         })
 
     hf_rows = _recommend_hf(manifest.get("hf_models") or [], machine, _gb(by_id, {i for i, (b, _) in status.items() if b != "skip"}), budget if disk_checked else 10 ** 9, disk_checked)
@@ -761,6 +778,7 @@ def recommend(manifest: dict, machine: dict) -> dict:
             "ids": ids_for({"models": flat}, "recommended"),
             "command": "fetch-models --profile auto",
         },
+        "engines": engines(machine),
     }
 
 
@@ -773,6 +791,20 @@ def _recommend_hf(rows: list[dict], machine: dict, used_gb: float, budget: float
         if cls not in backends:
             out["skip"].append({**_hf_public(row), "bucket": "skip", "reason": row.get("other_os") or f"no {cls} path"})
             continue
+        if row.get("opt_in") and not machine.get("uncensored"):
+            out["skip"].append({
+                **_hf_public(row), "bucket": "skip",
+                "reason": "opt-in uncensored model — rerun with --uncensored or VF_UNCENSORED=1",
+            })
+            continue
+        if row.get("min_vram_gb") and cls in ("nvidia", "amd"):
+            need = float(row["min_vram_gb"])
+            if not _fits_number(float(machine["best_vram_gb"]), need, slack=VRAM_SLACK_GB):
+                out["skip"].append({
+                    **_hf_public(row), "bucket": "skip",
+                    "reason": f"needs {need:g} GB VRAM on one card (largest is {float(machine['best_vram_gb']):.0f} GB)",
+                })
+                continue
         if cls == "apple":
             need = float(row.get("min_unified_gb") or 0)
             if not _fits_number(float(machine["ram_gb"]), need, slack=0):
@@ -801,7 +833,12 @@ def _recommend_hf(rows: list[dict], machine: dict, used_gb: float, budget: float
 
 
 def _hf_public(row: dict) -> dict:
-    return {"id": row["id"], "repo": row.get("repo"), "gb": row.get("gb"), "task": row.get("task"), "role": row.get("role")}
+    return {
+        "id": row["id"], "repo": row.get("repo"), "gb": row.get("gb"), "task": row.get("task"),
+        "role": row.get("role"), "uncensored": bool(row.get("uncensored")),
+        "gate": row.get("gate") or "open", "license": row.get("license") or "",
+        "opt_in": bool(row.get("opt_in")), "fetch": row.get("fetch", True),
+    }
 
 
 def _advice(machine: dict) -> list[str]:
@@ -949,6 +986,9 @@ def render_text(result: dict) -> str:
     else:
         budget = "no GPU"
     lines.append(f"  gpu     {cls}   fitting budget {budget}")
+    eng = result.get("engines") or {}
+    if eng:
+        lines.append(f"  engine  {eng.get('backend')}   card {eng.get('gpu_index')} {eng.get('gpu_name') or ''}".rstrip())
     for g in m.get("gpus") or []:
         vram = f"{g['vram_gb']} GB" if g.get("vram_gb") else "unified"
         driver = f"driver {g['driver']}" if g.get("driver") else "driver n/a"
@@ -1005,6 +1045,126 @@ def render_text(result: dict) -> str:
     return "\n".join(lines)
 
 
+def select_gpu(machine: dict, gpu_index: int | None = None) -> dict | None:
+    """Largest discrete card, or the card VF_GPU / gpu_index names. Never sums VRAM."""
+    gpus = list(machine.get("gpus") or [])
+    if gpu_index is not None:
+        for g in gpus:
+            if g.get("index") == gpu_index:
+                return g
+        return None
+    discrete = [g for g in gpus if g.get("vendor") in ("nvidia", "amd") and g.get("vram_gb")]
+    if not discrete:
+        return None
+    return max(discrete, key=lambda g: float(g["vram_gb"]))
+
+
+def engines(machine: dict, *, uncensored: bool | None = None, gpu_index: int | None = None) -> dict:
+    """Which local engine each modality should use on this machine.
+
+    CUDA and ROCm share ComfyUI. MLX stays on Apple Silicon. CPU is the fallback
+    only where the tool can actually run (upscale, stems, print) — not for diffusion.
+    """
+    machine = normalize(machine)
+    if uncensored is None:
+        uncensored = bool(machine.get("uncensored"))
+    if gpu_index is None and machine.get("gpu_index") is not None:
+        gpu_index = machine.get("gpu_index")
+    cls = machine["gpu_class"]
+    backend = {"nvidia": "cuda", "amd": "rocm", "apple": "mlx", "cpu": "cpu"}.get(cls, "cpu")
+    gpu = select_gpu(machine, gpu_index)
+    comfy_device = "mps" if cls == "apple" else ("cpu" if cls == "cpu" else "cuda")
+    vram = float(gpu["vram_gb"]) if gpu and gpu.get("vram_gb") else float(machine.get("best_vram_gb") or 0)
+    diffusion = cls != "cpu"
+    edit = "skip" if not diffusion else ("fp8" if backend in ("cuda", "rocm") and _fits_number(vram, 24, slack=VRAM_SLACK_GB) else "gguf")
+    if cls == "apple":
+        audio_engine, audio_note = "mlx-audio", "Kokoro / Parakeet / Qwen3-TTS through the MLX audio server."
+        llm_engine = "mlx-lm"
+        vlm_engine, vlm_model = "mlx-vlm", "mlx-community/Qwen3-VL-8B-Instruct-4bit"
+        vlm_note = "Local vision through MLX."
+        clone_note = "Voice clone through the MLX audio server."
+    else:
+        audio_engine, audio_note = "speaches", "Kokoro and faster-whisper through speaches. MLX weights are not loaded."
+        llm_engine = "llama-server"
+        vlm_engine, vlm_model = "llama-server", ""
+        vlm_note = "Qwen3-VL GGUF plus its mmproj, via llama-server. Set VLM_GGUF and VLM_MMPROJ."
+        clone_note = "No MLX clone here. Point VOICE_SERVER at a local PyTorch cloner if you run one."
+    if cls == "apple":
+        writer, writer_note = (
+            "mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit",
+            "Labeled uncensored writer. This is the Apple default; the CUDA/ROCm build of the same choice is opt-in.",
+        )
+    elif uncensored:
+        writer, writer_note = (
+            os.environ.get("WRITER_GGUF") or "",
+            "Labeled uncensored writer (opt-in). Point llama-server at a local GGUF with WRITER_GGUF. Not auto-downloaded.",
+        )
+    else:
+        writer, writer_note = (
+            os.environ.get("LLM_MODEL") or "",
+            "Set LLM_MODEL to a local GGUF, or VF_UNCENSORED=1 for the labeled uncensored writer.",
+        )
+    stems_device = "mps" if cls == "apple" else ("cuda" if cls in ("nvidia", "amd") else "cpu")
+    stems_note = {
+        "apple": "Demucs on Metal.",
+        "nvidia": "Demucs on CUDA.",
+        "amd": "Demucs on ROCm (PyTorch still calls the device cuda).",
+        "cpu": "Demucs on CPU. Slow, and it runs.",
+    }[cls if cls in ("apple", "nvidia", "amd", "cpu") else "cpu"]
+
+    def row(engine: str, note: str, runnable: bool, **extra: object) -> dict:
+        out = {
+            "engine": engine, "backend": backend, "device": extra.pop("device", comfy_device),
+            "note": note, "runnable": runnable,
+        }
+        out.update(extra)
+        return out
+
+    heavy = diffusion and (cls == "apple" or _fits_number(vram, 12, slack=VRAM_SLACK_GB))
+    return {
+        "backend": backend,
+        "gpu_index": None if gpu is None else gpu.get("index"),
+        "gpu_name": None if gpu is None else gpu.get("name"),
+        "uncensored": bool(uncensored),
+        "image": row("comfy", "ComfyUI. Edit weights follow the card: fp8 on large CUDA/ROCm, GGUF otherwise." if diffusion else "No GPU — diffusion is not a CPU path. Upscalers still run.", diffusion, edit=edit),
+        "video": row("comfy", "ComfyUI. Wan is the light clip; HunyuanVideo is the heavier one.", heavy),
+        "sfx": row("comfy", "Sound effects through ComfyUI (Stable Audio).", diffusion),
+        "music": row("comfy", "ACE-Step through ComfyUI. MiniMax via MLX is Apple-only.", diffusion),
+        "tts": row(audio_engine, audio_note, cls == "apple" or backend in ("cuda", "rocm")),
+        "stt": row(audio_engine, audio_note, cls == "apple" or backend in ("cuda", "rocm")),
+        "clone": row("mlx-audio" if cls == "apple" else "pytorch", clone_note, cls == "apple"),
+        "llm": row(llm_engine, writer_note, bool(writer) or cls != "cpu", model=writer),
+        "vision": row(vlm_engine, vlm_note, cls == "apple" or backend in ("cuda", "rocm"), model=vlm_model),
+        "stems": row("demucs", stems_note, True, device=stems_device),
+        "3d": row("comfy", "TRELLIS.2 through ComfyUI, same device as image.", heavy),
+        "print": row("cpu", "Mesh check and slice are CPU tools.", True, device="cpu"),
+    }
+
+
+def preflight(manifest: dict, ids: list[str] | None = None) -> dict:
+    """Offline gate check. Does not download and does not print a token.
+
+    gate hf-login blocks unless HF_TOKEN, HUGGING_FACE_HUB_TOKEN, or VF_SKIP_GATE is set.
+    gate notice is a license reminder and does not block.
+    """
+    by = {m["id"]: m for m in manifest.get("models") or []}
+    wanted = list(ids) if ids is not None else [m["id"] for m in manifest.get("models") or []]
+    token = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("VF_SKIP_GATE"))
+    rows = []
+    blocked = []
+    for i in wanted:
+        model = by.get(i)
+        if not model:
+            continue
+        fit = model.get("fit") or {}
+        gate = fit.get("gate") or "open"
+        row = {"id": i, "gate": gate, "license": fit.get("license") or ""}
+        rows.append(row)
+        if gate == "hf-login" and not token:
+            blocked.append(i)
+    return {"ok": not blocked, "blocked": blocked, "token_present": token, "models": [r for r in rows if r["gate"] != "open"]}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="forge-recommend",
@@ -1022,7 +1182,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixture", choices=sorted(FIXTURES),
                         help="synthetic hardware profile for tests; skips the live probe")
     parser.add_argument("--stack", help="stack root (manifest + disk). Default: this repo, or MEDIA_STACK, or ~/media-stack")
+    parser.add_argument("--uncensored", action="store_true", help="include the labeled opt-in uncensored writer")
+    parser.add_argument("--gpu", type=int, default=None, help="discrete GPU index to plan for (default: largest card)")
+    parser.add_argument("--engines", action="store_true", help="print the per-modality engine map as JSON")
+    parser.add_argument("--preflight", action="store_true", help="print license/gate notes for the ids about to be fetched; exit 3 if a login is required and no token is set")
+    parser.add_argument("--every", action="store_true", help="with --preflight, check every manifest model instead of the recommended tier")
     parser.add_argument("--dry-run", action="store_true", help="accepted for symmetry; this command never downloads")
+    parser.add_argument("check_ids", nargs="*", help="with --preflight, only these model ids")
     args = parser.parse_args(argv)
 
     stack = Path(args.stack).expanduser() if args.stack else stack_root()
@@ -1030,11 +1196,44 @@ def main(argv: list[str] | None = None) -> int:
         machine = fixture_machine(args.fixture)
     else:
         machine = probe(stack)
-    # Disk and presence follow the real stack unless the fixture froze them.
     if args.fixture and args.stack:
         machine["disk_path"] = str(stack)
+    if args.uncensored or os.environ.get("VF_UNCENSORED") == "1":
+        machine["uncensored"] = True
+    if args.gpu is not None:
+        machine["gpu_index"] = args.gpu
+    elif os.environ.get("VF_GPU", "").strip().lstrip("-").isdigit():
+        machine["gpu_index"] = int(os.environ["VF_GPU"])
     manifest = load_manifest(stack / "models" / "manifest.json")
+    if args.preflight and (args.check_ids or args.every):
+        wanted = args.check_ids or [m["id"] for m in manifest.get("models") or []]
+        report = preflight(manifest, wanted)
+        json.dump(report, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        if not report["ok"]:
+            print("fix: huggingface-cli login   or export HF_TOKEN   (never commit it). VF_SKIP_GATE=1 continues anyway.", file=sys.stderr)
+            return 3
+        return 0
     result = recommend(manifest, machine)
+    if not args.fixture:
+        try:
+            outp = stack / "run" / "forge-engines.json"
+            outp.parent.mkdir(parents=True, exist_ok=True)
+            outp.write_text(json.dumps({"engines": result["engines"], "backend": result["engines"]["backend"]}, indent=2) + "\n")
+        except OSError:
+            pass
+    if args.preflight:
+        report = preflight(manifest, ids_for(result, args.tier if args.tier != "recommended" else "recommended"))
+        json.dump(report, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        if not report["ok"]:
+            print("fix: huggingface-cli login   or export HF_TOKEN   (never commit it). VF_SKIP_GATE=1 continues anyway.", file=sys.stderr)
+            return 3
+        return 0
+    if args.engines:
+        json.dump(result["engines"], sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 0
     if args.ids:
         print(" ".join(ids_for(result, args.tier)))
         return 0

@@ -128,6 +128,14 @@ if [ -n "$token" ]; then
   auth=(-H "Authorization: Bearer $token")
 fi
 hinted=0
+if [ "$mode" = "fetch" ] && [ "$dry" -eq 0 ]; then
+  if [ "${#ids[@]}" -eq 0 ]; then
+    "$PY" "$REC" --preflight --every --stack "$STACK" || exit $?
+  else
+    "$PY" "$REC" --preflight --stack "$STACK" -- "${ids[@]}" || exit $?
+  fi
+fi
+
 missing=0
 while IFS='|' read -r id path url gb role; do
   [ -z "$id" ] && continue

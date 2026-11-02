@@ -21,7 +21,9 @@
           "amd",
           "apple"
         ],
-        "note": "Best text, slow. 17.2 GB fp8 file: comfortable from 24 GB VRAM; a 16 GB card streams it. On Apple Silicon fp8 upcasts toward ~34 GB."
+        "note": "Best text, slow. 17.2 GB fp8 file: comfortable from 24 GB VRAM; a 16 GB card streams it. On Apple Silicon fp8 upcasts toward ~34 GB.",
+        "license": "FLUX.1 [dev] Non-Commercial License",
+        "gate": "hf-login"
       }
     },
     {
@@ -147,7 +149,9 @@
         "includes": [
           "t5gemma-b-b-ul2"
         ],
-        "note": "Purpose-built sound effects. Faster than Stable Audio Open when the card can hold it."
+        "note": "Purpose-built sound effects. Faster than Stable Audio Open when the card can hold it.",
+        "license": "Stability AI Community License",
+        "gate": "notice"
       }
     },
     {
@@ -390,7 +394,9 @@
         "includes": [
           "t5gemma-b-b-ul2"
         ],
-        "note": "Longer music and ambience. Heavier than Small-SFX and Stable Audio Open."
+        "note": "Longer music and ambience. Heavier than Small-SFX and Stable Audio Open.",
+        "license": "Stability AI Community License",
+        "gate": "notice"
       }
     },
     {
@@ -724,8 +730,30 @@
         "apple"
       ],
       "min_unified_gb": 48,
-      "note": "Uncensored writer on :8081. About 16 GB. Fits beside Z-Image in 64 GB; unload before Flux or Qwen-Edit.",
-      "other_os": "MLX-only file. On NVIDIA/AMD use a GGUF via llama-server (INSTALL-UBUNTU.md \u00a76): 27B Q4 time-shares a 32 GB card; use a \u226414B Q4 on 16 GB. Not fetched here."
+      "note": "Labeled uncensored writer. Apple default. About 16 GB. Not the silent choice on CUDA or ROCm.",
+      "other_os": "MLX-only file. On NVIDIA/AMD use a GGUF via llama-server (INSTALL-UBUNTU.md \u00a76): 27B Q4 time-shares a 32 GB card; use a \u226414B Q4 on 16 GB. Not fetched here.",
+      "uncensored": true,
+      "license": "Upstream Qwen license plus the community uncensored build. Labeled uncensored."
+    },
+    {
+      "id": "qwen3.8-27b-uncensored-gguf",
+      "repo": "",
+      "role": "writer LLM, uncensored GGUF (opt-in)",
+      "task": "llm",
+      "gb": 16,
+      "tier": "quality",
+      "backends": [
+        "nvidia",
+        "amd"
+      ],
+      "min_vram_gb": 20,
+      "uncensored": true,
+      "opt_in": true,
+      "fetch": false,
+      "gate": "notice",
+      "license": "Match the GGUF card you download. Do not assume the MLX file's terms cover a different build.",
+      "note": "Opt-in uncensored writer for CUDA and ROCm. Set WRITER_GGUF to a local file and run with --uncensored. Not downloaded by fetch-models.",
+      "other_os": "Not an MLX file. On Apple Silicon the labeled uncensored writer is qwen3.8-27b-writer."
     }
   ]
 }
