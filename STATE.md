@@ -10,8 +10,7 @@ card per service with that service's **endpoint tiles inside it** — mlx-audio 
 grid and flip every link between `127.0.0.1` and the LAN IP (`192.168.1.44`). The service card's status
 pill is the start/stop toggle. Cards re-render only when the host changes — status updates patch the pill
 and port line in place, so an open log or curl panel is not collapsed by the 2.5 s poll.
-The status pill on each service card is itself the start/stop toggle (running → click stops, stopped →
-click starts; verified both directions on ComfyUI, which came back responding in 6 s).
+Verified both toggle directions on the pill (ComfyUI came back responding in 6 s).
 Verified live: TTS returned a 24 kHz wav, STT transcribed `output/voice/clone_*.wav`, `/object_info`
 returned 1033 nodes; clipboards checked by stubbing `navigator.clipboard.writeText`. Caveat: the
 LLM/VLM rows were checked against `tools/llm/scribe` + `tools/vision/see` request bodies, not by
