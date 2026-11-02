@@ -1,4 +1,4 @@
-#!/Users/dcruse/media-stack/audio/.venv/bin/python
+#!/home/billie/media-stack/tools/.venv/bin/python
 """voice — local TTS / voice-clone / STT / enhance CLI over the mlx-audio server.
 
 Everything runs on this Mac (mlx-audio at 127.0.0.1:8000). No cloud calls.

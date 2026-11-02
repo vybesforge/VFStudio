@@ -1,4 +1,4 @@
-#!/Users/dcruse/media-stack/tools/.venv/bin/python
+#!/home/billie/media-stack/tools/.venv/bin/python
 """slice - headless OrcaSlicer wrapper: STL/3MF -> G-code + sliced 3MF + stats.
 
 Usage:

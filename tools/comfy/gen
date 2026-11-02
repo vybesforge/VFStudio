@@ -1,4 +1,4 @@
-#!/Users/dcruse/media-stack/tools/.venv/bin/python
+#!/home/billie/media-stack/tools/.venv/bin/python
 """gen — one CLI for every ComfyUI generation pipeline on this Mac.
 
   gen image  "prompt" [--model zimage|klein|flux] [--w 1024 --h 1024] [--steps N] [--seed N] [--n 1]

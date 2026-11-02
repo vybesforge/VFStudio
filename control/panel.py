@@ -19,6 +19,7 @@ import signal
 import socket
 import struct
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -85,6 +86,40 @@ SERVICES = {
     },
 }
 
+if sys.platform.startswith("linux"):
+    # ---- NVIDIA/Linux overrides (billie): reuse the services that already run here ----
+    # ComfyUI runs as comfyui-v100.service on :8189; bin/comfy-shim fronts it on :8188.
+    # The MLX servers from the Mac build do not exist on this box, so audio/llm/vision are
+    # monitored through the ports billie's own services already answer on.
+    SERVICES["comfy"].update({
+        "external": "comfyui-v100.service (:8189, shimmed to :8188)",
+        "desc": "Image, video + 3D generation (ComfyUI on the V100, :8189 via shim)",
+    })
+    SERVICES["audio"] = {
+        "label": "voice (chatterbox + whisper)",
+        "port": int(os.environ.get("TTS_PORT", "3200")),
+        "cmd": None,
+        "cwd": str(STACK),
+        "external": "voice-tts.service :3200 · voice-stt.service :3201",
+        "desc": "TTS / STT — billie's local voice services",
+    }
+    SERVICES["llm"] = {
+        "label": "writer LLM",
+        "port": int(os.environ.get("LLM_PORT", "8000")),
+        "cmd": None,
+        "cwd": str(STACK),
+        "external": "llama-server :8000 (pepper-brain local mode)",
+        "desc": "OpenAI-compatible chat · local llama-server (:8000)",
+    }
+    SERVICES["vision"] = {
+        "label": "vision VLM",
+        "port": int(os.environ.get("VLM_PORT", "8200")),
+        "cmd": None,
+        "cwd": str(STACK),
+        "external": "vision-vl.service :8200",
+        "desc": "image understanding · Qwen3-VL-8B (:8200)",
+    }
+
 
 def port_open(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -114,6 +149,9 @@ def read_pid(name: str) -> int | None:
 
 def start(name: str) -> dict:
     svc = SERVICES[name]
+    if svc.get("cmd") is None:
+        return {"ok": False, "external": True,
+                "message": f"{svc['label']} is managed outside the panel ({svc.get('external','system service')})"}
     if read_pid(name) or port_open(svc["port"]):
         return {"ok": True, "already": True, "message": f"{svc['label']} already running"}
     log = LOGS / f"{name}.log"
@@ -130,6 +168,9 @@ def start(name: str) -> dict:
 
 def stop(name: str) -> dict:
     svc = SERVICES[name]
+    if svc.get("cmd") is None:
+        return {"ok": False, "external": True,
+                "message": f"{svc['label']} is managed outside the panel ({svc.get('external','system service')}) — use systemctl --user"}
     pid = read_pid(name)
     if not pid:
         return {"ok": True, "already": True, "message": f"{svc['label']} not running"}
@@ -218,7 +259,28 @@ _RES_TTL = 1.2
 
 
 def _gpu_stats() -> dict:
-    """GPU utilisation via ioreg's IOAccelerator PerformanceStatistics (no root needed)."""
+    """GPU utilisation. Linux: nvidia-smi. macOS: ioreg's IOAccelerator (no root needed)."""
+    if sys.platform.startswith("linux"):
+        raw = _run(["nvidia-smi",
+                    "--query-gpu=index,name,utilization.gpu,memory.used,memory.total",
+                    "--format=csv,noheader,nounits"])
+        gpus = []
+        for line in raw.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 5:
+                continue
+            try:
+                gpus.append({"index": int(float(parts[0])), "name": parts[1],
+                             "util": int(float(parts[2])),
+                             "mem_used": int(float(parts[3])) * 1024 * 1024,
+                             "mem_total": int(float(parts[4])) * 1024 * 1024})
+            except ValueError:
+                continue
+        if not gpus:
+            return {"available": False}
+        g = gpus[0]
+        return {"available": True, "util": g["util"], "mem_used": g["mem_used"],
+                "mem_alloc": g["mem_total"], "name": g["name"], "gpus": gpus}
     raw = _run(["ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"])
     m = re.search(r'"PerformanceStatistics"\s*=\s*(\{.*?\})\s*\n', raw)
     if not m:
@@ -241,6 +303,22 @@ def _gpu_stats() -> dict:
 
 def _cpu_stats() -> dict:
     out = {}
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/stat") as f:
+                vals = [int(x) for x in f.readline().split()[1:]]
+            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+            total = sum(vals) or 1
+            out.update({"idle": round(100 * idle / total, 1),
+                        "busy": round(100 * (total - idle) / total, 1)})
+        except Exception:
+            pass
+        try:
+            with open("/proc/loadavg") as f:
+                out["load"] = [float(x) for x in f.read().split()[:3]]
+        except Exception:
+            pass
+        return out
     raw = _run(["top", "-l", "1", "-n", "0", "-s", "0"], timeout=4.0)
     m = re.search(r"CPU usage:\s*([\d.]+)% user,\s*([\d.]+)% sys,\s*([\d.]+)% idle", raw)
     if m:
@@ -253,6 +331,27 @@ def _cpu_stats() -> dict:
 
 
 def _mem_stats() -> dict:
+    if sys.platform.startswith("linux"):
+        info: dict[str, int] = {}
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, v = line.split(":", 1)
+                    info[k] = int(re.sub(r"[^\d]", "", v) or 0) * 1024
+        except Exception:
+            return {}
+        total = info.get("MemTotal", 0)
+        free = info.get("MemAvailable", info.get("MemFree", 0))
+        return {
+            "total": total,
+            "free": free,
+            "used": max(total - free, 0),
+            "wired": 0,
+            "compressed": info.get("SwapCached", 0),
+            "active": info.get("Active", 0),
+            "swap_total": info.get("SwapTotal", 0),
+            "swap_used": max(info.get("SwapTotal", 0) - info.get("SwapFree", 0), 0),
+        }
     total = 0
     try:
         total = int(_run(["sysctl", "-n", "hw.memsize"]).strip())
