@@ -1,31 +1,117 @@
 #!/usr/bin/env bash
-# fetch-models — download every model in models/manifest.json that is missing.
-# Resumable (curl -C -), sequential (one GPU box: don't saturate disk I/O while
-# a render runs), logs to logs/fetch-models.log.
+# fetch-models — download models from models/manifest.json that are missing.
+# Resumable (curl -C -), sequential, logs to logs/fetch-models.log.
 #
-#   fetch-models            # fetch everything missing
-#   fetch-models --list     # show manifest with present/missing
-#   fetch-models wan2.2-ti2v-5b z-image-turbo   # only these ids
-#   fetch-models --check    # exit 1 if anything is missing (for scripts)
+#   fetch-models                         # everything missing in the manifest
+#   fetch-models --list                  # present / missing
+#   fetch-models --check                 # exit 1 if anything is missing
+#   fetch-models --profile auto          # essentials + quality for THIS machine
+#   fetch-models --profile essentials    # smallest useful set
+#   fetch-models --profile full          # auto, plus optional models that fit
+#   fetch-models --dry-run --profile auto
+#   fetch-models --dry-run --profile auto --fixture billie
+#   fetch-models id [id...]              # only these ids
+#
+# Profiles come from bin/forge-recommend (hardware probe + manifest fit blocks).
+# A calibration fixture is refused unless --dry-run is set, so a laptop does not
+# silently download the V100 set. To do that on purpose:
+#   fetch-models $(bin/forge-recommend --fixture billie --ids)
+#
+# Gated URLs: huggingface-cli login, or export HF_TOKEN / HUGGING_FACE_HUB_TOKEN.
+# The token is sent as a bearer header and is never written into the repo.
 set -uo pipefail
-STACK="$HOME/media-stack"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$ROOT/models/manifest.json" ]; then
+  STACK="$ROOT"
+else
+  STACK="${MEDIA_STACK:-$HOME/media-stack}"
+fi
 MANIFEST="$STACK/models/manifest.json"
 MODELS="$STACK/ComfyUI/models"
 LOG="$STACK/logs/fetch-models.log"
-PY="$STACK/audio/.venv/bin/python"
+REC="$STACK/tools/forge/recommend.py"
+if [ -x "$STACK/audio/.venv/bin/python" ]; then
+  PY="$STACK/audio/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PY=python3
+else
+  PY=python
+fi
 mkdir -p "$STACK/logs"
 
-mode="fetch"; ids=()
-for a in "$@"; do
+mode="fetch"
+dry=0
+profile=""
+fixture=""
+ids=()
+args=("$@")
+i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  a="${args[$i]}"
   case "$a" in
     --list) mode="list" ;;
     --check) mode="check" ;;
+    --dry-run) dry=1 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    --profile)
+      i=$((i + 1))
+      profile="${args[$i]:-}"
+      [ -n "$profile" ] || { echo "usage: fetch-models --profile auto|essentials|quality|full" >&2; exit 2; }
+      ;;
+    --profile=*) profile="${a#*=}" ;;
+    --fixture)
+      i=$((i + 1))
+      fixture="${args[$i]:-}"
+      [ -n "$fixture" ] || { echo "usage: fetch-models --dry-run --profile auto --fixture NAME" >&2; exit 2; }
+      ;;
+    --fixture=*) fixture="${a#*=}" ;;
+    --*) echo "unknown flag $a" >&2; exit 2 ;;
     *) ids+=("$a") ;;
   esac
+  i=$((i + 1))
 done
 
-# id|path|url|gb  (filtered by ids if given)
-rows=$("$PY" - "$MANIFEST" "${ids[@]+"${ids[@]}"}" <<'EOF'
+if [ -n "$profile" ] && [ "${#ids[@]}" -gt 0 ]; then
+  echo "pass either --profile or model ids, not both" >&2
+  exit 2
+fi
+if [ -n "$fixture" ] && [ -z "$profile" ]; then
+  echo "--fixture is only meaningful with --profile (and --dry-run)" >&2
+  exit 2
+fi
+if [ -n "$fixture" ] && [ "$dry" -ne 1 ]; then
+  echo "refusing to download a calibration fixture onto this machine." >&2
+  echo "  bin/forge-recommend --fixture $fixture" >&2
+  echo "  fetch-models \$(bin/forge-recommend --fixture $fixture --ids)" >&2
+  exit 2
+fi
+
+if [ -n "$profile" ]; then
+  case "$profile" in
+    auto|quality) tier="recommended" ;;
+    essentials) tier="essentials" ;;
+    full) tier="all" ;;
+    *) echo "unknown profile $profile (auto, essentials, quality, full)" >&2; exit 2 ;;
+  esac
+  fix_args=()
+  [ -n "$fixture" ] && fix_args=(--fixture "$fixture")
+  if ! ids_line=$("$PY" "$REC" --ids --tier "$tier" --stack "$STACK" "${fix_args[@]}"); then
+    echo "forge-recommend failed" >&2
+    exit 1
+  fi
+  ids=()
+  if [ -n "${ids_line// /}" ]; then
+    read -r -a ids <<< "$ids_line"
+  fi
+  if [ "${#ids[@]}" -eq 0 ]; then
+    echo "profile $profile: nothing to fetch"
+    exit 0
+  fi
+  echo "profile $profile ($tier): ${#ids[@]} models"
+fi
+
+# id|path|url|gb|role  (filtered by ids if given)
+if ! rows=$("$PY" - "$MANIFEST" "${ids[@]+"${ids[@]}"}" <<'EOF'
 import json, sys
 m = json.load(open(sys.argv[1]))["models"]
 want = set(sys.argv[2:])
@@ -33,34 +119,58 @@ for e in m:
     if want and e["id"] not in want: continue
     print(f'{e["id"]}|{e["path"]}|{e["url"]}|{e["gb"]}|{e["role"]}')
 EOF
-)
+); then
+  echo "failed to read $MANIFEST" >&2
+  exit 1
+fi
 
+token="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
+auth=()
+if [ -n "$token" ]; then
+  auth=(-H "Authorization: Bearer $token")
+fi
+hinted=0
 missing=0
 while IFS='|' read -r id path url gb role; do
   [ -z "$id" ] && continue
   dest="$MODELS/$path"
   if [ -s "$dest" ]; then
-    [ "$mode" != "fetch" ] && printf "  ✓ %-28s %6s GB  %s\n" "$id" "$gb" "$role"
+    [ "$mode" != "fetch" ] || [ "$dry" -eq 1 ] && printf "  ✓ %-28s %6s GB  %s\n" "$id" "$gb" "$role"
     continue
   fi
-  missing=$((missing+1))
+  missing=$((missing + 1))
   case "$mode" in
     list)  printf "  ✗ %-28s %6s GB  %s\n" "$id" "$gb" "$role" ;;
     check) echo "missing: $id ($path)" ;;
     fetch)
+      if [ "$dry" -eq 1 ]; then
+        printf "  would fetch %-28s %6s GB  %s\n" "$id" "$gb" "$role"
+        continue
+      fi
       mkdir -p "$(dirname "$dest")"
       echo "[$(date '+%F %T')] fetching $id -> $path ($gb GB)" | tee -a "$LOG"
       # download to .part, rename on success so a half file never looks present
       # quiet download: progress is the growing .part file (panel Models tab shows it)
-      if curl -L -C - --retry 5 --retry-delay 5 --fail -sS -o "$dest.part" "$url" 2>>"$LOG"; then
+      if curl -L -C - --retry 5 --retry-delay 5 --fail -sS "${auth[@]}" -o "$dest.part" "$url" 2>>"$LOG"; then
         mv "$dest.part" "$dest"
         echo "[$(date '+%F %T')] done $id ($(du -h "$dest" | cut -f1))" | tee -a "$LOG"
       else
         echo "[$(date '+%F %T')] FAILED $id (left $dest.part for resume)" | tee -a "$LOG"
+        if [ "$hinted" -eq 0 ]; then
+          echo "  hint: if the repo is gated, huggingface-cli login or export HF_TOKEN (never commit it)" | tee -a "$LOG"
+          hinted=1
+        fi
       fi ;;
   esac
 done <<< "$rows"
 
-if [ "$mode" = "check" ]; then [ "$missing" -eq 0 ] && echo "all models present"; exit $(( missing > 0 )); fi
+if [ "$mode" = "check" ]; then
+  [ "$missing" -eq 0 ] && echo "all models present"
+  exit $(( missing > 0 ))
+fi
+if [ "$dry" -eq 1 ]; then
+  echo "dry-run: $missing missing, nothing downloaded"
+  exit 0
+fi
 [ "$mode" = "fetch" ] && echo "fetch complete — restart ComfyUI so it rescans model dirs: stack restart comfy"
 exit 0

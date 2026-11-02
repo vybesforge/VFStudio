@@ -66,6 +66,7 @@ TOOLS = [
     ("optimize_glb.sh", STACK / "tools" / "vr" / "optimize_glb.sh", "gltf-transform: decimate + resize textures for VR"),
     ("blender", STACK / "bin" / "blender", "Blender 5.2 headless wrapper"),
     ("fetch-models", STACK / "bin" / "fetch-models", "download missing manifest models"),
+    ("forge-recommend", STACK / "bin" / "forge-recommend", "probe this machine and print the model set to fetch"),
     ("Godot", Path("/Applications/Godot.app"), "Godot 4.7 OpenXR room (~/media-stack/vr-godot)"),
     ("OrcaSlicer", Path("/Applications/OrcaSlicer.app"), "slicer GUI + CLI"),
     ("Krita", Path("/Applications/Krita.app"), "raster painting"),
@@ -80,13 +81,15 @@ GROUPS = [
     ("Image", ["flux1-dev-fp8", "z-image-turbo", "z-image-te", "z-image-vae", "z-image-controlnet-union",
                "flux2-klein-4b", "flux2-vae", "qwen-image-edit-2509", "qwen-image-edit-2509-gguf", "qwen-2.5-vl-7b", "qwen-image-vae",
                "4x-ultrasharp", "realesrgan-x4plus", "seedvr2-3b-int8", "seedvr2-vae"]),
-    ("Video", ["wan2.2-ti2v-5b", "wan2.2-vae", "umt5-xxl-fp8"]),
+    ("Video", ["wan2.2-ti2v-5b", "wan2.2-vae", "umt5-xxl-fp8",
+               "hyvideo15-720p-i2v", "hyvideo15-480p-t2v", "hyvideo15-vae", "hyvideo15-byt5", "hyvideo15-sigclip"]),
     ("3D", ["trellis2-int8", "trellis2-shape-vae", "trellis2-texture-vae", "dinov3-L", "birefnet"]),
-    ("Sound", ["stable-audio-open-1.0", "t5-base", "stable-audio-3-medium", "t5gemma-b-b-ul2", "ace-step-1.5-turbo-aio"]),
+    ("Sound", ["stable-audio-open-1.0", "t5-base", "sa3-small-sfx", "stable-audio-3-medium", "t5gemma-b-b-ul2", "ace-step-1.5-turbo-aio"]),
 ]
 
 AUDIO_MODELS = [
     ("mlx-community/Kokoro-82M-bf16", "TTS (50+ voices)"),
+    ("mlx-community/parakeet-tdt-0.6b-v3", "speech-to-text (default)"),
     ("mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16", "voice cloning"),
     ("mlx-community/chatterbox-turbo-fp16", "voice cloning (fallback)"),
     ("mlx-community/whisper-large-v3-turbo-asr-fp16", "speech-to-text"),
@@ -101,10 +104,48 @@ def _hf_cached(repo: str) -> bool:
     return d.exists() and any(d.glob("snapshots/*/*"))
 
 
+_FORGE = None
+
+
+def _forge():
+    """The hardware probe lives next to this file so the panel and the CLI share it."""
+    global _FORGE
+    if _FORGE is None:
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "tools" / "forge" / "recommend.py"
+        spec = importlib.util.spec_from_file_location("forge_recommend", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _FORGE = mod
+    return _FORGE
+
+
+def _recommendation():
+    try:
+        mod = _forge()
+        stack = Path(__file__).resolve().parents[1]
+        manifest = mod.load_manifest(stack / "models" / "manifest.json")
+        return mod.recommend(manifest, mod.probe(stack))
+    except Exception as exc:  # the inventory must still render if the probe fails
+        return {"error": str(exc), "models": [], "hf": {}, "summary": {}, "notes": []}
+
+
+@router.get("/recommend")
+def studio_recommend():
+    return _recommendation()
+
+
 @router.get("/inventory")
 def inventory():
     man = json.load(open(MANIFEST))["models"] if MANIFEST.exists() else []
     by_id = {m["id"]: m for m in man}
+    advice = _recommendation()
+    fit_by_id = {m["id"]: m for m in advice.get("models") or []}
+    hf_fit = {}
+    for bucket, rows in (advice.get("hf") or {}).items():
+        for row in rows:
+            if row.get("repo"):
+                hf_fit[row["repo"]] = {"bucket": row.get("bucket") or bucket, "reason": row.get("reason") or ""}
     groups = []
     for label, ids in GROUPS:
         rows = []
@@ -114,22 +155,35 @@ def inventory():
                 continue
             p = MODELS / m["path"]
             part = Path(str(p) + ".part")
+            fit = fit_by_id.get(i) or {}
             rows.append({"id": i, "role": m["role"], "gb": m["gb"], "path": m["path"],
                          "present": p.exists(), "downloading": part.exists(),
-                         "part_gb": round(part.stat().st_size / 1e9, 2) if part.exists() else 0})
+                         "part_gb": round(part.stat().st_size / 1e9, 2) if part.exists() else 0,
+                         "bucket": fit.get("bucket"), "reason": fit.get("reason") or ""})
         groups.append({"label": label, "models": rows})
     known = {i for _, ids in GROUPS for i in ids}
-    extra = [{"id": m["id"], "role": m["role"], "gb": m["gb"], "path": m["path"],
-              "present": (MODELS / m["path"]).exists(), "downloading": False, "part_gb": 0}
-             for m in man if m["id"] not in known]
+    extra = []
+    for m in man:
+        if m["id"] in known:
+            continue
+        fit = fit_by_id.get(m["id"]) or {}
+        extra.append({"id": m["id"], "role": m["role"], "gb": m["gb"], "path": m["path"],
+                      "present": (MODELS / m["path"]).exists(), "downloading": False, "part_gb": 0,
+                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or ""})
     if extra:
         groups.append({"label": "Other", "models": extra})
-    audio = [{"id": r, "role": n, "present": _hf_cached(r)} for r, n in AUDIO_MODELS]
+    audio = []
+    for r, n in AUDIO_MODELS:
+        fit = hf_fit.get(r) or {}
+        audio.append({"id": r, "role": n, "present": _hf_cached(r),
+                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or ""})
     tools = [{"name": n, "path": str(p), "present": p.exists(), "desc": d} for n, p, d in TOOLS]
     present_gb = sum(m["gb"] for g in groups for m in g["models"] if m["present"])
     total_gb = sum(m["gb"] for g in groups for m in g["models"])
     return {"groups": groups, "audio": audio, "tools": tools,
-            "present_gb": round(present_gb, 1), "total_gb": round(total_gb, 1)}
+            "present_gb": round(present_gb, 1), "total_gb": round(total_gb, 1),
+            "recommend": advice.get("summary") or {},
+            "recommend_error": advice.get("error")}
 
 
 # ───────────────────────── outputs ─────────────────────────

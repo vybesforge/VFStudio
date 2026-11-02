@@ -1,5 +1,10 @@
 # Model choices — what is installed, why, and what was rejected (audited 2026-11-02)
 
+`bin/forge-recommend` turns the table below into a per-machine fetch list (`models/manifest.json`
+`fit` blocks). Essentials / quality / optional, largest GPU only, 0.75 GB slack so a 4080's
+16376 MiB still counts as 16 GB, Apple Silicon prefers the Qwen-Image-Edit GGUF and the MLX
+repos. Read the table before changing a `fit` threshold.
+
 Read this before suggesting "a newer model". Every row was checked against three gates:
 **runs on MPS in 64 GB** (fp8 has no Metal kernel → upcasts to bf16, double the size; int8-convrot
 runs but dequantises), **licence allows Dylan's commercial use**, **measured here**, not quoted.

@@ -26,11 +26,19 @@ skills — is plain Python + ffmpeg and runs unchanged.
 | Service manager | `bin/stack` (launchd-free, works as is) | same; optional systemd units in §8 | — |
 
 Memory model is different too: on the Mac everything shared one 64 GB pool; on a GPU box you are
-bound by **VRAM**. V100 32 GB: Z-Image (bf16 ≈ 12 GB) + text encoder fits; Flux dev fp8 fits;
-Wan 2.2 5B fits; Qwen-Image-Edit 2509 fp8 (~20 GB) fits alone; a 27B writer at Q4 (~17 GB) does
-**not** coexist with ComfyUI on one 32 GB card — run it on the 2060 (no: 6 GB — too small) or
-time-share with the panel's *Unload all*. RTX 4080 16 GB: use the fp8/4-bit variants and a
-≤14B writer (Q4 ≈ 9 GB).
+bound by **VRAM**. Run `bin/forge-recommend` before fetching — it uses the largest card only
+(a model is not split across the V100 and the 2060). The rules, checked against the calibration
+fixtures in `tools/forge/test_recommend.py`:
+
+| Box | Largest card | Fetch | Skip |
+|---|---|---|---|
+| billie (Precision 5810) | V100 32 GB (2060 6 GB is ignored for fitting) | `--profile auto`: Z-Image, klein, Flux dev fp8, Qwen-Image-Edit **fp8**, Wan 2.2 5B, HunyuanVideo 1.5, TRELLIS.2, ACE-Step | the Qwen GGUF (the fp8 file fits), MLX repos |
+| dspc RTX 4080 | 16 GB (nvidia-smi reports ~16376 MiB; that still counts as 16) | Z-Image, klein, Flux dev fp8 (tight), Qwen-Image-Edit **GGUF**, Wan 2.2 5B | Qwen fp8 (needs ~24 GB), HunyuanVideo 1.5 (needs ~20 GB), MLX repos |
+| Apple Silicon | unified RAM | MLX voice / vision / writer, Qwen **GGUF** | Qwen fp8 always; Flux dev and the 27B writer under 48 GB |
+
+V100 32 GB: a 27B Q4 writer (~17 GB) does **not** coexist with ComfyUI — time-share with
+*Unload all*. The 2060 is too small for every diffusion model in the manifest. RTX 4080:
+text encoders offload; use a ≤14B writer (Q4 ≈ 9 GB) via llama-server, not the MLX 27B repo.
 
 ## 1. Base packages
 
@@ -60,12 +68,21 @@ ComfyUI/.venv/bin/python -c "import torch;print(torch.cuda.is_available(), torch
 `bin/stack` starts ComfyUI with `--listen 127.0.0.1 --port 8188`; remove any `--force-fp16`/MPS flags
 if you find them in `bin/stack` (grep `mps`). For ≤16 GB cards add `--lowvram` or `--fp8_e4m3fn-unet`.
 
-Models: identical manifest.
+Models: the same manifest. Probe first, then fetch the profile for this GPU.
 ```bash
-bin/fetch-models --list
-bin/fetch-models            # ~25 GB essentials (Z-Image, klein, Wan 2.2 5B, SAO, ACE-Step, upscalers)
-bin/fetch-models --all      # ~136 GB everything incl. Qwen-Image-Edit 2509, Flux dev, Stable Audio 3
+bin/forge-recommend                  # or: python3 tools/forge/recommend.py
+bin/forge-recommend --dry-run        # the probe never downloads; this flag is accepted anyway
+bin/fetch-models --dry-run --profile auto
+bin/fetch-models --profile auto      # essentials + quality that fit the largest GPU and the free disk
+bin/fetch-models --list              # ✓/✗ per manifest id
 ```
+`fetch-models --profile essentials` is the small set (on a V100 or 4080: Z-Image, upscalers,
+Stable Audio Open, TRELLIS.2). `--profile full` adds optional files such as Stable Audio 3 medium.
+There is no `--all` flag; fetching every id regardless of VRAM is `bin/fetch-models` with no
+profile. Do that only when you mean to.
+
+Windows (the 4080 box): `python tools/forge/recommend.py` runs as-is. `bin/fetch-models` is bash
+— Git Bash or WSL. ComfyUI itself is the CUDA install above, pointed at the same `models/` tree.
 
 ## 3. Tools venv + CLIs (unchanged)
 
@@ -73,7 +90,7 @@ bin/fetch-models --all      # ~136 GB everything incl. Qwen-Image-Edit 2509, Flu
 uv venv --python 3.12 tools/.venv
 uv pip install --python tools/.venv/bin/python build123d trimesh pygltflib numpy-stl moviepy pedalboard librosa soundfile pillow imageio-ffmpeg requests websocket-client scipy
 mkdir -p ~/.local/bin
-for c in tools/comfy/gen tools/voice/voice tools/video/vid tools/llm/scribe tools/vision/see tools/print/slice tools/vr/gltf tools/audio/stems tools/train/lora bin/stack bin/fetch-models; do ln -sf "$PWD/$c" ~/.local/bin/$(basename "$c"); done
+for c in tools/comfy/gen tools/voice/voice tools/video/vid tools/llm/scribe tools/vision/see tools/print/slice tools/vr/gltf tools/audio/stems tools/train/lora bin/stack bin/fetch-models bin/forge-recommend; do ln -sf "$PWD/$c" ~/.local/bin/$(basename "$c"); done
 ```
 The CLIs have `#!/usr/bin/env` or venv shebangs pointing at `tools/.venv`/`audio/.venv`; if a
 shebang hard-codes a Mac path it will fail with "bad interpreter" — fix the shebang, that is a bug
@@ -163,6 +180,9 @@ GPU is not held by idle weights.
 
 ## 9. Smoke test
 
+`forge-recommend` prints a `gen` line for whatever image model it kept. On the V100 and the 4080
+that is klein:
+
 ```bash
 stack status
 gen image "a brass compass on an old map" --model klein --seed 1      # expect ~5–8 s on a V100, output/image/klein_*.png
@@ -173,7 +193,7 @@ see describe output/image/klein_00001_.png
 
 ## Known gaps on Linux (honest list)
 - Voice cloning server is not packaged — §5 describes the route, nobody has run it.
-- `control/status.py` GPU stats are macOS-only until the `nvidia-smi` fallback is added.
+- `control/status.py` live GPU utilisation is still macOS-only (`ioreg`). `bin/forge-recommend` and the Models tab do probe `nvidia-smi` for name, VRAM, and driver; the Resources tab's percent-busy figure does not, yet.
 - `bin/stack` service definitions for `llm`/`vision` reference `mlx_lm.server`/`mlx_vlm.server`; swap to `llama-server` lines.
 - Skills quote Mac timings; CUDA numbers will be faster for diffusion, similar or faster for LLMs.
 - No Rosetta-style issues, but AppImages need FUSE (`sudo apt install libfuse2`).
