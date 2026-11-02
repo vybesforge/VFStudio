@@ -119,13 +119,25 @@
       <div class="hint">CLI: <code>gen image "prompt" --model zimage</code></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Upscale / control</div>
-      <label>source image path (click a gallery item → "use")</label><input id="im-src" placeholder="/Users/dcruse/media-stack/output/image/…png">
+      <label>source image (click a gallery item → "use", or upload)</label>
+      <div class="row" style="gap:6px"><input id="im-src" placeholder="/Users/dcruse/media-stack/output/image/…png" style="flex:1"><button onclick="pickFile('im-src','image')">Upload…</button></div>
+      <img id="im-src-prev" style="max-height:120px;border-radius:6px;display:none;margin:4px 0">
       <div class="fields">
         <div><label>upscaler</label><select id="im-up"><option value="esrgan">RealESRGAN x4 · fast</option><option value="ultrasharp">4x-UltraSharp · crisper</option><option value="seedvr2">SeedVR2 3B · diffusion, slow</option></select></div>
         <div><label>scale</label><input id="im-scale" value="2"></div>
       </div>
       <div class="btns"><button onclick="runJob('upscale',{image:v('im-src'),method:v('im-up'),scale:v('im-scale')})">Upscale</button>
         <button onclick="runJob('control',{prompt:v('im-prompt'),image:v('im-src'),mode:'canny'})">Canny-guided re-render with prompt</button></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">Edit (Qwen-Image-Edit 2509) — change what you say, keep the rest</div>
+      <label>instruction</label><input id="ed-prompt" placeholder="make it a snowy night; keep the hog exactly the same">
+      <div class="fields">
+        <div><label>2nd reference (optional, "put the object from image 2 …")</label><input id="ed-ref2" placeholder="/path/b.png"></div>
+        <div><label>seed</label><input id="ed-seed" placeholder="random"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="runJob('edit',{image:v('im-src'),prompt:v('ed-prompt'),ref2:v('ed-ref2'),seed:v('ed-seed'),fast:true})">Edit source image (fast, 4 steps)</button>
+        <button onclick="runJob('edit',{image:v('im-src'),prompt:v('ed-prompt'),ref2:v('ed-ref2'),seed:v('ed-seed'),fast:false})">Edit (20 steps, slow)</button></div>
+      <div class="hint">Uses the source image path above. Heaviest model in the stack — run it alone (Resources → Unload all first). CLI: <code>gen edit in.png "instruction" --fast</code></div>
     </div>
     <div id="jobs-image" class="card" style="margin-top:12px"></div>
   </div>
@@ -137,7 +149,8 @@
   <div>
     <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B</span></div>
       <label>prompt</label><textarea id="vd-prompt">a mulefoot hog walks slowly across a sunlit barn floor, dust in the air, cinematic</textarea>
-      <label>start image (optional, path)</label><input id="vd-img" placeholder="blank = text-to-video">
+      <label>start image (optional — image-to-video)</label>
+      <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')">Upload…</button></div>
       <div class="fields">
         <div><label>size</label><select id="vd-size"><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
         <div><label>frames (24 fps)</label><select id="vd-frames"><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
@@ -189,6 +202,14 @@
       <div class="btns"><button class="primary" onclick="runJob('music',{prompt:v('mu-tags'),lyrics:v('mu-lyrics'),seconds:v('mu-sec'),bpm:v('mu-bpm'),key:v('mu-key')})">Generate music</button></div>
       <div class="hint">Also: <code>stack music "caption"</code> (MiniMax-Music via mlx-audio).</div>
     </div>
+    <div class="card" style="margin-top:12px"><div class="name">Stems (Demucs) — split a song into drums / bass / vocals / other</div>
+      <label>audio file (gallery item → "stems", or upload)</label>
+      <div class="row" style="gap:6px"><input id="st-file" placeholder="/Users/dcruse/media-stack/output/music/….flac" style="flex:1"><button onclick="pickFile('st-file','voice')">Upload…</button></div>
+      <div class="fields"><div><label>model</label><select id="st-model"><option value="htdemucs">htdemucs · fast (~5 s / 30 s)</option><option value="htdemucs_ft">htdemucs_ft · better, 2× slower</option><option value="htdemucs_6s">htdemucs_6s · + guitar, piano</option></select></div></div>
+      <div class="btns"><button class="primary" onclick="runJob('stems',{file:v('st-file'),model:v('st-model')})">Split into stems</button>
+        <button onclick="runJob('stems',{file:v('st-file'),karaoke:true})">Karaoke (remove vocals)</button></div>
+      <div class="hint">CLI: <code>stems split song.flac</code> · <code>stems karaoke song.mp3</code></div>
+    </div>
     <div id="jobs-sound" class="card" style="margin-top:12px"></div>
   </div>
   <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('sound')">Refresh</button></div><div class="gal" id="gal-sound"></div></div>
@@ -203,7 +224,15 @@
       <div class="btns"><button class="primary" onclick="runJob('say',{text:v('vo-text'),voice:v('vo-voice')})">Speak</button></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Clone a voice <span class="tag">Qwen3-TTS</span></div>
-      <label>reference wav path (5–15 s of the voice)</label><input id="vo-ref" placeholder="/Users/dcruse/…/ref.wav">
+      <label>reference voice (5–15 s) — record it, upload it, or paste a path</label>
+      <div class="btns">
+        <button id="vo-rec" onclick="toggleRec()">● Record from mic</button>
+        <span id="vo-rectime" class="muted"></span>
+        <input type="file" id="vo-upload" accept="audio/*,video/*" style="display:none" onchange="uploadRef(this.files[0])">
+        <button onclick="$('vo-upload').click()">Upload file…</button>
+      </div>
+      <audio id="vo-preview" controls style="width:100%;margin:6px 0;display:none"></audio>
+      <input id="vo-ref" placeholder="/Users/dcruse/…/ref.wav">
       <label>what the reference says (transcript; blank = auto-transcribe first)</label><input id="vo-reftext">
       <div class="btns"><button class="primary" onclick="cloneJob()">Clone &amp; speak the text above</button></div>
     </div>
@@ -250,7 +279,8 @@
   <div>
     <div class="card"><div class="name">Look at an image <span class="tag">local VLM</span></div>
       <div class="desc" id="vlm-state">checking vision VLM…</div>
-      <label>image path (or click a gallery item → "ask")</label><input id="vi-image" placeholder="/Users/dcruse/media-stack/output/image/….png">
+      <label>image (click a gallery item → "ask", or upload)</label>
+      <div class="row" style="gap:6px"><input id="vi-image" placeholder="/Users/dcruse/media-stack/output/image/….png" style="flex:1"><button onclick="pickFile('vi-image','image')">Upload…</button></div>
       <label>question</label><input id="vi-q" value="Describe this image. Any defects or artifacts?">
       <div class="btns"><button class="primary" onclick="runJob('see',{op:'ask',image:v('vi-image'),question:v('vi-q')})">Ask</button>
         <button onclick="runJob('see',{op:'describe',image:v('vi-image')})">Describe</button><button onclick="runJob('see',{op:'ocr',image:v('vi-image')})">OCR</button></div>
@@ -297,7 +327,7 @@ skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-p
 </section>
 </main>
 
-<footer><span><b style="color:var(--amber)">VF</b> Studio · <a href="https://vybesforge.com" target="_blank" rel="noopener">vybesforge.com</a> · everything generated here is local</span><span><a href="http://127.0.0.1:8188" target="_blank">ComfyUI</a> · <a href="/vr/index.html" target="_blank">VR room</a></span></footer>
+<footer><span><b style="color:var(--amber)">VF</b> Studio · <a href="https://vybesforge.com" target="_blank" rel="noopener">vybesforge.com</a> · <a href="https://ko-fi.com/vybesforge" target="_blank" rel="noopener" style="color:var(--accent)">☕ ko-fi</a> · everything generated here is local</span><span><a href="http://127.0.0.1:8188" target="_blank">ComfyUI</a> · <a href="/vr/index.html" target="_blank">VR room</a></span></footer>
 <div id="modal" onclick="if(event.target.id==='modal')closeModal()"><div class="box"><div class="hd"><span id="modal-title"></span><button onclick="closeModal()">close</button></div><div class="ct" id="modal-ct"></div></div></div>
 
 <script>
@@ -308,7 +338,7 @@ function flash(m){const d=document.createElement('div');d.textContent=m;d.style.
 
 // tabs
 let current='image';
-const KIND_TAB={image:'image',control:'image',upscale:'image',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice',write:'write',see:'vision'};
+const KIND_TAB={image:'image',control:'image',upscale:'image',edit:'image',stems:'sound',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice',write:'write',see:'vision'};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.dataset.tab;
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('active',s.id==='tab-'+current));
@@ -347,7 +377,46 @@ async function writeJob(){ const m=v('wr-mode'); const a={mode:m,prompt:v('wr-pr
 async function svcState(){ try{ const s=await (await fetch('/api/status')).json(); const l=s.services.llm, vv=s.services.vision;
   $('llm-state').innerHTML=`<span class="dot ${l.responding?'on':'off'}"></span>${l.label} :${l.port} — ${l.responding?'running':'stopped'} ${l.responding?'':'<button onclick="act(\'start/llm\');setTimeout(svcState,3000)">Start (loads ~16 GB, 1-2 min)</button>'}`;
   $('vlm-state').innerHTML=`<span class="dot ${vv.responding?'on':'off'}"></span>${vv.label} :${vv.port} — ${vv.responding?'running':'stopped'} ${vv.responding?'':'<button onclick="act(\'start/vision\');setTimeout(svcState,3000)">Start (~5 GB, ~30 s)</button>'}`; }catch(e){} }
-async function cloneJob(){ runJob('clone',{ref:v('vo-ref'),ref_text:v('vo-reftext'),text:v('vo-text')}); }
+async function cloneJob(){ if(!v('vo-ref')){flash('record or upload a reference first');return;} runJob('clone',{ref:v('vo-ref'),ref_text:v('vo-reftext'),text:v('vo-text')}); }
+// ── mic recording → /api/studio/upload → sets the reference path (localhost counts as a secure context for getUserMedia)
+let _rec=null,_chunks=[],_t0=0,_tick=null;
+async function toggleRec(){
+  const b=$('vo-rec');
+  if(_rec&&_rec.state==='recording'){ _rec.stop(); return; }
+  try{ const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    const mime=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':(MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':'');
+    _rec=new MediaRecorder(stream, mime?{mimeType:mime}:{}); _chunks=[];
+    _rec.ondataavailable=e=>{ if(e.data.size) _chunks.push(e.data); };
+    _rec.onstop=async()=>{ clearInterval(_tick); stream.getTracks().forEach(t=>t.stop()); b.textContent='● Record from mic'; b.classList.remove('primary');
+      const blob=new Blob(_chunks,{type:_rec.mimeType||'audio/webm'}); await uploadRef(blob, 'mic.'+((_rec.mimeType||'').includes('mp4')?'m4a':'webm')); };
+    _rec.start(250); _t0=Date.now(); b.textContent='■ Stop'; b.classList.add('primary');
+    _tick=setInterval(()=>{ $('vo-rectime').textContent=((Date.now()-_t0)/1000).toFixed(1)+' s (aim for 5–15 s, read a full sentence or two)'; },200);
+  }catch(e){ flash('mic error: '+e.message); }
+}
+// generic uploader: any input that wants a file path gets an "Upload…" button → /api/studio/upload?kind=image|voice|model
+function pickFile(inputId, kind){
+  let f=document.getElementById('__picker'); if(!f){ f=document.createElement('input'); f.type='file'; f.id='__picker'; f.style.display='none'; document.body.appendChild(f); }
+  f.accept = kind==='image' ? 'image/*' : kind==='model' ? '.glb,.gltf,.stl,.obj' : 'audio/*,video/*';
+  f.onchange = async () => { const file=f.files[0]; if(!file) return; flash('uploading…');
+    const fd=new FormData(); fd.append('file', file, file.name);
+    const r=await (await fetch('/api/studio/upload?kind='+kind,{method:'POST',body:fd})).json();
+    if(!r.ok){ flash('upload failed: '+r.error); return; }
+    $(inputId).value=r.path; flash('uploaded → '+r.path.split('/').pop());
+    const prev=$(inputId+'-prev'); if(prev&&kind==='image'){ prev.src=r.url; prev.style.display='block'; }
+    f.value=''; };
+  f.click();
+}
+async function uploadRef(fileOrBlob, name){
+  if(!fileOrBlob) return; flash('uploading…');
+  const fd=new FormData(); fd.append('file', fileOrBlob, name||fileOrBlob.name||'upload');
+  const r=await (await fetch('/api/studio/upload',{method:'POST',body:fd})).json();
+  if(!r.ok){ flash('upload failed: '+r.error); return; }
+  $('vo-ref').value=r.path; $('vo-file').value=r.path;
+  const p=$('vo-preview'); p.src=r.url+'?t='+Date.now(); p.style.display='block';
+  $('vo-rectime').textContent=`saved ${r.seconds.toFixed(1)} s → ${r.path.split('/').pop()}`;
+  flash('reference set ('+r.seconds.toFixed(1)+' s) — add its transcript or leave blank to auto-transcribe');
+  loadGallery&&loadGallery('voice');
+}
 async function cancelJob(id){ await fetch('/api/studio/jobs/'+id+'/cancel',{method:'POST'}); flash('cancel sent'); refreshJobs(); }
 let lastJobStates={};
 async function refreshJobs(){
@@ -400,6 +469,7 @@ async function loadGallery(kind){
       <div class="acts"><button onclick="openItem(galCache['${kind}'][${i}])">preview</button>
         ${kind==='image'?`<button onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
         ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
+        ${kind==='sound'?`<button onclick="$('st-file').value='${it.path}';flash('stems source set')">stems</button>`:''}
         ${kind==='video'||kind==='image'?`<button onclick="$('vd-img').value='${it.path}';flash('start image set')">→ video</button>`:''}
         ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}','_blank')">room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}&rig=1','_blank')">rig</button>`:''}
         ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}

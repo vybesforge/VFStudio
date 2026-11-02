@@ -15,6 +15,8 @@
 
     {"id": "qwen-image-edit-2509", "role": "image/edit (instruction editing, turnarounds)", "path": "diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors", "gb": 20.4},
+    {"id": "qwen-image-edit-2509-gguf", "role": "image/edit Q4 GGUF — use this on Apple Silicon (fp8 upcasts to 39 GB bf16 on MPS; Q4 stays ~13 GB)", "path": "unet/Qwen-Image-Edit-2509-Q4_K_M.gguf",
+     "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_M.gguf", "gb": 13.1},
     {"id": "qwen-2.5-vl-7b", "role": "image/edit text encoder", "path": "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors", "gb": 9.4},
     {"id": "qwen-image-vae", "role": "image/edit vae", "path": "vae/qwen_image_vae.safetensors",

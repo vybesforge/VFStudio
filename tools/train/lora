@@ -1,0 +1,255 @@
+#!/Users/dcruse/media-stack/train/.venv/bin/python
+"""lora — train image LoRAs locally on Apple Silicon (ostris ai-toolkit on MPS).
+
+  lora train --dataset DIR --name NAME [--model zimage|klein|flux] [--steps 500] [--rank 16] [--res 768]
+             [--lr 1e-4] [--trigger WORD] [--resume] [--no-adapter]
+  lora status                      # venv / trainer / weights / running jobs
+  lora list                        # LoRAs ComfyUI can load (ComfyUI/models/loras)
+
+train prints exactly one JSON line at the end:
+  {"ok": true, "lora": "/path/NAME.safetensors", "steps": 200, "seconds": 900.0, "sec_per_step": 4.5, ...}
+The finished .safetensors is copied to ComfyUI/models/loras/NAME.safetensors, so
+`gen image "prompt with trigger" --lora NAME` works immediately.
+
+Dataset = a folder of .png/.jpg plus a same-name .txt caption per image. Put the
+trigger word in every caption (or pass --trigger and write [trigger] in the captions).
+
+Model notes (proven on this Mac, see skill studio-lora):
+  zimage  Z-Image-Turbo. Uses the ComfyUI bf16 file we already have + the Qwen3-4B
+          text encoder file ComfyUI uses + the ostris de-distillation training adapter
+          (merged for training, removed for sampling) so the LoRA runs at 8 steps / cfg 1.
+  klein   FLUX.2 klein 4B — ai-toolkit targets the *base* (undistilled) klein; the ComfyUI
+          file here is the distilled one. Untested on this Mac; expect to need a download.
+  flux    FLUX.1-dev — needs the full diffusers repo (~24 GB download), untested here.
+"""
+import argparse, glob, json, os, shutil, subprocess, sys, time, re, signal
+
+HOME = os.path.expanduser("~")
+STACK = os.environ.get("MEDIA_STACK", f"{HOME}/media-stack")
+TRAIN = f"{STACK}/train"
+VENV_PY = f"{TRAIN}/.venv/bin/python"
+TOOLKIT = f"{TRAIN}/ai-toolkit"
+RUNS = f"{TRAIN}/runs"
+COMFY_MODELS = f"{STACK}/ComfyUI/models"
+LORAS = f"{COMFY_MODELS}/loras"
+ZIMAGE_EXTRAS = f"{TRAIN}/models/Z-Image-Turbo"   # config/tokenizer/vae + symlinked text encoder
+ADAPTER_REPO = "ostris/zimage_turbo_training_adapter/zimage_turbo_training_adapter_v2.safetensors"
+PANEL = "http://127.0.0.1:8787"
+COMFY = "http://127.0.0.1:8188"
+
+
+def out(d):
+    print(json.dumps(d), flush=True)
+    sys.exit(0 if d.get("ok") else 1)
+
+
+def hf_cached(filename):
+    hits = glob.glob(f"{HOME}/.cache/huggingface/hub/models--*/snapshots/*/{filename}")
+    return os.path.realpath(hits[0]) if hits else None
+
+
+def comfy_queue():
+    try:
+        import urllib.request
+        q = json.load(urllib.request.urlopen(f"{COMFY}/queue", timeout=3))
+        return len(q.get("queue_running", [])) + len(q.get("queue_pending", []))
+    except Exception:
+        return None
+
+
+def free_gpu():
+    """Ask the panel to unload ComfyUI models + stop LLM/VLM so training gets the GPU."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"{PANEL}/api/studio/unload-all", data=b"{}",
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req, timeout=60).read()
+        return True
+    except Exception:
+        return False
+
+
+def build_config(a):
+    ds = os.path.abspath(a.dataset)
+    imgs = [f for f in os.listdir(ds) if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
+    if not imgs:
+        out({"ok": False, "error": f"no images in {ds}"})
+    missing = [f for f in imgs if not os.path.exists(os.path.join(ds, os.path.splitext(f)[0] + ".txt"))]
+    if missing:
+        out({"ok": False, "error": f"{len(missing)} images have no .txt caption, e.g. {missing[0]}"})
+
+    model = {"quantize": False, "quantize_te": False, "low_vram": False}
+    if a.model == "zimage":
+        unet = f"{COMFY_MODELS}/diffusion_models/z_image_turbo_bf16.safetensors"
+        if not os.path.exists(unet):
+            out({"ok": False, "error": f"missing {unet} (run fetch-models)"})
+        if not os.path.exists(f"{ZIMAGE_EXTRAS}/text_encoder/model.safetensors"):
+            out({"ok": False, "error": f"missing {ZIMAGE_EXTRAS} (install.sh builds it: configs from Tongyi-MAI/Z-Image-Turbo + symlink to ComfyUI qwen_3_4b.safetensors)"})
+        model.update({"name_or_path": unet, "extras_name_or_path": ZIMAGE_EXTRAS, "arch": "zimage"})
+        if not a.no_adapter:
+            model["assistant_lora_path"] = hf_cached("zimage_turbo_training_adapter_v2.safetensors") or ADAPTER_REPO
+        sample = {"sampler": "flowmatch", "guidance_scale": 1, "sample_steps": 9}
+    elif a.model == "klein":
+        model.update({"name_or_path": "black-forest-labs/FLUX.2-klein-base-4B", "arch": "flux2_klein_4b"})
+        sample = {"sampler": "flowmatch", "guidance_scale": 1, "sample_steps": 4}
+    else:
+        model.update({"name_or_path": "black-forest-labs/FLUX.1-dev", "arch": "flux", "quantize": True})
+        sample = {"sampler": "flowmatch", "guidance_scale": 4, "sample_steps": 20}
+
+    sample.update({"sample_every": 0, "width": a.res, "height": a.res, "prompts": [],
+                   "neg": "", "seed": 42, "walk_seed": True})
+    cfg = {
+        "job": "extension",
+        "config": {
+            "name": a.name,
+            "process": [{
+                "type": "sd_trainer",
+                "training_folder": RUNS,
+                "device": a.device,
+                "trigger_word": a.trigger,
+                "performance_log_every": 50,
+                "network": {"type": "lora", "linear": a.rank, "linear_alpha": a.rank},
+                "save": {"dtype": "bf16", "save_every": a.save_every or max(a.steps, 1), "max_step_saves_to_keep": 2},
+                "datasets": [{"folder_path": ds, "caption_ext": "txt", "caption_dropout_rate": 0.05,
+                              "shuffle_tokens": False, "cache_latents_to_disk": True,
+                              # Batched caption caching OOMs on MPS (Qwen3-4B SDPA tried to allocate 88 GB for 10 captions);
+                              # encoding per step keeps the encoder resident (+8 GB) but works.
+                              "cache_text_embeddings": not a.no_te_cache if hasattr(a, "no_te_cache") else True,
+                              "resolution": [a.res]}],
+                "train": {"batch_size": 1, "steps": a.steps, "gradient_accumulation": 1,
+                          "train_unet": True, "train_text_encoder": False, "gradient_checkpointing": True,
+                          "noise_scheduler": "flowmatch", "timestep_type": "weighted",
+                          "optimizer": "adamw", "lr": a.lr, "dtype": "bf16",
+                          "unload_text_encoder": False,
+                          "ema_config": {"use_ema": False}},
+                "model": model,
+                "sample": sample,
+            }],
+        },
+        "meta": {"name": a.name, "version": "1.0"},
+    }
+    return cfg
+
+
+def cmd_train(a):
+    if not os.path.exists(VENV_PY) or not os.path.exists(f"{TOOLKIT}/run.py"):
+        out({"ok": False, "error": f"trainer not installed: {VENV_PY} / {TOOLKIT} (run install.sh)"})
+    a.name = re.sub(r"[^A-Za-z0-9_.-]", "_", a.name)
+    os.makedirs(RUNS, exist_ok=True); os.makedirs(LORAS, exist_ok=True)
+    run_dir = f"{RUNS}/{a.name}"
+    if os.path.exists(run_dir) and not a.resume:
+        shutil.rmtree(run_dir)
+    os.makedirs(run_dir, exist_ok=True)
+    cfg = build_config(a)
+    cfg_path = f"{run_dir}/config.json"
+    json.dump(cfg, open(cfg_path, "w"), indent=2)
+
+    if not a.now:
+        q = comfy_queue()
+        waited = 0
+        while q:   # shared GPU: let the Telegram/desktop generation finish first
+            time.sleep(5); waited += 5
+            q = comfy_queue()
+            if waited > 1800:
+                out({"ok": False, "error": "ComfyUI queue busy for 30 min"})
+        if not a.keep_models:
+            free_gpu()
+
+    env = dict(os.environ, MODELS_PATH=COMFY_MODELS, HF_HUB_DISABLE_XET="1",
+               PYTORCH_ENABLE_MPS_FALLBACK="1", DISABLE_TELEMETRY="YES", PYTHONUNBUFFERED="1")
+    log_path = f"{run_dir}/train.log"
+    cmd = [VENV_PY, "run.py", cfg_path]
+    t0 = time.time()
+    steps_seen = 0
+    peak_rss_gb = 0.0
+    with open(log_path, "w") as log:
+        p = subprocess.Popen(cmd, cwd=TOOLKIT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        try:
+            for line in p.stdout:
+                log.write(line); log.flush()
+                if a.verbose:
+                    sys.stderr.write(line)
+                m = re.search(r"(\d+)/(\d+)\s*\[", line) or re.search(r"\b(\d+)/(\d+)\b", line)
+                if m and int(m.group(2)) == a.steps:
+                    steps_seen = max(steps_seen, int(m.group(1)))
+                if steps_seen and steps_seen % 10 == 0:
+                    try:
+                        rss = int(subprocess.check_output(["ps", "-o", "rss=", "-p", str(p.pid)]).split()[0]) / 1048576
+                        peak_rss_gb = max(peak_rss_gb, rss)
+                    except Exception:
+                        pass
+        except KeyboardInterrupt:
+            p.send_signal(signal.SIGINT); p.wait()
+            out({"ok": False, "error": "interrupted", "log": log_path})
+        p.wait()
+    seconds = round(time.time() - t0, 1)
+    final = f"{run_dir}/{a.name}.safetensors"
+    if p.returncode != 0 or not os.path.exists(final):
+        tail = "".join(open(log_path).readlines()[-15:])
+        out({"ok": False, "error": f"trainer exit {p.returncode}, no {final}", "log": log_path, "tail": tail})
+    dest = f"{LORAS}/{a.name}.safetensors"
+    shutil.copy2(final, dest)
+    out({"ok": True, "lora": dest, "steps": a.steps, "seconds": seconds,
+         "sec_per_step": round(seconds / max(a.steps, 1), 2), "peak_rss_gb": round(peak_rss_gb, 1),
+         "size_mb": round(os.path.getsize(dest) / 1048576, 1), "run_dir": run_dir, "log": log_path})
+
+
+def cmd_status(a):
+    print(f"venv:     {'ok' if os.path.exists(VENV_PY) else 'MISSING'}  {VENV_PY}")
+    print(f"trainer:  {'ok' if os.path.exists(TOOLKIT + '/run.py') else 'MISSING'}  {TOOLKIT}")
+    try:
+        v = subprocess.check_output([VENV_PY, "-c", "import torch;print(torch.__version__, 'mps' if torch.backends.mps.is_available() else 'NO-MPS')"], text=True).strip()
+    except Exception as e:
+        v = f"error {e}"
+    print(f"torch:    {v}")
+    for label, path in [("zimage unet", f"{COMFY_MODELS}/diffusion_models/z_image_turbo_bf16.safetensors"),
+                        ("zimage extras", f"{ZIMAGE_EXTRAS}/text_encoder/model.safetensors"),
+                        ("zimage adapter", hf_cached("zimage_turbo_training_adapter_v2.safetensors") or "(not downloaded, auto on first train)")]:
+        print(f"{label:15} {'ok ' if os.path.exists(path) else '-- '} {path}")
+    q = comfy_queue()
+    print(f"comfy queue: {q if q is not None else 'server down'}")
+    running = subprocess.run(["pgrep", "-fl", "ai-toolkit/run.py|run.py .*runs/"], capture_output=True, text=True).stdout.strip()
+    print(f"training now: {running or 'none'}")
+    for d in sorted(glob.glob(f"{RUNS}/*/")):
+        name = os.path.basename(d.rstrip("/"))
+        done = os.path.exists(f"{d}/{name}.safetensors")
+        print(f"run {name:20} {'done' if done else 'incomplete'}  {d}")
+
+
+def cmd_list(a):
+    rows = []
+    for f in sorted(glob.glob(f"{LORAS}/*.safetensors")):
+        rows.append({"name": os.path.basename(f)[:-12], "mb": round(os.path.getsize(f) / 1048576, 1), "path": f})
+    if a.json:
+        print(json.dumps(rows))
+    else:
+        for r in rows:
+            print(f"{r['name']:50} {r['mb']:8.1f} MB")
+        if not rows:
+            print("(no LoRAs; train one: lora train --dataset DIR --name NAME)")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="lora", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    t = sub.add_parser("train")
+    t.add_argument("--dataset", required=True); t.add_argument("--name", required=True)
+    t.add_argument("--model", choices=["zimage", "klein", "flux"], default="zimage")
+    t.add_argument("--steps", type=int, default=500); t.add_argument("--rank", type=int, default=16)
+    t.add_argument("--res", type=int, default=768); t.add_argument("--lr", type=float, default=1e-4)
+    t.add_argument("--trigger", default=None, help="replaces [trigger] in captions")
+    t.add_argument("--save-every", type=int, default=0, help="intermediate saves (default: final only)")
+    t.add_argument("--device", default="mps")
+    t.add_argument("--no-adapter", action="store_true", help="zimage: train without the de-distillation adapter")
+    t.add_argument("--te-cache", dest="no_te_cache", action="store_false", default=True, help="batch-cache text embeddings (CUDA only — OOMs on MPS, so off by default)")
+    t.add_argument("--resume", action="store_true"); t.add_argument("--now", action="store_true", help="do not wait for an idle ComfyUI queue")
+    t.add_argument("--keep-models", action="store_true", help="do not ask the panel to unload ComfyUI/LLM models first")
+    t.add_argument("--verbose", "-v", action="store_true", help="stream trainer log to stderr")
+    sub.add_parser("status")
+    l = sub.add_parser("list"); l.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+    {"train": cmd_train, "status": cmd_status, "list": cmd_list}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()

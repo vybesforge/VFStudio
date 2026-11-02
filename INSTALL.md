@@ -1,5 +1,7 @@
 # Installing the studio on another Mac
 
+> Linux / NVIDIA box instead? See [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md).
+
 Target: Apple Silicon Mac (M-series), macOS 14+, **32 GB unified memory minimum, 64 GB
 recommended** (Flux dev, Qwen-Image-Edit and TRELLIS.2 need the headroom). ~150 GB free
 disk for the full model set; ~30 GB for the essentials.

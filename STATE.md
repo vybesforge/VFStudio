@@ -1,6 +1,20 @@
 # Project state — read this first
 
-Last updated: 2026-11-01 (desktop session) — **studio build-out**
+Last updated: 2026-11-01 late (desktop session) — **studio build-out, round 2**
+
+## 2026-11-01 (evening): round 2 — what changed since the table below
+- **Published**: https://github.com/vybesforge/VFStudio (`main`, history rewritten so no GLBs/models/joints are tracked; `*.glb`, `gold-standard/`, `rig/joints_*.json`, `output/`, `train/*`, `stems/.venv` gitignored). Push via a one-shot credential helper with the fine-grained PAT in `~/Desktop/gitderp.rtf` (needs Contents: read+write). Local assets were restored from `known-good/` after the rewrite reset the tree (gold sha 773c5fd37e8c intact).
+- **Writer LLM** `scribe` (:8081, Qwen3.8-27B-Uncensored 4-bit, thinking off) · **vision** `see` (:8082, Qwen3-VL-8B, camera via imagesnap / V4L2 on Linux). Panel Write + Vision tabs.
+- **Panel**: VF branding + ko-fi link; Resources → *Unload all / Stop everything*; Edit card (Qwen-Image-Edit), Stems card (Demucs), **Upload…** buttons for every path field (image/voice/model → `output/<kind>/uploads/`), **Record from mic** for voice-clone references; `voice clone` auto-transcribes the reference with Whisper. `stack restart panel|llm|vision` now works. Legacy page removed.
+- **VR room** rewritten: any GLB via `?src=`, per-asset joint picker (`&rig=1`, quadruped/biped templates, mirror, undo), controller rays + trigger pick/teleport, foveation, >300k-tri warning. `rig.html` redirects.
+- **`gen edit`** (Qwen-Image-Edit 2509): works; prefers the Q4 GGUF (`unet/Qwen-Image-Edit-2509-Q4_K_M.gguf`, ComfyUI-GGUF node pack) because fp8 upcasts to 39 GB on MPS (measured 5–9 min/edit). GGUF path downloaded and node registered; **first GGUF-path timing not yet measured** — run `gen edit … --fast` alone and record it in `studio` skill.
+- **Game + animation**: Godot 2D/3D templates (`game/`), `tools/anim/` (Rigify auto-rig, Grease Pencil, sprite sheets), Tahoma2D installed (OpenToonz is x86-only on macOS). Skills `studio-game`, `studio-animation`.
+- **Stems**: `stems split|karaoke` (Demucs htdemucs on MPS, 5–8 s per 30 s). Skill `studio-stems`.
+- **LoRA training**: ai-toolkit in `train/.venv`, `lora train|status|list`, `gen image --lora NAME[:s]`. First real run (Z-Image, 512 px, rank 16, 60 steps) was **in progress at hand-off**: 6.5 s/step early, ~23 s/step once swap engaged. Batched caption caching OOMs on MPS → disabled by default. Verify the produced `ComfyUI/models/loras/vfrobot.safetensors` with/without and update `studio-lora`.
+- **Ubuntu port**: `INSTALL-UBUNTU.md` written from the code (speaches + llama-server replace MLX; CUDA ComfyUI). **Not executed anywhere yet.**
+- **Deferred — lip-sync / talking head**: Wan 2.2 S2V 14B is ~30 GB fp8 → ~60 GB bf16 on MPS; not viable on this Mac alongside anything. Run it (or LatentSync) on the RTX 4080 / V100 box instead; template `video_wan2_2_14B_s2v` exists in ComfyUI.
+
+Open items: GGUF edit timing; finish + verify first LoRA; headset test (Godot .exe, WebXR controller picking); run `install.sh` on a clean Mac; run `INSTALL-UBUNTU.md` once on the Precision box.
 
 ## 2026-11-01: one-stop studio (image · video · 3D · VR · print · sound · music · voice)
 

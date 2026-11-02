@@ -74,9 +74,15 @@ Prefix = language+gender: `af`/`am` American female/male, `bf`/`bm` British.
 
 ### 3. Clone a voice
 
-You need (a) a reference wav of the voice, 5-15 s of clean speech, and
-(b) the exact words spoken in it (`--ref-text`). If you do not have the
-transcript, get it with recipe 4 first.
+You need a reference wav of the voice, 5-15 s of clean speech. `--ref-text`
+(the exact words in it) is optional: when omitted, `clone` runs Whisper on the
+reference first and prints `auto-transcribed reference: …` to stderr.
+
+Getting Dylan's own voice in: panel → Voice tab → **Record from mic** (or
+**Upload file…**). The browser recording is posted to `/api/studio/upload`, saved
+as 24 kHz mono WAV under `~/media-stack/output/voice/uploads/`, and set as the
+reference path automatically. Any audio/video file works as an upload — ffmpeg
+converts it.
 
 ```bash
 ~/media-stack/tools/voice/voice clone \
@@ -167,7 +173,8 @@ word for word (Chatterbox dropped punctuation; Qwen3 kept it).
   server opens itself. The CLI resolves it with `os.path.abspath`; the reference
   must be on this Mac's disk.
 - **`--ref-text` must be the words actually in the reference.** Wrong text makes
-  the clone mumble or stop early. Transcribe the reference first if unsure.
+  the clone mumble or stop early. Leave it out to let Whisper fill it in; only
+  type it yourself when the reference is noisy enough that Whisper gets it wrong.
 - **Whisper rewrites numbers as digits** ("ten second" -> "10-second"). Compare
   words, not raw strings, when verifying.
 - **First request after server start is slow** (20-45 s for Kokoro, ~6-10 s for

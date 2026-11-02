@@ -2,7 +2,7 @@
 
 Image · video · 3D · VR · 3D-print · sound FX · music · voice, all generated **on the
 machine** (no cloud inference), all drivable by an AI agent through plain CLIs and a web panel.
-Built and measured on an M3 Max / 64 GB; see [INSTALL.md](INSTALL.md) to reproduce it elsewhere.
+Built and measured on an M3 Max / 64 GB; see [INSTALL.md](INSTALL.md) to reproduce it on another Mac, or [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md) for an NVIDIA Linux box (ported on paper, not yet run).
 
 ```
 ./install.sh [--all-models] [--hermes]      # fresh Mac → working studio
@@ -31,6 +31,9 @@ stack panel                                  # http://127.0.0.1:8787
 | Animation | `tools/anim/rigify_auto.py` · `gp_anim.py` · `spritesheet.py` · `pngseq_to_vse.py` | Blender Rigify + Grease Pencil · Krita · Tahoma2D |
 | Writing (uncensored) | `scribe prose\|outline\|chapter\|screenplay\|dialogue\|lore\|revise` | Qwen3.8-27B-Uncensored (mlx-lm, :8081) |
 | Vision + camera | `see describe\|ask\|ocr\|compare\|snap` | Qwen3-VL-8B (mlx-vlm, :8082) · imagesnap |
+| Image editing | `gen edit in.png "instruction" --fast` | Qwen-Image-Edit 2509 (Q4 GGUF via ComfyUI-GGUF) |
+| Stems / karaoke | `stems split\|karaoke song.flac` | Demucs htdemucs (MPS) |
+| LoRA training | `lora train --dataset DIR --name NAME` → `gen image --lora NAME` | ostris ai-toolkit (MPS) |
 
 Every `gen` call prints one JSON line (`{"ok":true,"files":[…],"seconds":…}`), waits for an idle
 GPU queue, and fails loudly when ComfyUI reports success without writing a file.

@@ -51,12 +51,18 @@ def ask(images, question, max_tokens=700, temp=0.2):
 
 
 def snap(out=None, device=None, warmup=2.0):
-    exe = shutil.which("imagesnap") or "/opt/homebrew/bin/imagesnap"
-    if not os.path.exists(exe):
-        die("imagesnap not installed: brew install imagesnap")
     os.makedirs(OUT, exist_ok=True)
     out = out or os.path.join(OUT, f"snap_{time.strftime('%Y%m%d_%H%M%S')}.jpg")
-    cmd = [exe, "-q", "-w", str(warmup)] + (["-d", device] if device else []) + [out]
+    if sys.platform != "darwin":
+        # Linux: V4L2 through ffmpeg. --device is /dev/videoN (default /dev/video0).
+        ff = shutil.which("ffmpeg") or die("ffmpeg not installed: sudo apt install ffmpeg")
+        dev = device or "/dev/video0"
+        cmd = [ff, "-y", "-loglevel", "error", "-f", "v4l2", "-i", dev, "-ss", str(warmup), "-frames:v", "1", out]
+    else:
+        exe = shutil.which("imagesnap") or "/opt/homebrew/bin/imagesnap"
+        if not os.path.exists(exe):
+            die("imagesnap not installed: brew install imagesnap")
+        cmd = [exe, "-q", "-w", str(warmup)] + (["-d", device] if device else []) + [out]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if r.returncode != 0 or not os.path.exists(out):
         die(f"camera capture failed: {r.stderr.strip() or r.stdout.strip()} (grant Terminal camera access in System Settings > Privacy)")

@@ -5,7 +5,7 @@ Everything runs on this Mac (mlx-audio at 127.0.0.1:8000). No cloud calls.
 
   voice say "text" [--voice af_heart] [--out f.wav] [--speed 1.0]
   voice voices
-  voice clone --ref ref.wav --ref-text "transcript of ref" "new text" [--out f.wav]
+  voice clone --ref ref.wav "new text" [--ref-text "transcript of ref"] [--out f.wav]   (transcript auto-filled by Whisper if omitted)
   voice clone --ref ref.wav "new text" --model mlx-community/chatterbox-turbo-fp16   (no transcript needed)
   voice transcribe file.wav [--srt] [--json]
   voice enhance in.wav out.wav [--lufs -16]
@@ -111,8 +111,11 @@ def cmd_clone(a):
     if a.ref_text:
         payload["ref_text"] = a.ref_text
     elif "qwen3" in a.model.lower():
-        die("--ref-text (exact words spoken in the reference) is required for Qwen3-TTS; "
-            "get it with: voice transcribe <ref.wav>")
+        # Qwen3-TTS needs the reference transcript; get it from Whisper rather than failing.
+        payload["ref_text"] = whisper_text(ref)
+        if not payload["ref_text"]:
+            die("could not transcribe the reference (silent?) — pass --ref-text \"exact words\"")
+        print(f"auto-transcribed reference: {payload['ref_text']!r}", file=sys.stderr)
     data = post_json("/v1/audio/speech", payload)
     write_audio(data, out)
     print(f"{out}  ({len(data)} bytes, {time.time()-t0:.1f}s, model {a.model})")
@@ -139,18 +142,26 @@ def srt_time(s):
     return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
 
 
-def cmd_transcribe(a):
-    check_server()
-    if not os.path.isfile(a.file):
-        die(f"file not found: {a.file}")
-    body, ctype = multipart({"model": WHISPER}, a.file)
+def whisper(path):
+    body, ctype = multipart({"model": WHISPER}, path)
     req = urllib.request.Request(SERVER + "/v1/audio/transcriptions", data=body,
                                  headers={"Content-Type": ctype}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=1800) as r:
-            d = json.load(r)
+            return json.load(r)
     except urllib.error.HTTPError as e:
         die(f"server {e.code}: {e.read().decode(errors='replace')[:400]}")
+
+
+def whisper_text(path):
+    return whisper(path).get("text", "").strip()
+
+
+def cmd_transcribe(a):
+    check_server()
+    if not os.path.isfile(a.file):
+        die(f"file not found: {a.file}")
+    d = whisper(a.file)
     if a.json:
         print(json.dumps(d, indent=1))
     elif a.srt:
@@ -234,7 +245,7 @@ def main():
 
     s = sp.add_parser("clone", help="voice clone from reference wav + its transcript")
     s.add_argument("text"); s.add_argument("--ref", required=True)
-    s.add_argument("--ref-text", dest="ref_text", help="exact words in --ref (required for Qwen3-TTS, optional for Chatterbox)")
+    s.add_argument("--ref-text", dest="ref_text", help="exact words in --ref (auto-transcribed with Whisper when omitted)")
     s.add_argument("--out"); s.add_argument("--model", default=CLONE_MODEL); s.set_defaults(fn=cmd_clone)
 
     s = sp.add_parser("transcribe", help="Whisper STT via server"); s.add_argument("file")

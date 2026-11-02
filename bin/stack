@@ -30,7 +30,13 @@ case "$cmd" in
     curl -s "$PANEL/api/status" | "$PY" "$STACK/control/status.py"
     ;;
   start|stop|restart)
-    [ -z "$target" ] && { echo "usage: stack $cmd <comfy|audio>" >&2; exit 1; }
+    [ -z "$target" ] && { echo "usage: stack $cmd <comfy|audio|llm|vision|panel>" >&2; exit 1; }
+    if [ "$target" = "panel" ]; then
+      # the panel cannot restart itself through its own API — do it by pid
+      pkill -f "$STACK/control/panel.py" 2>/dev/null && sleep 1
+      [ "$cmd" = "stop" ] && { echo "  panel stopped"; exit 0; }
+      exec "$0" panel
+    fi
     ensure_panel || exit 1
     curl -s -X POST "$PANEL/api/$cmd/$target" | "$PY" -c 'import json,sys;print(" ",json.load(sys.stdin).get("message","ok"))'
     ;;

@@ -6,7 +6,7 @@
 set -euo pipefail
 STACK="$(cd "$(dirname "$0")/.." && pwd)"
 H="${HERMES_HOME:-$HOME/.hermes}"
-SKILLS=(studio/studio studio/studio-video-edit studio/studio-voice studio/studio-3d-print studio/studio-vr studio/studio-writing studio/studio-vision studio/studio-game studio/studio-animation media/local-media-stack blender)
+SKILLS=(studio/studio studio/studio-video-edit studio/studio-voice studio/studio-stems studio/studio-lora studio/studio-3d-print studio/studio-vr studio/studio-writing studio/studio-vision studio/studio-game studio/studio-animation media/local-media-stack blender)
 case "${1:-}" in
   export)
     mkdir -p "$STACK/hermes/plugins/image_gen" "$STACK/hermes/skills"

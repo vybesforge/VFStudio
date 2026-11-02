@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -28,7 +29,8 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 HOME = Path.home()
 STACK = HOME / "media-stack"
@@ -39,6 +41,7 @@ MANIFEST = STACK / "models" / "manifest.json"
 JOBS_LOG = STACK / "logs" / "studio-jobs.jsonl"
 GEN = STACK / "tools" / "comfy" / "gen"
 VOICE = STACK / "tools" / "voice" / "voice"
+STEMS = STACK / "tools" / "audio" / "stems"
 VID = STACK / "tools" / "video" / "vid"
 WRITE = STACK / "tools" / "llm" / "scribe"   # not "write": macOS owns that name
 SEE = STACK / "tools" / "vision" / "see"
@@ -72,7 +75,7 @@ TOOLS = [
 
 GROUPS = [
     ("Image", ["flux1-dev-fp8", "z-image-turbo", "z-image-te", "z-image-vae", "z-image-controlnet-union",
-               "flux2-klein-4b", "flux2-vae", "qwen-image-edit-2509", "qwen-2.5-vl-7b", "qwen-image-vae",
+               "flux2-klein-4b", "flux2-vae", "qwen-image-edit-2509", "qwen-image-edit-2509-gguf", "qwen-2.5-vl-7b", "qwen-image-vae",
                "4x-ultrasharp", "realesrgan-x4plus", "seedvr2-3b-int8", "seedvr2-vae"]),
     ("Video", ["wan2.2-ti2v-5b", "wan2.2-vae", "umt5-xxl-fp8"]),
     ("3D", ["trellis2-int8", "trellis2-shape-vae", "trellis2-texture-vae", "dinov3-L", "birefnet"]),
@@ -140,9 +143,9 @@ EXT = {
 ROOTS = {
     "image": [(OUT / "image", "/files/output/image"), (OUT / "control", "/files/output/control"),
               (OUT / "upscale", "/files/output/upscale"), (COMFY_OUT, "/files/comfy_output")],
-    "video": [(OUT / "video", "/files/output/video"), (COMFY_OUT / "video", "/files/comfy_output/video"),
+    "video": [(OUT / "video", "/files/output/video"), (OUT / "image" / "uploads", "/files/output/image/uploads"), (COMFY_OUT / "video", "/files/comfy_output/video"),
               (STACK / "scratch" / "video-test", "/files/scratch/video-test")],
-    "sound": [(OUT / "sfx", "/files/output/sfx"), (OUT / "music", "/files/output/music"),
+    "sound": [(OUT / "sfx", "/files/output/sfx"), (OUT / "music", "/files/output/music"), (OUT / "stems", "/files/output/stems"),
               (COMFY_OUT / "audio", "/files/comfy_output/audio"), (STACK / "scratch", "/files/scratch")],
     "voice": [(OUT / "voice", "/files/output/voice"), (STACK / "scratch" / "voice-test", "/files/scratch/voice-test")],
     "text": [(OUT / "text", "/files/output/text")],
@@ -279,6 +282,11 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
                 *flag("--strength", cast=float), *flag("--steps", cast=int), *flag("--seed", cast=int), "--save-control"]
     if kind == "upscale":
         return [str(GEN), "upscale", a["image"], "--method", a.get("method", "esrgan"), *flag("--scale", cast=float)]
+    if kind == "edit":
+        cmd = [str(GEN), "edit", a["image"], a["prompt"], *flag("--ref2"), *flag("--ref3"), *flag("--seed", cast=int), *flag("--steps", cast=int)]
+        if a.get("fast", True) not in (False, "false", "0", ""):
+            cmd.append("--fast")
+        return cmd
     if kind == "video":
         return [str(GEN), "video", a["prompt"], *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
                 *flag("--frames", cast=int), *flag("--fps", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int)]
@@ -291,6 +299,10 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
         if a.get("lyrics"):
             cmd += ["--lyrics", a["lyrics"]]
         return cmd
+    if kind == "stems":
+        if a.get("karaoke"):
+            return [str(STEMS), "karaoke", a["file"]]
+        return [str(STEMS), "split", a["file"], "--model", a.get("model", "htdemucs")]
     if kind == "say":
         out = OUT / "voice" / f"say_{int(time.time())}.wav"
         return [str(VOICE), "say", a["text"], "--voice", a.get("voice", "af_heart"), "--out", str(out)]
@@ -465,6 +477,60 @@ def unload_all(payload: dict = Body(default={})):
     freed = (before.get("used", 0) - after.get("used", 0)) / 2**30
     return {"ok": True, "steps": steps, "freed_gb": round(freed, 1),
             "used_gb": round(after.get("used", 0) / 2**30, 1), "message": f"freed ~{freed:.1f} GB · " + "; ".join(steps)}
+
+
+@router.post("/upload")
+async def upload(request: Request):
+    """Receive a browser recording or a picked file (multipart or raw body) for the Voice tab.
+    Audio is converted to 24 kHz mono 16-bit WAV with ffmpeg so it works as a clone reference
+    and as Whisper input. Saved under output/voice/uploads/."""
+    import shutil
+    from datetime import datetime
+    ct = request.headers.get("content-type", "")
+    name = request.query_params.get("name") or "mic"
+    raw = await request.body()
+    if ct.startswith("multipart/"):
+        form = await request.form()
+        f = form.get("file")
+        if f is None:
+            return JSONResponse({"ok": False, "error": "no file field"}, status_code=400)
+        raw = await f.read(); name = f.filename or name
+    if not raw:
+        return JSONResponse({"ok": False, "error": "empty upload"}, status_code=400)
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(name).stem)[:40] or "upload"
+    ext = Path(name).suffix.lower()
+    kind = request.query_params.get("kind") or ("image" if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"} else
+                                                "model" if ext in {".glb", ".gltf", ".stl", ".obj", ".fbx"} else "voice")
+    if kind == "image":
+        # Images are stored as-is (converted to PNG only if the format is exotic) so they can feed gen edit / control / i2v / see.
+        updir = OUT / "image" / "uploads"; updir.mkdir(parents=True, exist_ok=True)
+        dst = updir / f"{stem}_{datetime.now():%Y%m%d_%H%M%S}{ext if ext in {'.png', '.jpg', '.jpeg', '.webp'} else '.png'}"
+        if dst.suffix == ext:
+            dst.write_bytes(raw)
+        else:  # exotic format → PNG via ffmpeg (no PIL in this venv)
+            tmp = dst.with_suffix(ext or ".bin"); tmp.write_bytes(raw)
+            ff = shutil.which("ffmpeg") or str(next(Path.home().glob(".hermes/tools/ffmpeg-*/ffmpeg"), "ffmpeg"))
+            subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(tmp), str(dst)], check=False); tmp.unlink(missing_ok=True)
+        return {"ok": True, "kind": "image", "path": str(dst), "url": f"/files/output/image/uploads/{dst.name}"}
+    if kind == "model":
+        updir = OUT / "3d" / "uploads"; updir.mkdir(parents=True, exist_ok=True)
+        dst = updir / f"{stem}_{datetime.now():%Y%m%d_%H%M%S}{ext}"
+        dst.write_bytes(raw)
+        return {"ok": True, "kind": "model", "path": str(dst), "url": f"/files/output/3d/uploads/{dst.name}"}
+    updir = OUT / "voice" / "uploads"; updir.mkdir(parents=True, exist_ok=True)
+    tmp = updir / f"{stem}_{datetime.now():%Y%m%d_%H%M%S}.src"
+    tmp.write_bytes(raw)
+    wav = tmp.with_suffix(".wav")
+    ff = shutil.which("ffmpeg") or str(next(Path.home().glob(".hermes/tools/ffmpeg-*/ffmpeg"), "ffmpeg"))
+    r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(tmp), "-ac", "1", "-ar", "24000", "-sample_fmt", "s16", str(wav)],
+                       capture_output=True, text=True)
+    tmp.unlink(missing_ok=True)
+    if r.returncode != 0 or not wav.exists():
+        return JSONResponse({"ok": False, "error": "ffmpeg: " + r.stderr[-300:]}, status_code=500)
+    import wave
+    with wave.open(str(wav)) as w:  # no ffprobe in the bundled ffmpeg dir; the header is enough
+        dur = w.getnframes() / float(w.getframerate())
+    return {"ok": True, "kind": "voice", "path": str(wav), "url": f"/files/output/voice/uploads/{wav.name}", "seconds": round(dur, 2)}
 
 
 @router.get("/voices")

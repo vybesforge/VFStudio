@@ -41,8 +41,19 @@ scratch/*.gif
 scratch/*.jpg
 scratch/*.srt
 
+# LoRA training (tools/train/lora): venv, upstream trainer clone, datasets, runs, model shims
+train/.venv/
+train/ai-toolkit/
+train/datasets/
+train/runs/
+train/models/
+
 # local assets never go to GitHub (the installer regenerates/downloads; gold-standard stays on this Mac)
 *.glb
 *.gltf
 gold-standard/
 rig/joints_*.json
+stems/.venv/
+
+# training / stems / node packs are re-created by install.sh
+ComfyUI/custom_nodes/ComfyUI-GGUF/

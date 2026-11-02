@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — reproduce the media-stack "studio" on another Apple Silicon Mac.
 #
-#   git clone <repo> ~/media-stack && cd ~/media-stack && ./install.sh [--all-models] [--hermes] [--no-apps]
+#   git clone <repo> ~/media-stack && cd ~/media-stack && ./install.sh [--all-models] [--hermes] [--no-apps] [--train]
 #
 # Idempotent: every step checks before it acts, so re-running after a failure is safe.
 # The install location is fixed at ~/media-stack (scripts, skills and the panel assume it).
@@ -12,18 +12,20 @@
 #   3. mlx-audio venv (TTS / STT / voice clone / music)              -> :8000
 #      mlx-lm / mlx-vlm venv: uncensored writer LLM -> :8081, vision VLM (+camera) -> :8082
 #   4. tools venv (build123d, trimesh, moviepy, pedalboard, librosa…) for the CLIs
+#      stems venv (demucs, torch/MPS) for `stems split|karaoke` stem separation
+#      --train: train venv (ostris ai-toolkit, torch/MPS) for `lora train` — LoRA training on this Mac
 #   5. GUI apps: Blender, Godot (+ export templates), OrcaSlicer, Krita, Audacity, Inkscape,
 #      OpenSCAD, MeshLab, Tahoma2D (2D animation)       (skip with --no-apps)
-#   6. gltf-transform (npm), symlinks for stack/gen/voice/vid/fetch-models/blender into ~/.local/bin
+#   6. gltf-transform (npm), symlinks for stack/gen/voice/vid/stems/fetch-models/blender into ~/.local/bin
 #   7. Models: essentials by default (~25 GB); --all-models fetches the full manifest (~136 GB)
 #   8. --hermes: install the image_gen plugin + studio skills into ~/.hermes and point
 #      Hermes' image/tts/stt at the local services
 #   9. Starts the panel and runs a smoke test
 set -euo pipefail
 
-ALL_MODELS=0; HERMES=0; APPS=1
+ALL_MODELS=0; HERMES=0; APPS=1; TRAIN=0
 for a in "$@"; do case "$a" in
-  --all-models) ALL_MODELS=1 ;; --hermes) HERMES=1 ;; --no-apps) APPS=0 ;;
+  --all-models) ALL_MODELS=1 ;; --hermes) HERMES=1 ;; --no-apps) APPS=0 ;; --train) TRAIN=1 ;;
   -h|--help) sed -n '2,20p' "$0"; exit 0 ;; *) echo "unknown flag $a" >&2; exit 1 ;; esac; done
 
 STACK="$HOME/media-stack"
@@ -60,6 +62,12 @@ if [ ! -x "$STACK/ComfyUI/.venv/bin/python" ]; then
   uv venv --python 3.12 "$STACK/ComfyUI/.venv"
   uv pip install --python "$STACK/ComfyUI/.venv/bin/python" torch torchvision torchaudio
   uv pip install --python "$STACK/ComfyUI/.venv/bin/python" -r "$STACK/ComfyUI/requirements.txt"
+
+# GGUF loader node pack: Qwen-Image-Edit Q4 (fp8 has no MPS kernel and upcasts to 39 GB)
+if [ ! -d "$STACK/ComfyUI/custom_nodes/ComfyUI-GGUF" ]; then
+  git clone -q https://github.com/city96/ComfyUI-GGUF "$STACK/ComfyUI/custom_nodes/ComfyUI-GGUF"
+fi
+uv pip install -q --python "$STACK/ComfyUI/.venv/bin/python" -r "$STACK/ComfyUI/custom_nodes/ComfyUI-GGUF/requirements.txt"
 fi
 "$STACK/ComfyUI/.venv/bin/python" -c "import torch; assert torch.backends.mps.is_available(), 'MPS not available'" && ok "torch MPS ok"
 mkdir -p "$STACK/ComfyUI/output"
@@ -90,12 +98,50 @@ uv pip install -q --python "$STACK/tools/.venv/bin/python" build123d trimesh pym
   moviepy pedalboard librosa soundfile pillow imageio-ffmpeg requests websocket-client scipy
 ok "build123d, trimesh, moviepy, pedalboard, librosa"
 
+# ─── 4b. stems venv (Demucs stem separation, torch/MPS) ─────────────────────────
+say "stems venv (demucs)"
+if [ ! -x "$STACK/stems/.venv/bin/python" ]; then
+  mkdir -p "$STACK/stems"; uv venv --python 3.12 "$STACK/stems/.venv"
+fi
+uv pip install -q --python "$STACK/stems/.venv/bin/python" demucs torchaudio soundfile
+"$STACK/stems/.venv/bin/python" -c "import demucs, torch, torchaudio, soundfile" && ok "demucs $("$STACK/stems/.venv/bin/python" -c 'import importlib.metadata as m;print(m.version("demucs"))') (htdemucs weights download on first run, ~80 MB)"
+
+# ─── 4c. train venv (ostris ai-toolkit on MPS — `lora train`) — optional, --train ─
+if [ "$TRAIN" = 1 ]; then
+  say "train venv (ai-toolkit, LoRA training on MPS)"
+  mkdir -p "$STACK/train/datasets" "$STACK/train/runs"
+  [ -d "$STACK/train/ai-toolkit/.git" ] || git clone --depth 1 https://github.com/ostris/ai-toolkit.git "$STACK/train/ai-toolkit"
+  if [ ! -x "$STACK/train/.venv/bin/python" ]; then
+    uv venv --python 3.12 "$STACK/train/.venv"
+    # pins from ai-toolkit/manager/spec.py (mac = plain PyPI wheels, MPS included)
+    uv pip install --python "$STACK/train/.venv/bin/python" "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
+    uv pip install --python "$STACK/train/.venv/bin/python" -r "$STACK/train/ai-toolkit/requirements.txt" "torchcodec==0.15.0"
+  fi
+  "$STACK/train/.venv/bin/python" -c "import torch, diffusers, peft; assert torch.backends.mps.is_available()" && ok "ai-toolkit venv (torch MPS, diffusers, peft)"
+  # Z-Image-Turbo "extras" folder: configs/tokenizer/vae from the HF repo (~200 MB), text encoder
+  # symlinked to the ComfyUI qwen_3_4b.safetensors (same HF key layout), transformer = ComfyUI bf16 file.
+  ZX="$STACK/train/models/Z-Image-Turbo"
+  if [ ! -f "$ZX/vae/diffusion_pytorch_model.safetensors" ]; then
+    HF_HUB_DISABLE_XET=1 "$STACK/llm/.venv/bin/hf" download Tongyi-MAI/Z-Image-Turbo --exclude "transformer/*.safetensors" --exclude "text_encoder/*.safetensors" --exclude "assets/*" >/dev/null
+    SNAP="$(ls -d "$HOME"/.cache/huggingface/hub/models--Tongyi-MAI--Z-Image-Turbo/snapshots/* | head -1)"
+    mkdir -p "$ZX"/{text_encoder,transformer,vae,tokenizer,scheduler}
+    cp "$SNAP/model_index.json" "$ZX/"; cp "$SNAP"/scheduler/* "$ZX/scheduler/"; cp "$SNAP"/tokenizer/* "$ZX/tokenizer/"
+    cp "$SNAP/transformer/config.json" "$ZX/transformer/"; cp "$SNAP/text_encoder/config.json" "$SNAP/text_encoder/generation_config.json" "$ZX/text_encoder/"
+    cp "$SNAP/vae/config.json" "$ZX/vae/"; ln -sf "$(readlink -f "$SNAP/vae/diffusion_pytorch_model.safetensors")" "$ZX/vae/diffusion_pytorch_model.safetensors"
+    ln -sf "$STACK/ComfyUI/models/text_encoders/qwen_3_4b.safetensors" "$ZX/text_encoder/model.safetensors"
+  fi
+  HF_HUB_DISABLE_XET=1 "$STACK/llm/.venv/bin/hf" download ostris/zimage_turbo_training_adapter zimage_turbo_training_adapter_v2.safetensors >/dev/null && ok "Z-Image-Turbo extras + training adapter (340 MB)"
+  sed -i '' "1s|^#!.*|#!$STACK/train/.venv/bin/python|" "$STACK/tools/train/lora"; chmod +x "$STACK/tools/train/lora"
+  ln -sf "$STACK/tools/train/lora" "$HOME/.local/bin/lora"
+fi
+
 # Rewrite CLI shebangs to this machine's venvs (they are absolute by necessity)
 for f in tools/comfy/gen tools/print/slice tools/video/vid tools/video/transcribe_srt.py; do
   sed -i '' "1s|^#!.*|#!$STACK/tools/.venv/bin/python|" "$STACK/$f"; chmod +x "$STACK/$f"
 done
 sed -i '' "1s|^#!.*|#!$STACK/audio/.venv/bin/python|" "$STACK/tools/voice/voice"; chmod +x "$STACK/tools/voice/voice"
 for f in tools/llm/scribe tools/vision/see; do sed -i '' "1s|^#!.*|#!$STACK/llm/.venv/bin/python|" "$STACK/$f"; chmod +x "$STACK/$f"; done
+sed -i '' "1s|^#!.*|#!$STACK/stems/.venv/bin/python|" "$STACK/tools/audio/stems"; chmod +x "$STACK/tools/audio/stems"
 chmod +x "$STACK"/bin/* "$STACK"/tools/vr/* "$STACK"/tools/print/* 2>/dev/null || true
 
 # ─── 5. apps ────────────────────────────────────────────────────────────────────
@@ -135,8 +181,9 @@ ln -sf "$STACK/tools/voice/voice" "$HOME/.local/bin/voice"
 ln -sf "$STACK/tools/video/vid" "$HOME/.local/bin/vid"
 ln -sf "$STACK/tools/llm/scribe" "$HOME/.local/bin/scribe"
 ln -sf "$STACK/tools/vision/see" "$HOME/.local/bin/see"
+ln -sf "$STACK/tools/audio/stems" "$HOME/.local/bin/stems"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile" ;; esac
-ok "gen voice vid scribe see stack fetch-models blender -> ~/.local/bin"
+ok "gen voice vid scribe see stems stack fetch-models blender -> ~/.local/bin"
 
 # ─── 7. models ──────────────────────────────────────────────────────────────────
 say "models"
