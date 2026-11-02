@@ -74,6 +74,17 @@ The quadruped run on `pig_anim_test.glb` goes one step further: `ENVELOPE covera
 Options: `--frames 24 --fps 24` cycle length, `--uniform` (fit by height only instead of per-axis bbox fit), `--flip` (model faces +Y), `--length-axis x|y`, `--no-anim`, `--save-blend /abs/rig.blend` (open in the Blender GUI to refine weights/poses; all Rigify controls are there, only DEF bones are exported).
 Supported inputs: `.glb .gltf .fbx .obj`. Existing armatures/animations in the input are stripped.
 
+### 1b. Key a locomotion clip onto an already-rigged GLB (walk / trot / gallop / idle)
+Intent: the rig exists (panel **Build rig**, or `rigify_auto.py`) and you want a named, looping clip on it.
+```bash
+stack anim vr/hog_trellis2_rigged.glb --clip walk --frames 24      # or: --clip trot|gallop|idle
+# equivalently: bin/blender -b --python tools/anim/animate_clip.py -- <in.glb> <out.glb> --clip trot
+```
+Writes `<in>_anim.glb`, or `vr/<asset>_anim.glb` from the panel's **3D tab → Animate the built rig** card (`POST /api/rig/animate`, clip + frames). The room's **Anim** button plays clip 0 by name; `verify_anim_glb.py` proves it moves (`max_disp > 0`, `moving_frac`).
+Clips are procedural sine gaits, not a motion model: upper limb swings at cycle rate, lower lags 0.12 of a cycle at 55% amplitude, body pitches at twice the stride rate, head counter-rotates. Gait phases are a `GAITS` table — lateral-sequence walk (BL 0, FL .25, BR .5, FR .75), trot (diagonal pairs), gallop (front pair then back pair, 1.5x amplitude).
+Bone naming handled: `FL_upper/FL_lower…` (rig_from_joints.py) and Rigify `DEF-thigh.L` / `DEF-front_thigh.L` / `DEF-upper_arm.L` (strip `DEF-`, skip the `.001` secondary deform twins — animating them with their parent doubles the rotation).
+Gotchas: a mesh with a baked base/plinth gets the plate weighted too, so the ground warps as the animal walks — animate a clean mesh; and `stack` runs with `set -u`, so loop variables need initialising.
+
 ### 2. Prove the GLB is skinned and actually moves (no rendering)
 ```bash
 ~/media-stack/bin/blender -b --python ~/media-stack/tools/anim/verify_anim_glb.py -- ~/media-stack/scratch/game-test/pig_human_rig.glb 2>&1 | grep '^{'; echo exit=$?
