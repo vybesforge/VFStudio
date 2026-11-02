@@ -11,6 +11,20 @@ Built and measured on an M3 Max / 64 GB; see [INSTALL.md](INSTALL.md) to reprodu
 stack panel                                  # http://127.0.0.1:8787
 ```
 
+## New machine
+
+```bash
+git clone <your-fork-url> ~/media-stack && cd ~/media-stack
+bin/forge-recommend                  # OS, CPU, RAM, GPUs, free disk, and the model ids that fit
+bin/fetch-models --profile auto      # essentials + quality for this box (add --dry-run to preview)
+stack start comfy
+gen image "a brass compass on an old map" --model klein --seed 1
+```
+
+`forge-recommend` only prints. `--profile essentials` is the small set, `--profile auto` adds the daily models, `--profile full` also fetches optional heavy files that still fit. Weak GPUs get an explicit skip list (Flux, HunyuanVideo, the fp8 editor, …) instead of a silent full download. Apple Silicon is recommended the MLX voice / vision / writer repos and the Qwen-Image-Edit GGUF, not the fp8 file. The same command with `--fixture billie`, `--fixture 4080`, or `--fixture mac64` shows the calibration for those boxes without probing.
+
+Windows can run `python tools/forge/recommend.py`. `fetch-models` is a bash script (Git Bash or WSL). Gated downloads: `huggingface-cli login` or `HF_TOKEN` — the token is not stored in the repo.
+
 ## What's inside
 
 | Need | Command | Engine (local) |
@@ -48,7 +62,7 @@ http://127.0.0.1:8787 — one origin, tabs per modality:
 |---|---|
 | Image / Video / Sound / Voice / Write / Vision | run form (same args as the CLI) · jobs list with cancel · gallery with inline preview · camera snap |
 | 3D & VR | WebXR room (iframe + full screen) · joint picker · GLB/STL viewer · meshes & prints gallery · "set in room" |
-| Models | manifest inventory: present / downloading / missing per model, HF-cached audio models, tool checklist |
+| Models | manifest inventory: present / downloading / missing per model, the forge recommendation for this machine, HF-cached audio models, tool checklist |
 | Services | start / stop / restart / logs for ComfyUI, mlx-audio, writer LLM, vision VLM |
 | Resources | CPU, GPU (IOAccelerator), memory, swap, disk, top processes · **Unload all models / Stop everything** |
 
@@ -62,6 +76,7 @@ listens under the same id — ComfyUI only sends per-step progress to the submit
 stack status | start comfy | start audio | stop comfy | free | logs comfy 100 | panel
 gen status                      # which model sets are installed + queue
 fetch-models --list             # ✓/✗ per manifest entry;  fetch-models  downloads the ✗
+forge-recommend                 # what this machine should fetch;  fetch-models --profile auto  downloads it
 voice voices                    # Kokoro voice list
 ```
 

@@ -101,7 +101,7 @@
   .eptile td{padding:3px 0}
 </style></head><body>
 <header>
-  <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge · M3 Max 64 GB · nothing leaves the machine</div></div></div>
+  <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub" id="machine-sub">VybesForge local asset forge · probing this machine · nothing leaves the machine</div></div></div>
   <div class="card" id="progress" style="min-width:360px;flex:1;max-width:720px;padding:10px 14px"></div>
 </header>
 <nav>
@@ -352,7 +352,8 @@
 
 <!-- MODELS -->
 <section class="tab" id="tab-models">
-  <div class="card" id="inv-summary"></div>
+  <div class="card" id="forge-rec"><div class="desc">probing this machine…</div></div>
+  <div class="card" id="inv-summary" style="margin-top:14px"></div>
   <div id="inv-groups"></div>
   <h2>Audio models (mlx-audio, HF cache)</h2><div class="card" id="inv-audio"></div>
   <h2>Tools</h2><div class="card" id="inv-tools"></div>
@@ -377,6 +378,7 @@
 gen status | gen image "…" | gen video "…" | gen sfx "…" | gen music "…" | gen upscale f.png
 voice say "…" | voice clone --ref r.wav "…" | voice transcribe f.wav
 vid trim in.mp4 out.mp4 --start 1 --end 3      fetch-models --list
+forge-recommend          fetch-models --profile auto
 skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-print · studio-vr · local-media-stack</pre></div>
 </section>
 
@@ -584,13 +586,37 @@ async function loadGames(){
 }
 async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
 
-// inventory
+// inventory + hardware recommendation (same probe the forge-recommend CLI uses)
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function bucketTag(b){
+  if(!b) return '';
+  const cls=b==='optional'?'dl':(b==='skip'?'':'ok');
+  return `<span class="tag ${cls}">${esc(b)}</span>`;
+}
+function paintForge(r){
+  const s=r.summary||{};
+  const sub=$('machine-sub');
+  if(sub&&s.headline) sub.textContent=`VybesForge local asset forge · ${s.headline} · nothing leaves the machine`;
+  const el=$('forge-rec');
+  if(!el) return;
+  if(r.error){ el.innerHTML=`<div class="name">This machine</div><div class="desc">${esc(r.error)}</div>`; return; }
+  const m=r.machine||{};
+  const gpus=(m.gpus||[]).map(g=>`${esc(g.name)} ${g.vram_gb?esc(g.vram_gb)+' GB':'unified'}${g.driver?' · '+esc(g.driver):''}`).join(' · ')||'no GPU';
+  const notes=(r.notes||[]).slice(0,3).map(n=>`<div class="desc">${esc(n)}</div>`).join('');
+  const smoke=(s.smoke||[]).map(c=>`<code>${esc(c)}</code>`).join(' · ');
+  el.innerHTML=`<div class="row"><div><div class="name">${esc(s.headline||'This machine')}</div><div class="desc">${esc(m.os_pretty||m.os||'')} · ${esc(m.cpu||'')} · ${esc(m.ram_gb)} GB RAM · ${esc(m.disk_free_gb)} GB free under ${esc(m.disk_path||'')}</div><div class="desc">${gpus}</div></div><button onclick="navigator.clipboard.writeText('fetch-models --profile auto');flash('command copied')">copy fetch command</button></div>
+    <div class="meta">essentials ${esc(s.essentials_gb)} GB · quality ${esc(s.quality_gb)} GB · optional ${esc(s.optional_gb)} GB · ${esc(s.skip_n)} skipped · <code>fetch-models --profile auto</code>${smoke?' · smoke '+smoke:''}</div>${notes}`;
+}
+async function loadForge(){
+  try{ const r=await (await fetch('/api/studio/recommend')).json(); paintForge(r); }catch(e){}
+}
 async function loadInventory(){
   const inv=await (await fetch('/api/studio/inventory')).json();
-  $('inv-summary').innerHTML=`<div class="row"><div><div class="name">ComfyUI models</div><div class="desc">${inv.present_gb} of ${inv.total_gb} GB present · manifest <code>~/media-stack/models/manifest.json</code> · missing → <code>fetch-models</code></div></div></div><div class="bar g"><i style="width:${100*inv.present_gb/inv.total_gb}%"></i></div>`;
-  $('inv-groups').innerHTML=inv.groups.map(g=>`<h2>${g.label}</h2><div class="card"><table><thead><tr><th>model</th><th>role</th><th class="r">size</th><th class="r">state</th></tr></thead><tbody>${g.models.map(m=>`<tr><td><code>${m.id}</code><div class="desc" style="font-size:10px">${m.path}</div></td><td class="desc">${m.role}</td><td class="r">${m.gb} GB</td><td class="r">${m.present?'<span class="tag ok">present</span>':m.downloading?`<span class="tag dl">downloading ${m.part_gb}/${m.gb}</span>`:'<span class="tag">missing</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
-  $('inv-audio').innerHTML=`<table><tbody>${inv.audio.map(m=>`<tr><td><code>${m.id}</code></td><td class="desc">${m.role}</td><td class="r">${m.present?'<span class="tag ok">cached</span>':'<span class="tag">on demand</span>'}</td></tr>`).join('')}</tbody></table>`;
-  $('inv-tools').innerHTML=`<table><tbody>${inv.tools.map(t=>`<tr><td><span class="dot ${t.present?'on':'off'}"></span><code>${t.name}</code></td><td class="desc">${t.desc}</td><td class="desc" style="font-size:10px">${t.path}</td></tr>`).join('')}</tbody></table>`;
+  const pct=inv.total_gb?100*inv.present_gb/inv.total_gb:0;
+  $('inv-summary').innerHTML=`<div class="row"><div><div class="name">ComfyUI models</div><div class="desc">${inv.present_gb} of ${inv.total_gb} GB present · manifest <code>models/manifest.json</code> · <code>fetch-models --profile auto</code></div></div></div><div class="bar g"><i style="width:${pct}%"></i></div>`;
+  $('inv-groups').innerHTML=inv.groups.map(g=>`<h2>${g.label}</h2><div class="card"><table><thead><tr><th>model</th><th>role</th><th class="r">size</th><th class="r">fit</th><th class="r">state</th></tr></thead><tbody>${g.models.map(m=>`<tr><td><code>${esc(m.id)}</code><div class="desc" style="font-size:10px">${esc(m.path)}</div></td><td class="desc">${esc(m.role)}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${esc(m.gb)} GB</td><td class="r">${bucketTag(m.bucket)}</td><td class="r">${m.present?'<span class="tag ok">present</span>':m.downloading?`<span class="tag dl">downloading ${esc(m.part_gb)}/${esc(m.gb)}</span>`:'<span class="tag">missing</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
+  $('inv-audio').innerHTML=`<table><tbody>${inv.audio.map(m=>`<tr><td><code>${esc(m.id)}</code></td><td class="desc">${esc(m.role)}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${bucketTag(m.bucket)}</td><td class="r">${m.present?'<span class="tag ok">cached</span>':'<span class="tag">on demand</span>'}</td></tr>`).join('')}</tbody></table>`;
+  $('inv-tools').innerHTML=`<table><tbody>${inv.tools.map(t=>`<tr><td><span class="dot ${t.present?'on':'off'}"></span><code>${esc(t.name)}</code></td><td class="desc">${esc(t.desc)}</td><td class="desc" style="font-size:10px">${esc(t.path)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 // services + endpoints — one card per service, its endpoints as tiles inside it
@@ -694,7 +720,7 @@ async function refreshResources(){
 async function unloadAll(hard){ $('unload-result').textContent='working…'; const j=await (await fetch('/api/studio/unload-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hard})})).json(); $('unload-result').textContent=j.message||JSON.stringify(j); flash(`freed ~${j.freed_gb} GB`); setTimeout(refreshResources,1500); }
 async function loadVoices(){ try{const j=await (await fetch('/api/studio/voices')).json(); if(j.voices&&j.voices.length) $('vo-voice').innerHTML=j.voices.map(x=>`<option${x==='af_heart'?' selected':''}>${x}</option>`).join('');}catch(e){} }
 
-refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
+refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices(); loadForge();
 setInterval(refreshProgress,1500); setInterval(refreshJobs,3000);
 setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); },2500);
 setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); },8000);
