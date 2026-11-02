@@ -1,15 +1,29 @@
-# media-stack — a one-stop local studio for Apple Silicon
+# VF Studio — detect the machine, install what fits
 
-Image · video · 3D · VR · 3D-print · sound FX · music · voice, all generated **on the
-machine** (no cloud inference), all drivable by an AI agent through plain CLIs and a web panel.
-**What this repo is:** the studio *loadout* — installer, model manifest, CLIs, panel, skills — so another machine can run the same AI-drivable asset pipeline. **What it is not:** the things made with it. Games (`game/<project>`), models, GLBs, LoRAs, datasets and outputs stay local by `.gitignore`.
+Image, video, 3D, print, sound, music, and voice, generated **on the machine** (no cloud inference).
+Windows, Linux, and Mac each get the engine that matches the probe: CUDA, ROCm, MLX, or CPU.
 
-Built and measured on an M3 Max / 64 GB; see [INSTALL.md](INSTALL.md) to reproduce it on another Mac, or [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md) for an NVIDIA Linux box (ported on paper, not yet run).
+**What this repo is:** the studio loadout — installer, model manifest, CLIs, panel, skills — so another machine can run the same local pipeline. **What it is not:** the things made with it. Games, weights, and outputs stay local.
 
+```bash
+git clone <your-fork-url> ~/media-stack && cd ~/media-stack
+bin/forge-recommend                         # this machine: OS, RAM, GPUs, free disk, tiers
+bin/fetch-models --dry-run --profile auto   # what would download; stops if a license needs a login
+bin/fetch-models --profile auto             # essentials + quality that fit
+stack panel                                 # http://127.0.0.1:8787
 ```
-./install.sh [--all-models] [--hermes]      # fresh Mac → working studio
-stack panel                                  # http://127.0.0.1:8787
-```
+
+| OS | Install |
+|---|---|
+| Apple Silicon | `./install.sh` (Homebrew, MLX for voice / writer / vision, ComfyUI for diffusion) |
+| Linux | `python3 tools/forge/install.py` then the CUDA or ROCm steps in [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md) |
+| Windows | `powershell -File install.ps1` — probe and panel. `fetch-models` runs in Git Bash |
+
+The probe never assumes a particular card. It uses the largest GPU, not the sum. `VF_GPU=1` picks another index. Apple Silicon keeps MLX where it is the right engine. NVIDIA and AMD keep ComfyUI for diffusion and use speaches plus llama-server for voice, writing, and vision. The uncensored writer is labeled: it is the Apple default, and opt-in everywhere else (`VF_UNCENSORED=1`, `scribe --uncensored`).
+
+Checklist: [SMOKE.md](SMOKE.md). Apple Silicon detail: [INSTALL.md](INSTALL.md). CUDA and ROCm detail: [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md).
+
+Gated downloads: `huggingface-cli login` or `HF_TOKEN`. The token is not stored in the repo. `VF_SKIP_GATE=1` continues when you know the URL is public.
 
 ## What's inside
 
@@ -29,7 +43,7 @@ stack panel                                  # http://127.0.0.1:8787
 | Mesh repair / rig / render | `bin/blender -b -P …` | Blender 5.2 |
 | CAD → STL → G-code | `tools/print/cad_examples/*.py` · `meshcheck.py` · `slice --preset bambu\|generic` | build123d · trimesh · OrcaSlicer 2.4 CLI |
 | VR | `vr-godot/` · `tools/vr/optimize_glb.sh` · WebXR room `vr/` (any GLB, joint picker, controllers) | Godot 4.7 OpenXR · gltf-transform · Three.js |
-| Games 2D/3D | `game/new_project.sh 2d\|3d <name> <dest>`, templates with headless run/export | Godot 4.7 |
+| Games | `game/new_project.sh 2d\|3d\|web` | Godot 4 (desktop) · Three.js (browser) |
 | Animation | `tools/anim/rigify_auto.py` · `gp_anim.py` · `spritesheet.py` · `pngseq_to_vse.py` | Blender Rigify + Grease Pencil · Krita · Tahoma2D |
 | Writing (uncensored) | `scribe prose\|outline\|chapter\|screenplay\|dialogue\|lore\|revise` | Qwen3.8-27B-Uncensored (mlx-lm, :8081) |
 | Vision + camera | `see describe\|ask\|ocr\|compare\|snap` | Qwen3-VL-8B (mlx-vlm, :8082) · imagesnap |
@@ -48,7 +62,7 @@ http://127.0.0.1:8787 — one origin, tabs per modality:
 |---|---|
 | Image / Video / Sound / Voice / Write / Vision | run form (same args as the CLI) · jobs list with cancel · gallery with inline preview · camera snap |
 | 3D & VR | WebXR room (iframe + full screen) · joint picker · GLB/STL viewer · meshes & prints gallery · "set in room" |
-| Models | manifest inventory: present / downloading / missing per model, HF-cached audio models, tool checklist |
+| Models | manifest inventory: present / downloading / missing per model, the forge recommendation for this machine, HF-cached audio models, tool checklist |
 | Services | start / stop / restart / logs for ComfyUI, mlx-audio, writer LLM, vision VLM |
 | Resources | CPU, GPU (IOAccelerator), memory, swap, disk, top processes · **Unload all models / Stop everything** |
 
@@ -62,6 +76,7 @@ listens under the same id — ComfyUI only sends per-step progress to the submit
 stack status | start comfy | start audio | stop comfy | free | logs comfy 100 | panel
 gen status                      # which model sets are installed + queue
 fetch-models --list             # ✓/✗ per manifest entry;  fetch-models  downloads the ✗
+forge-recommend                 # what this machine should fetch;  fetch-models --profile auto  downloads it
 voice voices                    # Kokoro voice list
 ```
 

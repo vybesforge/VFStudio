@@ -55,18 +55,21 @@ def die(msg, code=1):
 
 
 def pick_device():
-    """mps when available, else cpu (with a warning on stderr)."""
+    """cuda (NVIDIA or ROCm), then Metal, then CPU. STEMS_DEVICE overrides."""
     forced = os.environ.get("STEMS_DEVICE")
     if forced:
         return forced
     try:
         import torch
-        if torch.backends.mps.is_available():
+        cuda = getattr(torch, "cuda", None)
+        if cuda is not None and cuda.is_available():
+            return "cuda"
+        if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
             return "mps"
     except Exception as e:  # torch missing / broken
         print(f"warning: torch check failed ({e}); using cpu", file=sys.stderr)
         return "cpu"
-    print("warning: MPS not available, falling back to cpu (slow)", file=sys.stderr)
+    print("warning: no CUDA, ROCm, or Metal device; using cpu (slow)", file=sys.stderr)
     return "cpu"
 
 

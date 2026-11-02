@@ -136,7 +136,7 @@ ENDPOINTS = [
         "paths": [("POST", "/v1/audio/speech", "JSON + ref_audio, ref_text")],
         "snippet": (
             "curl -s -X POST {{base}} -H 'Content-Type: application/json' \\\n"
-            f"  -d '{{\"model\":\"{CLONE_MODEL}\",\"input\":\"New line in your voice\",\"ref_audio\":\"/Users/dcruse/media-stack/output/voice/ref.wav\",\"ref_text\":\"the words in the reference\",\"response_format\":\"wav\"}}' \\\n"
+            f"  -d '{{\"model\":\"{CLONE_MODEL}\",\"input\":\"New line in your voice\",\"ref_audio\":\"ref.wav\",\"ref_text\":\"the words in the reference\",\"response_format\":\"wav\"}}' \\\n"
             "  -o clone.wav"
         ),
     },
@@ -217,17 +217,84 @@ def read_pid(name: str) -> int | None:
     return pid
 
 
+def _engines() -> dict:
+    """Last probe written by forge-recommend. Empty if this machine has not been probed yet."""
+    path = STACK / "run" / "forge-engines.json"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data.get("engines") or {}
+
+
+def _service_launch(name: str) -> tuple[dict, dict, str | None]:
+    """Return (service copy, env, error). The engine map picks CUDA, ROCm, MLX, or a stand-in."""
+    svc = dict(SERVICES[name])
+    svc["cmd"] = list(svc["cmd"])
+    env = _base_env()
+    eng = _engines()
+    if not eng:
+        return svc, env, None
+    backend = eng.get("backend") or "mlx"
+    if name == "comfy":
+        if backend in ("cuda", "rocm") and eng.get("gpu_index") is not None:
+            env["CUDA_VISIBLE_DEVICES"] = str(eng["gpu_index"])
+        if backend == "cpu":
+            svc["cmd"].append("--cpu")
+        return svc, env, None
+    if name == "audio" and backend != "mlx":
+        speaches = shutil.which("speaches")
+        if not speaches:
+            return svc, env, "Voice on this machine is speaches (not MLX), and speaches is not on PATH. See INSTALL-UBUNTU.md section 5."
+        env["UVICORN_HOST"] = "127.0.0.1"
+        env["UVICORN_PORT"] = "8000"
+        svc["cmd"] = [speaches]
+        svc["label"] = "speaches"
+        svc["desc"] = "TTS and STT (speaches)"
+        return svc, env, None
+    if name == "llm":
+        slot = eng.get("llm") or {}
+        if slot.get("engine") == "llama-server":
+            binary = os.environ.get("LLAMA_SERVER") or shutil.which("llama-server")
+            model = os.environ.get("WRITER_GGUF") or slot.get("model") or ""
+            if not binary or not model or not Path(model).exists():
+                return svc, env, "Writer here is llama-server. Set LLAMA_SERVER if needed and WRITER_GGUF to a local GGUF. VF_UNCENSORED=1 selects the labeled uncensored writer. See INSTALL-UBUNTU.md section 6."
+            svc["cmd"] = [binary, "-m", model, "--host", "127.0.0.1", "--port", "8081"]
+            svc["label"] = "writer (llama-server)"
+            return svc, env, None
+        model = os.environ.get("LLM_MODEL") or slot.get("model") or ""
+        if not model:
+            return svc, env, "No writer model selected. Export LLM_MODEL, or VF_UNCENSORED=1 for the labeled uncensored Qwen."
+        svc["cmd"] = [str(LLM_PY), "-m", "mlx_lm.server", "--host", "127.0.0.1", "--port", "8081", "--model", model]
+        if os.environ.get("VF_UNCENSORED") == "1" or "Uncensored" in model or "uncensored" in model:
+            svc["desc"] = "labeled uncensored writer"
+        return svc, env, None
+    if name == "vision" and backend != "mlx":
+        binary = os.environ.get("LLAMA_SERVER") or shutil.which("llama-server")
+        model = os.environ.get("VLM_GGUF") or ""
+        mmproj = os.environ.get("VLM_MMPROJ") or ""
+        if not binary or not model or not mmproj:
+            return svc, env, "Vision here is llama-server with a VLM GGUF and mmproj. Set VLM_GGUF and VLM_MMPROJ. See INSTALL-UBUNTU.md section 6."
+        svc["cmd"] = [binary, "-m", model, "--mmproj", mmproj, "--host", "127.0.0.1", "--port", "8082"]
+        svc["label"] = "vision (llama-server)"
+        return svc, env, None
+    return svc, env, None
+
+
 def start(name: str) -> dict:
-    svc = SERVICES[name]
-    if read_pid(name) or port_open(svc["port"]):
-        return {"ok": True, "already": True, "message": f"{svc['label']} already running"}
+    base = SERVICES[name]
+    if read_pid(name) or port_open(base["port"]):
+        return {"ok": True, "already": True, "message": f"{base['label']} already running"}
+    svc, env, err = _service_launch(name)
+    if err:
+        return {"ok": False, "message": err}
     log = LOGS / f"{name}.log"
     fh = open(log, "ab")
     fh.write(f"\n=== start {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n".encode())
     fh.flush()
     proc = subprocess.Popen(
         svc["cmd"], cwd=svc["cwd"], stdout=fh, stderr=subprocess.STDOUT,
-        env=_base_env(), start_new_session=True,
+        env=env, start_new_session=True,
     )
     pidfile(name).write_text(str(proc.pid))
     return {"ok": True, "pid": proc.pid, "message": f"{svc['label']} starting on :{svc['port']}"}

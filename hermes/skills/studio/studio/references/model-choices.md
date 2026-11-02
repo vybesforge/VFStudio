@@ -1,5 +1,11 @@
 # Model choices — what is installed, why, and what was rejected (audited 2026-11-02)
 
+`bin/forge-recommend` turns the limits below into a fetch list for whatever machine it detects
+(`models/manifest.json` `fit` blocks). Essentials / quality / optional, largest GPU only, 0.75 GB
+slack so a driver that reports 16376 MiB still counts as 16 GB. Apple Silicon gets the
+Qwen-Image-Edit GGUF and the MLX repos; NVIDIA and AMD do not. Read the table before changing a
+`fit` threshold.
+
 Read this before suggesting "a newer model". Every row was checked against three gates:
 **runs on MPS in 64 GB** (fp8 has no Metal kernel → upcasts to bf16, double the size; int8-convrot
 runs but dequantises), **licence allows Dylan's commercial use**, **measured here**, not quoted.
@@ -10,7 +16,7 @@ runs but dequantises), **licence allows Dylan's commercial use**, **measured her
 | Image edit | **Qwen-Image-Edit 2509 Q4 GGUF** (13 GB, ComfyUI-GGUF) + Lightning 4-step LoRA; fp8 fallback | only open editor that keeps identity; GGUF avoids the 39 GB upcast | **Qwen-Image-Edit 2511** (newer) — no public Q4 GGUF yet; int8-convrot 20.5 GB would upcast. Swap in when a GGUF appears (manifest id pattern `qwen-image-edit-2511-gguf`) |
 | ControlNet | Z-Image Fun ControlNet Union (`model_patches/`) | matches the default t2i | — |
 | Upscale | ESRGAN / UltraSharp (8 s) · **SeedVR2 3B int8** (diffusion, 40 s for 2×) | 3B is the memory-sane one | SeedVR2 **7B** fp16 (16 GB) — marginal gain, slower; add only for hero stills |
-| Video | **Wan 2.2 TI2V 5B** (Apache-2.0, 832×480×49f in 372 s) · **HunyuanVideo 1.5** 720p-i2v + 480p-t2v cfg-distilled fp16 (8.3B, SOTA open quality; `gen video --model hyv15 "prompt" [--image start.png]` — graph written from the official template, **not yet run on this Mac**: first run must record time + memory here) | 5B = fast path; HyV1.5 = quality path | **LTX-2.5** 22B — 44 GB bf16 on MPS, no. **Wan 2.2 14B** — 27 GB fp8 → 54 GB, no. Lip-sync (Wan S2V 14B) — same problem → run on the RTX 4080 / V100 box |
+| Video | **Wan 2.2 TI2V 5B** (Apache-2.0, 832×480×49f in 372 s) · **HunyuanVideo 1.5** 720p-i2v + 480p-t2v cfg-distilled fp16 (8.3B, SOTA open quality; `gen video --model hyv15 "prompt" [--image start.png]` — graph written from the official template, **not yet timed on this machine**: first run must record time + memory) | 5B = fast path; HyV1.5 = quality path | **LTX-2.5** 22B — 44 GB bf16 on MPS, no. **Wan 2.2 14B** — 27 GB fp8 → 54 GB, no. Lip-sync (Wan S2V 14B) — same size problem; only a card with room for ~30 GB+ |
 | SFX | **Stable Audio 3 Small-SFX** (`--model sa3sfx`, 6 s clip in 4.1 s) · Stable Audio Open 1.0 (`sao`, 12.4 s, CC) · SA3 medium (`sa3`, long clips) | Small-SFX is purpose-built for effects and 3× faster; A/B listened by Dylan pending | — |
 | Music | **ACE-Step 1.5 turbo AIO** (30 s track in 72 s) · MiniMax-Music3 via mlx-audio | lyrics + structure tags, fast | ACE-Step 1.5 **XL** turbo (10 GB + 8.4 GB encoder) — heavier, not measured; YuE2 3B int8 |
 | Stems | Demucs **htdemucs** (MPS, 5–8 s / 30 s) · htdemucs_ft | standard | — |

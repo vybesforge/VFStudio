@@ -141,9 +141,10 @@ the provider's `list_models()` output.
 ## Models and generation from the CLI
 
 `~/media-stack/models/manifest.json` is the single list of required model files
-(id, folder-relative path, URL, size, role). `fetch-models` downloads whatever is
-missing, sequentially and resumably; `fetch-models --list` shows present/missing;
-`fetch-models --check` exits non-zero if anything is absent. `gen` (symlinked in
+(id, folder-relative path, URL, size, role, plus a `fit` block). `bin/forge-recommend`
+probes the machine and prints which ids to fetch; `fetch-models --profile auto` downloads
+that set. `fetch-models` still downloads whatever is missing, sequentially and resumably;
+`fetch-models --list` shows present/missing; `fetch-models --check` exits non-zero if anything is absent. `gen` (symlinked in
 `~/.local/bin`) is one CLI for every ComfyUI pipeline — `gen image|control|upscale|
 video|sfx|music|status` — and prints one JSON line with the output paths. Graph
 parameters per model, the template-reading technique and which recipes are verified
