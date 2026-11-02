@@ -269,7 +269,18 @@ def _game_projects():
     for d in sorted(GAME_DIR.iterdir()):
         if not d.is_dir() or d.name in GAME_SKIP or d.name == "tools":
             continue
-        kind = "godot" if (d / "project.godot").exists() else "web" if (d / "package.json").exists() or (d / "index.html").exists() else None
+        if (d / "project.godot").exists():
+            kind = "godot"
+        elif (d / "package.json").exists():
+            try:
+                pkg = (d / "package.json").read_text(errors="replace")
+            except OSError:
+                pkg = ""
+            kind = "three" if '"three"' in pkg else "web"
+        elif (d / "index.html").exists():
+            kind = "web"
+        else:
+            kind = None
         if not kind:
             continue
         counts = {}

@@ -196,7 +196,8 @@
       <div class="btns"><button title="Open the local ComfyUI page, where photo-to-mesh runs." onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div>
       <div class="hint">TRELLIS is started there, not from this page. The recipe is in the <code>local-media-stack</code> skill.</div></div>
     <div class="card"><div class="name">Print</div><div class="desc">Check a mesh, then slice it for a printer (<code>bambu</code> or <code>generic</code>). Skill <code>studio-3d-print</code>. Mesh previews show in the gallery below.</div></div>
-    <div class="card"><div class="name">VR build</div><div class="desc">Godot 4.7 OpenXR room at <code>~/media-stack/vr-godot</code>; Windows SteamVR export + <code>optimize_glb.sh</code>. Skill <code>studio-vr</code>.</div></div>
+    <div class="card"><div class="name">VR build</div><div class="desc">Godot OpenXR room. Skill <code>studio-vr</code>. This is a viewer, not a game project.</div></div>
+    <div class="card"><div class="name">Web game</div><div class="desc">Three.js page. Stamp it with <code>game/new_project.sh web</code>. It shows here as Three.js. Play opens the production build. Skill <code>studio-game</code>.</div></div>
   </div>
   <div class="row" style="margin-top:14px"><h2 style="margin:0">Meshes &amp; prints</h2><button title="Reload meshes and prints." onclick="loadGallery('3d')">Refresh</button></div>
   <div class="gal" id="gal-3d"></div>
@@ -583,13 +584,14 @@ function renderItem(it,i,kind,cache){
 async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }
 async function loadGames(){
   const d=await (await fetch('/api/studio/games')).json();
-  $('games').innerHTML = d.projects.length ? d.projects.map(g=>`<div class="card"><div class="name">${g.name} <span class="muted" style="font-weight:400">· ${g.kind==='godot'?'Godot 4':'web (Three.js)'} · ${g.when}</span></div>
+  const engineLabel=k=>k==='godot'?'Godot 4':k==='three'?'Three.js':'web';
+  $('games').innerHTML = d.projects.length ? d.projects.map(g=>`<div class="card"><div class="name">${g.name} <span class="muted" style="font-weight:400">· ${engineLabel(g.kind)} · ${g.when}</span></div>
     <div class="desc" style="white-space:pre-wrap;max-height:90px;overflow:hidden">${(g.readme||'').replace(/[#*`]/g,'').trim().slice(0,320)}</div>
     <div class="muted" style="margin:6px 0">${Object.entries(g.assets).map(([k,v])=>`${v} ${k}`).join(' · ')||'no media assets'}</div>
     <div class="btns">${g.play?`<button class="primary" title="Play this project in the browser." onclick="window.open('${g.play}','_blank')">▶ Play in browser</button>`:''}
       <button title="Copy the project path." onclick="navigator.clipboard.writeText('${g.path}');flash('path copied')">copy path</button>
       ${g.kind==='godot'?`<button title="Copy a command that opens this project locally." onclick="navigator.clipboard.writeText('godot --path ${g.path}');flash('run command copied')">copy run cmd</button>`:`<button title="Copy the dev command for this project." onclick="navigator.clipboard.writeText('cd ${g.path} && npm run dev');flash('dev command copied')">copy dev cmd</button>`}
-    </div></div>`).join('') : '<div class="card muted">no projects yet — <code>game/new_project.sh 2d|3d Name ~/media-stack/game/Name</code></div>';
+    </div></div>`).join('') : '<div class="card muted">no projects yet — <code>game/new_project.sh 2d|3d|web Name ~/media-stack/game/Name</code>. <code>web</code> is the Three.js page.</div>';
 }
 async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
 

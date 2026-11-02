@@ -43,7 +43,7 @@ Gated downloads: `huggingface-cli login` or `HF_TOKEN`. The token is not stored 
 | Mesh repair / rig / render | `bin/blender -b -P …` | Blender 5.2 |
 | CAD → STL → G-code | `tools/print/cad_examples/*.py` · `meshcheck.py` · `slice --preset bambu\|generic` | build123d · trimesh · OrcaSlicer 2.4 CLI |
 | VR | `vr-godot/` · `tools/vr/optimize_glb.sh` · WebXR room `vr/` (any GLB, joint picker, controllers) | Godot 4.7 OpenXR · gltf-transform · Three.js |
-| Games 2D/3D | `game/new_project.sh 2d\|3d <name> <dest>`, templates with headless run/export | Godot 4.7 |
+| Games | `game/new_project.sh 2d\|3d\|web` | Godot 4 (desktop) · Three.js (browser) |
 | Animation | `tools/anim/rigify_auto.py` · `gp_anim.py` · `spritesheet.py` · `pngseq_to_vse.py` | Blender Rigify + Grease Pencil · Krita · Tahoma2D |
 | Writing (uncensored) | `scribe prose\|outline\|chapter\|screenplay\|dialogue\|lore\|revise` | Qwen3.8-27B-Uncensored (mlx-lm, :8081) |
 | Vision + camera | `see describe\|ask\|ocr\|compare\|snap` | Qwen3-VL-8B (mlx-vlm, :8082) · imagesnap |
