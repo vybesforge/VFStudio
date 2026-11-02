@@ -1,3 +1,17 @@
+## 2026-11-02 (desktop): animation step after the joint picker
+
+The picker's **Build rig** already bakes a 24-frame `AutoCycle`; this adds a way to ask for a
+*specific* clip. `tools/anim/animate_clip.py` keys one procedural sine gait onto a rigged GLB —
+`walk | trot | gallop | idle` — via `stack anim <glb> --clip trot --frames 24` or the panel's
+3D tab → **Animate the built rig** card (`POST /api/rig/animate`, `GET /api/rig/animate/status`),
+writing `vr/<asset>_anim.glb`. The room's **Anim** button (added earlier today) plays it.
+Verified: `hog_quad_rig.glb` (Rigify quadruped, 46 DEF bones) → `Trot`, 24 f, `max_disp 0.395`,
+diagonal pairs swinging fore-aft in the rendered frames; `hog_rig_test.glb` → `Trot`/`Gallop`,
+`moving_frac 1.0`. Bone naming: `FL_upper…` chains from `rig_from_joints.py`, or Rigify
+`DEF-thigh.L`/`DEF-front_thigh.L`/`DEF-upper_arm.L` (strip the prefix, skip the `.001` twins).
+No local motion model exists, so these are gaits, not authored animation — `--save-blend` in the
+rig builders is the route for hand-keyed work.
+
 # Project state — read this first
 
 ## 2026-11-02 (desktop): rig joints — local VLM places them, and the pig.glb identity bug

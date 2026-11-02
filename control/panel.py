@@ -815,6 +815,62 @@ def api_rig_auto(payload: dict = Body(default={})):
             "vision": (started or {}).get("message", "already running")}
 
 
+@app.post("/api/rig/animate")
+def api_rig_animate(payload: dict = Body(default={})):
+    """Key a named locomotion clip onto a rigged GLB (the step after "Build rig").
+
+    No motion library is installed here, so the clips are procedural sine gaits in
+    tools/anim/animate_clip.py — walk / trot / gallop / idle. Writes vr/<asset>_anim.glb
+    and logs to rig/anim_<asset>.log; the room's Anim button plays clip 0 by name."""
+    asset = payload.get("asset") or "asset"
+    slug = _rig_slug(asset)
+    source = payload.get("source")
+    if not source:
+        # <asset>_rigged.glb is what "Build rig" writes; an already-rigged asset in the room
+        # (e.g. a Rigify export) is the fallback, so the card works on either.
+        for cand in (f"vr/{slug}_rigged.glb", f"vr/{slug}.glb"):
+            if (STACK / cand).is_file():
+                source = cand
+                break
+        source = source or f"vr/{slug}_rigged.glb"
+    clip = str(payload.get("clip") or "walk")
+    frames = int(payload.get("frames") or 24)
+    batch = STACK / "bin" / "blender"
+    tool = STACK / "tools" / "anim" / "animate_clip.py"
+    if not tool.is_file():
+        return JSONResponse({"ok": False, "message": f"missing {tool}"}, status_code=500)
+
+    def _resolve(q):
+        q = Path(q)
+        return q if q.is_absolute() else (STACK / q)
+
+    src = _resolve(source)
+    if not src.is_file():
+        return JSONResponse({"ok": False, "message": f"missing {src} — build the rig first"},
+                            status_code=400)
+    dest = VR / f"{_rig_slug(asset)}_anim.glb"
+    RIG.mkdir(parents=True, exist_ok=True)
+    log = RIG / f"anim_{_rig_slug(asset)}.log"
+    cmd = [str(batch), "-b", "--python", str(tool), "--", str(src), str(dest),
+           "--clip", clip, "--frames", str(frames)]
+    with open(log, "wb") as fh:
+        proc = subprocess.Popen(cmd, cwd=str(STACK), stdout=fh, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    return {"ok": True, "pid": proc.pid, "clip": clip, "dest": str(dest), "log": str(log),
+            "asset": _rig_slug(asset), "source": str(src)}
+
+
+@app.get("/api/rig/animate/status")
+def api_rig_animate_status(asset: str = "asset"):
+    log = RIG / f"anim_{_rig_slug(asset)}.log"
+    txt = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+    dest = VR / f"{_rig_slug(asset)}_anim.glb"
+    return {"log": txt, "done": "done:" in txt or "Traceback" in txt,
+            "failed": "Traceback" in txt or "[anim] no armature" in txt,
+            "wrote": dest.exists(), "src": f"/vr/{dest.name}" if dest.exists() else None,
+            "asset": _rig_slug(asset)}
+
+
 @app.get("/api/rig/auto/status")
 def api_rig_auto_status(asset: str = "asset"):
     log = RIG / f"auto_{_rig_slug(asset)}.log"
