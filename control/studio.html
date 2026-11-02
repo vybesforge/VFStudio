@@ -189,6 +189,15 @@
     <div class="btns" style="margin:0"><button class="primary" title="Open the room full screen." onclick="window.open('/vr/index.html','_blank')">Open full screen (WebXR)</button>
       <button title="Mark joints on the mesh so it can be rigged." onclick="window.open('/vr/index.html?rig=1','_blank')">Joint picker</button><button title="Reload the room embedded on this page." onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
   <iframe id="room" class="room" src="/vr/index.html" allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"></iframe>
+  <div class="card" style="margin-top:12px"><div class="name">Animate the built rig</div>
+    <div class="desc">After the joint picker's <b>Build rig</b>: keys one named locomotion clip onto that rig and writes <code>vr/&lt;asset&gt;_anim.glb</code>. Clip names: walk · trot · gallop · idle — procedural sine gaits in <code>tools/anim/animate_clip.py</code> (no motion model is installed locally). The room's <b>Anim</b> button plays it.</div>
+    <div class="btns" style="align-items:center">
+      <select id="anim-clip"><option value="walk">walk</option><option value="trot">trot</option><option value="gallop">gallop</option><option value="idle">idle</option></select>
+      <label class="muted" style="font-size:12px">frames <input id="anim-frames" value="24" size="3" style="width:46px"></label>
+      <button class="primary" onclick="runAnim()">Animate</button>
+      <span class="muted" id="anim-status" style="font-size:12px"></span>
+    </div>
+    <pre id="anim-log" class="muted" style="display:none;max-height:150px;overflow:auto;font-size:11px;margin-top:8px"></pre></div>
   <div class="row" style="margin-top:14px"><h2 style="margin:0">Game projects <span class="muted" style="font-weight:400;font-size:12px">~/media-stack/game/ — their models, audio and sprites also appear in the galleries</span></h2><button onclick="loadGames()">Refresh</button></div>
   <div id="games" class="grid"></div>
   <div class="grid" style="margin-top:14px">
@@ -593,6 +602,26 @@ async function loadGames(){
       ${g.kind==='godot'?`<button title="Copy a command that opens this project locally." onclick="navigator.clipboard.writeText('godot --path ${g.path}');flash('run command copied')">copy run cmd</button>`:`<button title="Copy the dev command for this project." onclick="navigator.clipboard.writeText('cd ${g.path} && npm run dev');flash('dev command copied')">copy dev cmd</button>`}
     </div></div>`).join('') : '<div class="card muted">no projects yet — <code>game/new_project.sh 2d|3d|web Name ~/media-stack/game/Name</code>. <code>web</code> is the Three.js page.</div>';
 }
+async function runAnim(){
+  const clip=$('anim-clip').value, frames=parseInt($('anim-frames').value)||24;
+  const st=$('anim-status'); st.textContent='starting…';
+  const asset=(await (await fetch('/api/vr/current')).json()).asset;
+  const r=await (await fetch('/api/rig/animate',{method:'POST',headers:{'Content-Type':'application/json'},
+     body:JSON.stringify({asset,clip,frames})})).json();
+  if(!r.ok){ st.textContent='failed: '+(r.message||JSON.stringify(r)); return; }
+  $('anim-log').style.display='block'; st.textContent=`${clip} · rig ${r.source.split('/').pop()}`;
+  for(let i=0;i<120;i++){
+    await new Promise(s=>setTimeout(s,2000));
+    const s=await (await fetch('/api/rig/animate/status?asset='+encodeURIComponent(asset))).json();
+    $('anim-log').textContent=s.log||''; $('anim-log').scrollTop=$('anim-log').scrollHeight;
+    if(s.done){
+      if(s.failed){ st.textContent='failed — see log'; return; }
+      st.innerHTML=`wrote <a href="${s.src}" target="_blank" style="color:var(--cyan)">${s.src.split('/').pop()}</a> — open it in the room, press Anim`;
+      return; }
+  }
+  st.textContent='still running — check the log';
+}
+
 async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads ${a.name} (asset “${a.asset}” → ${a.joints_file}) · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'nothing in ~/media-stack/vr/ — use “set in room” on a GLB'; }
 
 // inventory + hardware recommendation (same probe the forge-recommend CLI uses)

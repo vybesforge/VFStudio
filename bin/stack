@@ -71,6 +71,16 @@ case "$cmd" in
       *) echo "usage: stack rig auto|list" >&2; exit 1 ;;
     esac
     ;;
+  anim)
+    # stack anim <rigged.glb> [--clip walk|trot|gallop|idle] [--frames 24] [--out file.glb]
+    [ -z "$target" ] && { echo "usage: stack anim <rigged.glb> [--clip walk|trot|gallop|idle] [--frames N] [--out file.glb]" >&2; exit 1; }
+    src="$target"; shift 2
+    [ -f "$src" ] || { echo "no such GLB: $src" >&2; exit 1; }
+    out="${src%.glb}_anim.glb"
+    prev=""
+    for i in "$@"; do [ "$prev" = "--out" ] && out="$i"; prev="$i"; done
+    exec "$STACK/bin/blender" -b --python "$STACK/tools/anim/animate_clip.py" -- "$src" "$out" "$@"
+    ;;
   vr)
     # The VR room is a tab in the panel now — one origin, port 8787.
     ensure_panel || exit 1
@@ -83,7 +93,7 @@ case "$cmd" in
     exec "$ROOT/bin/forge-recommend" "${@:2}"
     ;;
   *)
-    echo "usage: stack {start|stop|restart|status|logs|panel|free|music|vr|rig|recommend} [comfy|audio]" >&2
+    echo "usage: stack {start|stop|restart|status|logs|panel|free|music|vr|rig|anim|recommend} [comfy|audio]" >&2
     exit 1
     ;;
 esac
