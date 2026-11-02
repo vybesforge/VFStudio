@@ -8,6 +8,8 @@ copy-paste rows: TTS `/v1/audio/speech`, STT `/v1/audio/transcriptions`, voice c
 Each row has **Copy URL**, **Details** (method/path/schema table + a working curl) and **Copy all → .env
 / JSON**; a host switch flips every link between `127.0.0.1` and the LAN IP (`192.168.1.44`), with a
 note that only the panel is LAN-bound unless a service is started with a 0.0.0.0 listen.
+The status pill on each service card is itself the start/stop toggle (running → click stops, stopped →
+click starts; verified both directions on ComfyUI, which came back responding in 6 s).
 Verified live: TTS returned a 24 kHz wav, STT transcribed `output/voice/clone_*.wav`, `/object_info`
 returned 1033 nodes; clipboards checked by stubbing `navigator.clipboard.writeText`. Caveat: the
 LLM/VLM rows were checked against `tools/llm/scribe` + `tools/vision/see` request bodies, not by
