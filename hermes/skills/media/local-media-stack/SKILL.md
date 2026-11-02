@@ -316,6 +316,20 @@ effort here rather than downstream.
   (`vision_analyze` with a `region` box over the feet/face/hands) and ask a
   question about that detail alone. Re-roll the reference if it fails; a trait
   that is wrong at the source is unfixable downstream.
+- **Measure the pose and the margins in pixels; do not grade them by eye or by VLM.**
+  Vision-model angle estimates contradict each other on the same image (one read of a
+  wide A-pose said "45 degrees", another "arms almost horizontal"), and a whole-frame
+  judgement cannot see a hand 30 px from the frame edge. `scripts/pose_measure.py
+  ref1.png ref2.png` prints, per image, the subject bbox, left/right/top/bottom margins,
+  each hand tip's distance to the edge, and the arm angle off vertical computed from
+  shoulder row to hand row. Use it to choose between A-pose candidates and to prove a
+  re-generation actually widened the arms.
+- **When you show the user a crop for review, crop from a measured bbox and never
+  resize to a square.** Both times a reviewer said "the head is stretched" / "that is
+  only half a face", the asset was fine and the preview was wrong: a rectangular crop
+  forced into a square distorts it, and a hand-picked top-22% box clips at nose height.
+  Derive the region from the subject mask (top of subject + head-height fraction), keep
+  the crop's own aspect ratio, and state the region in the message.
 - **Generate several seeds and choose by eye.** Three to four candidates cost a
   few minutes and are cheaper than any repair pass.
 
@@ -623,6 +637,12 @@ the scripts under deadline:
   albedo; only equal exposure on every side makes a colour difference a defect.
   `scripts/render_views.py` does front / left / back / right / 3-4 with per-view
   lighting — use it instead of hand-placing cameras.
+- **Use the right renderer for the question.** `render_views.py` / `render_asset.py` are
+  EEVEE comparison tools — fast, and flat enough that a user reads them as an untextured
+  base mesh. For anything shown to the user, render with `scripts/render_hero.py`
+  (Cycles, AgX, studio sweep, per-view key/fill/rim, SSS nudge):
+  `bin/blender -b -P scripts/render_hero.py -- out.glb outdir --views front,threequarter,head
+  --size 1000x1400 --samples 128` → ~60-90 s per view.
 
 GLB parsing gotchas and the full check list are in `references/asset-qc.md`.
 
@@ -644,8 +664,10 @@ ComfyUI installs the official graph at
 `ComfyUI/.venv/lib/python3.12/site-packages/comfyui_workflow_templates_json/templates/3d_pixal3d_trellis2_image_to_model.json`.
 Hand-assembling the same nodes from `/object_info` looks right and produces
 garbage: the texture decode comes out as noise and bakes into a scrambled atlas
-(abstract yellow/teal blocks, stripes, or terrazzo speckle). `scratch/run_trellis2.py`
-drives the template through the browser UI and is the proven path — see below.
+(abstract yellow/teal blocks, stripes, or terrazzo speckle). `scratch/run_trellis2_hq.py`
+drives that exact template through `/prompt` by re-pointing its mesh at `SaveGLB`, and
+is the proven path — see below. `scratch/run_trellis2.py` (browser/CDP) still works as a
+fallback but has not been needed since the API route was verified.
 
 What the template does that a naive graph does not:
 
@@ -665,19 +687,57 @@ What the template does that a naive graph does not:
 - **`MeshSmoothNormals(crease_angle=180)` last** is what removes the faceted look;
   `SaveGLB` writes no `NORMAL` attribute on its own.
 
-**This template cannot be run through `/prompt`. Drive the real UI.** Two hard
-blockers, both confirmed against `/object_info` and the server log:
+**The template as shipped cannot be queued through `/prompt` — re-point its mesh at
+`SaveGLB` and it can.** Two blockers, both confirmed against `/object_info` and the
+server log:
 
 - `Save3DAdvanced` requires a `viewport_state` (`LOAD_3D`) socket that only the web
   frontend injects, so it cannot be constructed from a script.
-- **No output node accepts MESH.** `MeshToFile3D` has `output_node=False`, so with
+- **No output node accepts MESH.** `MeshToFile3D` reports `output_node=False`, so with
   the UI-only savers pruned it never executes on its own. The prompt then reports
   `status_str=success` in 0.02–8 s having run nothing at all, with only
   `PreviewImage`/`MaskPreview` entries in `/history` and no file in `output/3d/`.
   **Treat "success but no 3D file written" as a failed run** — check for the output
   file, never the status alone.
 
-Working route (CDP recipe and code in `references/trellis2-ui-run.md`): open
+**Fix — feed the mesh to `SaveGLB` instead.** `MeshToFile3D` emits `FILE_3D_GLB` on its
+`model_3d` output and `SaveGLB` accepts `FILE_3D_GLB` in its `mesh` input, so the node
+that fed `Save3DAdvanced.model_3d` can feed a `SaveGLB` instead:
+
+1. Convert the template's UI graph to an API prompt (widgets in declaration order; skip
+   the `control_after_generate` / `image_upload` pseudo-widgets).
+2. Read `prompt['322'].inputs['model_3d']` (the `Save3DAdvanced` link) — the
+   `[node, slot]` of the final `MeshToFile3D` — **before** deleting anything.
+3. Add `SaveGLB(mesh=<that link>, filename_prefix='3d/<name>')`.
+4. Delete the viewer/saver nodes (`322` Save3DAdvanced, `323` + `246`
+   Preview3DAdvanced) and the uninstalled branch (`319`, `55`, `56`, `242`, `298`),
+   then unlink any remaining input that still points at a deleted id.
+5. Keep `CFGOverride` / `RescaleCFG` / `ModelSamplingSD3` and the second (upsample)
+   `KSampler` exactly as authored — they are the reason hand-built graphs bake noise
+   atlases.
+
+This keeps the authored graph, so it invalidates nothing said below about guidance
+emulation. `scratch/run_trellis2_hq.py` implements it and sets the HQ profile by node
+id (`312` ImageCropToMask, `94` Trellis2UpsampleStage, `3/18/23/12` the four KSamplers,
+`241` RemeshMesh, `186` DecimateMesh, `288` PrimitiveInt → unwrap + colour bake, `233`
+AO, `224` normal map, `261` RenderUVAtlas).
+
+**Proven end to end**, same input, HQ profile: `status_str=success` *and* an 82 MB
+`pepper_hq_00001_.glb` on disk, `qc_glb.py` PASS at **1,194,140 tris / 725,075 verts /
+3 PBR maps / `NORMAL, POSITION, TANGENT, TEXCOORD_0` / texture std 23.8**. Two notes
+from that run: the same graph re-submitted with identical inputs finishes in ~4 min
+because ComfyUI reuses the cached structure/upsample stages (only remesh, decimate,
+bakes and save re-run), so a timed run is not a cold-cache number; and after any
+change to a wired node the run can take 25+ min again.
+
+**Import hazard:** `scratch/run_trellis2.py` parses `sys.argv` at import time and
+*deletes* `--image` / `--refname` from it, so importing it for its converter silently
+strips your own CLI flags and argparse dies with "the following arguments are
+required". Save `sys.argv`, replace it with `[argv[0]]` around the import, restore it
+after.
+
+Fallback if you would rather drive the browser (CDP recipe and code in
+`references/trellis2-ui-run.md`): open
 `http://127.0.0.1:8188`, fetch
 `/templates/3d_pixal3d_trellis2_image_to_model.json` (served directly — not under
 `/api/`), call `app.loadGraphData(wf)`, set `PrimitiveBoolean` to `true`, point
@@ -694,16 +754,39 @@ strings (`String(node.id)`) or the loop silently matches nothing and nothing is 
 
 If you must build an API prompt anyway:
 
-- `COMFY_DYNAMICCOMBO_V3` inputs (e.g. `RemeshMesh.sign_mode`) serialise as the key
-  plus that key's **sub-input values inline** in `widgets_values`. Walk the widget
-  list as a queue and push the chosen option's sub-input names after it, or every
-  later widget shifts and validation fails with `Value 20.0 bigger than max of 1.0`.
 - Seed widgets carry an extra UI-only value (`fixed`/`randomize`) that must be skipped.
-- `RemeshMesh` with `sign_mode='solid'` needs its sub-inputs named explicitly:
-  `fill` (20.0) and `qef` (false). Positional mapping shifts by two and fails with
-  `Value 20.0 bigger than max of 1.0`. Set the base inputs by name instead —
-  resolution 768, band 1.0, project_back 0.0, fix_poles false, smooth_iters 20,
-  drop_small_components 0.01, precluster_max_verts 20000000.
+- **`COMFY_DYNAMICCOMBO_V3` inputs are `"<combo>": "<option key>"` plus NAMESPACED
+  `"<combo>.<sub>": value` keys — neither sibling keys nor a nested dict works.**
+  Confirmed on `RemeshMesh.sign_mode` (options `udf`/`sdf`/`solid`; `solid` needs
+  `fill`, `qef`) and `DecimateMesh.placement_mode` (options `midpoint`/`qem`; `qem`
+  needs `line_quadric_weight`, `feature_edge_quadric_weight`,
+  `feature_edge_min_dihedral_deg`, `clamp_v_to_edge`):
+
+  ```python
+  # CORRECT
+  {"sign_mode": "solid", "sign_mode.fill": 20.0, "sign_mode.qef": False}
+  {"placement_mode": "qem", "placement_mode.line_quadric_weight": 0.0,
+   "placement_mode.feature_edge_quadric_weight": 0.0,
+   "placement_mode.feature_edge_min_dihedral_deg": 30.0,
+   "placement_mode.clamp_v_to_edge": True}
+  ```
+
+  Both wrong shapes are silent disasters, not loud failures: bare sibling keys
+  (`fill`/`qef` at the top level) fail validation with `Required input is missing:
+  fill / qef`, and a nested dict fails at *execution* with `RemeshMesh.execute()
+  missing 1 required positional argument: 'sign_mode'` — after the samplers have
+  already run. Either way ComfyUI drops every output node and still returns
+  `status_str=success` with no file written. Derive the names from
+  `GET /object_info/<Node>` (`sign_mode[1].options[].inputs.required`) and remember
+  `finalize_prefix` joins with `.`.
+- **Guard the whole prompt for unset DynamicCombos before submitting.** Walk every
+  node's `/object_info` schema, and for each `COMFY_DYNAMICCOMBO_V3` input assert the
+  base key holds a valid option key *and* every sub-input of that option is present as
+  `"<combo>.<sub>"`. Run it at build time and raise — otherwise the failure surfaces
+  20+ minutes into a run, after sampling.
+- Set the remaining `RemeshMesh` base inputs by name: resolution 768, band 1.0,
+  project_back 0.0, fix_poles false, smooth_iters 20, drop_small_components 0.01,
+  precluster_max_verts 20000000.
 - Template defaults are 700k faces / 4096 atlas. Scale down to ~200k / 2048 for a VR
   asset, up via the HQ profile above for a hero asset — see that table for which knobs
   actually buy quality.
@@ -749,6 +832,15 @@ time, both with terminal access to `~/media-stack`. Expect `scratch/*.py` to
 change under you mid-task and expect runs you did not launch in `/history`.
 Put new work in a **new file** rather than editing one the other surface is
 editing, and check `ls -la` mtimes before trusting a script's contents.
+
+**Long batches must survive a server restart.** ComfyUI can drop and come back mid-run;
+a batch script that holds one `urlopen` call per job dies with
+`ConnectionRefusedError` and takes the remaining queue with it. Wrap every API call in
+a retry with backoff (`tries=6`, sleep `10 * attempt`), make the batch **resumable**
+(skip a job whose output file already exists), and append each finished job to a manifest
+JSON as you go — then a restart costs one image, not the batch. Measured here: a 4-step
+Qwen edit job is ~150 s, so a 30-image set is ~75 min and is worth structuring for
+restarts rather than running as one long loop.
 
 **Defer to the queue before submitting.** One GPU, several writers. Poll
 `GET http://127.0.0.1:8188/queue` until `queue_running` and `queue_pending` are
@@ -821,9 +913,16 @@ shippable GLBs). Ignore `ComfyUI/` (a clone with its own `.git`), `audio/.venv/`
     is a whole-figure question, face *detail* is a crop question, and one frame cannot
     answer both. `scripts/merge_head_overlay.py` does the measured fit and the enclosure
     merge — use it instead of re-deriving the alignment, which burns several attempts.
-12. **TRELLIS texture-stage cost explodes with remesh resolution on small subjects.**
-    A head-only job at remesh 1024 ran 400-440 s/step (2h35m); at remesh 384 it ran
-    3.4 s/step. The full body is fine at 1024. Check remesh before blaming RAM/swap.
+12. **TRELLIS texture-stage cost explodes on small subjects — check BOTH the upsample
+    target and resident memory before blaming remesh.** A head-only job at remesh 1024
+    ran 400-440 s/step (2h35m); at remesh 384 it ran 3.4 s/step. The full body is fine
+    at 1024. But the same kind of bust also measured **867 s/step** at remesh 320 with
+    `Trellis2UpsampleStage` 1536 while a vision model held ~10 GB of swap — after
+    `POST /api/studio/unload-all` (47 GB returned) and upsample 1024 it ran **~200
+    s/step**, and a first pass at ~9 s/step. So: unload everything first, print
+    `sysctl -n vm.swapusage` before submitting, and treat the upsample target as the
+    main cost driver. A 16-step texture stage at 200 s/step is ~50 min — budget it or
+    cut steps rather than watching it drift.
 13. **Verify the graph before queueing via the web UI.** ComfyUI's frontend restores
     the last-used workflow, so a `queuePrompt()` fired after a template load can run
     the wrong graph and silently write a PNG instead of a GLB. Assert

@@ -42,7 +42,8 @@ are copy-pasteable as written.
 | Fiction, screenplay, game dialogue, lore (uncensored, local) | `scribe prose|outline|chapter|screenplay|dialogue|lore|revise` | `studio-writing` |
 | Train a LoRA for a recurring subject/style | `lora train --dataset DIR --name NAME` → `gen image … --lora NAME` | `studio-lora` |
 | Look at an image / camera, OCR, compare renders (local) | `see describe|ask|ocr|compare|snap` | `studio-vision` |
-| 3D model from a photo | TRELLIS.2 via ComfyUI UI (`scratch/run_trellis2.py`) | `local-media-stack` (gold-standard recipe) |
+| 3D model from a photo | TRELLIS.2 with the template queued as an API prompt + `SaveGLB` (`scratch/run_trellis2_hq.py`) — no browser needed | `local-media-stack` (gold-standard recipe) |
+| Multi-angle / pose / outfit / expression set of ONE character (for a LoRA or a 3D asset) | Qwen-Image-Edit 2509 + Multiple-angles LoRA batches; masters first | `studio-lora` (its character-dataset reference) |
 | Fix / rig / render a mesh | Blender via `~/media-stack/bin/blender -b -P script.py` | `local-media-stack`, `blender` |
 | Parametric part → STL → G-code | `cad_examples/*.py`, `meshcheck.py`, `slice --preset bambu|generic` | `studio-3d-print` |
 | View asset in VR / build SteamVR app | Godot room, `optimize_glb.sh`, WebXR room | `studio-vr` |
@@ -132,6 +133,7 @@ between your runs. When delegating, give at most ONE subagent GPU-heavy work at 
 
 ## Rules that always apply
 
+- **Invent the variety; do not ship the literal minimum.** When Dylan asks for a character/image set, he expects the creative breadth already chosen: different camera angles and elevations, different poses, different outfits and hats, different facial expressions — say what you are adding rather than asking him to enumerate it ("don't make me spell it all out"). Keep it non-explicit and state the plan in one short table.
 - **State which half is local.** Generation is on-device; this conversation's reasoning is a cloud model. Say so when reporting.
 - **One GPU, two sessions.** Desktop and Telegram both drive ComfyUI. `gen` queues; hand-rolled scripts must poll `GET :8188/queue` until empty.
 - **Check the file, not the status.** A ComfyUI run can report success and write nothing. `gen` already fails on that; do the same in any custom script.
