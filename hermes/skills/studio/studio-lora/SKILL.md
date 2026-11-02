@@ -13,6 +13,8 @@ metadata:
 
 # studio-lora — train a LoRA locally (ai-toolkit on Apple Silicon)
 
+> **Save deliverables under `~/media-stack/ComfyUI/models/loras/ (LoRAs) and train/datasets/<name>/ (datasets)`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 A LoRA teaches Z-Image / FLUX.2 klein a recurring subject (a character, Dylan's BMW parts, a
 product) or a style, so every generation stays consistent. Trainer: ostris **ai-toolkit** in
 `~/media-stack/train/.venv` (torch 2.13, MPS), wrapped by the `lora` CLI. Output lands in

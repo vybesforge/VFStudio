@@ -139,7 +139,7 @@ EXT = {
     "sound": {".wav", ".flac", ".mp3", ".ogg", ".opus"},
     "voice": {".wav", ".flac", ".mp3"},
     "3d": {".glb", ".gltf", ".obj", ".stl"},
-    "text": {".md", ".txt", ".json", ".fountain"},
+    "text": {".md", ".txt", ".json", ".fountain", ".srt"},
     "camera": {".jpg", ".jpeg", ".png"},
 }
 # where each modality's files live; (dir, url mount)
@@ -191,9 +191,16 @@ def _game_projects():
     return out
 
 
+# Anything an AI writes under these trees is visible in the galleries, whatever subfolder it invents.
+# Extension filter per kind still applies, so a .glb in output/image/ shows under 3D, etc.
+BROAD_ROOTS = [(OUT, "/files/output"), (STACK / "scratch", "/files/scratch"), (COMFY_OUT, "/files/comfy_output"),
+               (Path.home() / ".hermes" / "cache" / "generated" / "images", "/files/images")]
+
+
 @router.get("/games")
 def games():
     return {"projects": _game_projects()}
+
 
 
 @router.get("/outputs")
@@ -202,7 +209,7 @@ def outputs(kind: str = "image", limit: int = 48):
         raise HTTPException(400, "unknown kind")
     exts = EXT[kind]
     seen, items = set(), []
-    roots = list(ROOTS[kind])
+    roots = list(ROOTS[kind]) + BROAD_ROOTS
     # game projects contribute their own assets (models, audio, sprites) to every gallery
     for g in _game_projects():
         roots.append((Path(g["path"]), f"/files/game/{g['name']}"))
@@ -212,13 +219,15 @@ def outputs(kind: str = "image", limit: int = 48):
         for p in d.rglob("*"):
             if not p.is_file() or p.suffix.lower() not in exts or ".part" in p.name:
                 continue
-            if d.parent == GAME_DIR and any(part in GAME_SKIP for part in p.relative_to(d).parts[:-1]):
+            if any(part in GAME_SKIP or part.startswith(".") or part == "uploads_tmp" for part in p.relative_to(d).parts[:-1]):
                 continue
             rp = p.resolve()
-            if rp in seen:
-                continue
-            seen.add(rp)
             st = p.stat()
+            # same file under two roots (gen copies ComfyUI/output/* into output/<kind>/): keep the first root's copy
+            key = (p.name, st.st_size)
+            if rp in seen or key in seen or (d.parent == GAME_DIR and p.name.lower().startswith("readme")):
+                continue
+            seen.add(rp); seen.add(key)
             rel = p.relative_to(d).as_posix()
             items.append({"name": p.name, "path": str(p), "url": f"{mount}/{rel}", "bytes": st.st_size,
                           "mtime": st.st_mtime, "when": time.strftime("%m-%d %H:%M", time.localtime(st.st_mtime)),

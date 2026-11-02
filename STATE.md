@@ -1,5 +1,15 @@
 # Project state — read this first
 
+## 2026-11-02: BLUE HOUR (browser extraction shooter)
+
+`game/bluehour` — Three.js/TS/Vite FPS, playable at `npm run dev` (:5199). Verified: movement/collision,
+gunplay, AI nav, contracts, extraction, results/restart, 19 unit tests.
+Second pass added: **dialogue** (Meridian radio VO + branching Voss/Kess conversations, 25 Kokoro lines
+generated locally via `tools/gen_vo.sh` → `public/vo/*.mp3`), **Blender-authored infected bodies**
+(`tools/zombie_build.py` → `public/models/zombie.glb`, 11 bone-space parts + face decals + emissive eyes),
+and **post-processing** (bloom + blue-hour grade + vignette/grain, `src/render/post.ts`).
+Skill `browser-3d-game` holds the harness workflow. FPS not measurable here (SwiftShader only).
+
 Last updated: 2026-11-01 late (desktop session) — **studio build-out, round 2**
 
 ## 2026-11-01 (evening): round 2 — what changed since the table below

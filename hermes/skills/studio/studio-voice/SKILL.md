@@ -13,6 +13,8 @@ metadata:
 
 # Studio Voice
 
+> **Save deliverables under `~/media-stack/output/voice/`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 One CLI, `~/media-stack/tools/voice/voice`, drives the local mlx-audio server
 (`http://127.0.0.1:8000`) for text-to-speech (Kokoro), voice cloning
 (Qwen3-TTS 1.7B Base), speech-to-text (Whisper large-v3-turbo) and a

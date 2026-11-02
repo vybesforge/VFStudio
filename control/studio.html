@@ -526,11 +526,15 @@ const galCache={};
 async function loadGallery(kind){
   const j=await (await fetch('/api/studio/outputs?kind='+kind)).json(); galCache[kind]=j.items;
   const el=$('gal-'+kind); if(!j.items.length){ el.innerHTML='<div class="desc">nothing generated yet</div>'; return; }
-  el.innerHTML=j.items.map((it,i)=>{
+  el.innerHTML=j.items.map((it,i)=>renderItem(it,i,kind)).join('');
+}
+function renderItem(it,i,kind,cache){
+    cache=cache||`galCache['${kind}']`;
     const audio=['wav','flac','mp3','ogg','opus'].includes(it.ext)?`<audio src="${it.url}" controls preload="none"></audio>`:'';
     const is3d=['glb','gltf'].includes(it.ext);
-    return `<div class="it"><div class="th" onclick="openItem(galCache['${kind}'][${i}])">${thumb(it,kind)}<span class="pill">${it.ext}</span></div>
-      <div class="bd"><div class="fn">${it.name}</div><div class="kv">${fmtB(it.bytes)} · ${it.when}</div>${audio}
+    const where=it.path.replace(/^\/Users\/[^/]+\/media-stack\//,'').replace(/\/[^/]*$/,'');
+    return `<div class="it"><div class="th" onclick="openItem(${cache}[${i}])">${thumb(it,kind)}<span class="pill">${it.ext}</span></div>
+      <div class="bd"><div class="fn">${it.name}</div><div class="kv">${fmtB(it.bytes)} · ${it.when} · <span title="${it.path}">${where}</span></div>${audio}
       <div class="acts"><button onclick="openItem(galCache['${kind}'][${i}])">preview</button>
         ${kind==='image'?`<button onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
         ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
@@ -539,7 +543,7 @@ async function loadGallery(kind){
         ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}','_blank')">room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}&rig=1','_blank')">rig</button>`:''}
         ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}
         ${kind==='text'?`<button onclick="$('wr-file').value='${it.path}';flash('draft set')">as draft</button>`:''}
-        <button onclick="window.open('${it.url}','_blank')">open</button></div></div></div>`;}).join('');
+        <button onclick="window.open('${it.url}','_blank')">open</button><button onclick="navigator.clipboard.writeText('${it.path}');flash('path copied')">path</button></div></div></div>`;
 }
 async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }
 async function loadGames(){
@@ -590,4 +594,5 @@ async function loadVoices(){ try{const j=await (await fetch('/api/studio/voices'
 refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
 setInterval(refreshProgress,1500); setInterval(refreshJobs,3000);
 setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); },2500);
+setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); },8000);
 </script></body></html>

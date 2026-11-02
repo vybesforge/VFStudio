@@ -13,6 +13,8 @@ metadata:
 
 # studio-game — Godot 4.7 game toolkit (local, headless-checkable)
 
+> **Save deliverables under `~/media-stack/game/<project>/ (the panel lists it; web builds get a Play button)`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 Two ready Godot 4.7.2 templates (2D platformer, 3D first/third-person), a script that stamps a new
 project from them, and the exact commands to run, self-test, import GLBs / sprite sheets, and export
 macOS + Windows builds without opening the editor. Everything runs on this Mac; nothing phones home.

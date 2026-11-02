@@ -182,6 +182,27 @@ It prefers `ComfyUI/models/unet/Qwen-Image-Edit-2509-Q4_K_M.gguf` (13 GB, needs 
 ## Which model for which job (and what was rejected)
 `references/model-choices.md` — installed defaults, why, licences, Mac-fit math, rejected alternatives and the 10-minute re-audit procedure. Read it before proposing a model swap.
 
+## Where to save anything you make (non-negotiable)
+The VF Studio panel shows a file only if it is under one of these trees; it sorts it into a tab by extension:
+
+| Save under | Shows in panel tab |
+|---|---|
+| `~/media-stack/output/image/` (also `control/`, `upscale/`, `edit/`, `renders/`) — png/jpg/webp | Image |
+| `~/media-stack/output/video/` — mp4/webm/gif | Video |
+| `~/media-stack/output/3d/` — glb/gltf/stl/obj | 3D & VR ("set in room", "rig") |
+| `~/media-stack/output/sfx/`, `music/`, `stems/` — wav/flac/mp3 | Sound |
+| `~/media-stack/output/voice/` — wav/mp3 | Voice |
+| `~/media-stack/output/text/` — md/txt/json/fountain/srt | Write |
+| `~/media-stack/output/camera/` | Vision |
+| `~/media-stack/game/<project>/**` (not node_modules/dist/build) | 3D & VR → Game projects + the galleries above |
+
+Any subfolder inside those trees is fine (`output/renders/blender/hero.png` still lands in Image). `scratch/`
+and `ComfyUI/output/` are scanned too but treat them as temporary. Files written anywhere else — home,
+Desktop, `/tmp`, another repo — are **invisible in the panel**. The `gen`, `voice`, `vid`, `scribe`, `see`,
+`stems`, `lora` CLIs already default to the right folder; when you write a file yourself (Blender render,
+ffmpeg output, a script), pass an `--out` under `~/media-stack/output/<kind>/`. Tell Dylan the path
+relative to `~/media-stack/` — each gallery card shows that same folder.
+
 ## Memory budget (64 GB unified)
 
 | Resident set | ~GB | Note |

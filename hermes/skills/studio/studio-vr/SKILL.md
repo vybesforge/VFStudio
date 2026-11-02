@@ -13,6 +13,8 @@ metadata:
 
 # studio-vr
 
+> **Save deliverables under `~/media-stack/output/3d/`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 Local-only VR / real-time 3D toolkit on the M3 Max: Godot 4.7.2 (OpenXR, Forward+) room that
 loads any GLB at runtime, headless exports for macOS and Windows (SteamVR box), and a
 gltf-transform pipeline that shrinks TRELLIS/ComfyUI GLBs to VR budgets. Nothing here fetches

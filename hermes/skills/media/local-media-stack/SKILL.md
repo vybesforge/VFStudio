@@ -13,6 +13,8 @@ metadata:
 
 # Local media stack (Apple Silicon)
 
+> **Save deliverables under `~/media-stack/output/<kind>/`** (3d, image, video…) — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there.
+
 Two services cover every local generation need on an M-series Mac, and both speak
 protocols Hermes already supports. Route Hermes at them instead of building tools.
 
