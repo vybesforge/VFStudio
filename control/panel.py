@@ -19,6 +19,7 @@ import signal
 import socket
 import struct
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -665,11 +666,18 @@ def api_stop_all():
 
 @app.get("/api/vr/asset")
 def api_vr_asset():
-    p = VR / "pig.glb"
+    """The GLB the room will open (current.json), falling back to pig.glb."""
+    cur = api_vr_current()
+    name = cur.get("name") or "pig.glb"
+    p = VR / name
+    if not p.exists():
+        p = VR / "pig.glb"
+        name = "pig.glb"
     if not p.exists():
         return {"present": False}
     st = p.stat()
-    return {"present": True, "bytes": st.st_size,
+    return {"present": True, "bytes": st.st_size, "name": name, "asset": cur.get("asset", "pig"),
+            "src": f"/vr/{name}", "joints_file": f"joints_{_rig_slug(cur.get('asset', 'pig'))}.json",
             "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))}
 
 
@@ -767,17 +775,87 @@ def api_rig_build_status(asset: str = "pig"):
     return {"log": txt, "likely_running": running, "asset": _rig_slug(asset)}
 
 
+@app.get("/api/rig/templates")
+def api_rig_templates():
+    """The joint templates the picker and the auto-placer share (names must agree)."""
+    sys.path.insert(0, str(STACK / "tools" / "rig"))
+    try:
+        import auto_joints as aj
+        return {"templates": {k: [{"name": n, "prompt": d, "side": s} for n, d, s in v]
+                              for k, v in aj.TEMPLATES.items()}}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+
+
+@app.post("/api/rig/auto")
+def api_rig_auto(payload: dict = Body(default={})):
+    """Let the local VLM place the joints: renders views, asks Qwen3-VL, snaps to the mesh.
+
+    Starts the vision server if it is down (first load is ~20 s) and runs the tool in the
+    background; the room polls /api/rig/auto/status for the log."""
+    asset = payload.get("asset") or "asset"
+    src = payload.get("source")
+    if not src:
+        return JSONResponse({"ok": False, "message": "need source (path to the GLB)"}, status_code=400)
+    template = payload.get("template") or "auto"
+    py = STACK / "tools" / ".venv" / "bin" / "python"
+    tool = STACK / "tools" / "rig" / "auto_joints.py"
+    if not tool.is_file():
+        return JSONResponse({"ok": False, "message": f"missing {tool}"}, status_code=500)
+    started = None
+    if not port_open(8082):
+        started = start("vision")
+    RIG.mkdir(parents=True, exist_ok=True)
+    log = RIG / f"auto_{_rig_slug(asset)}.log"
+    cmd = [str(py), str(tool), str(src), "--asset", asset, "--template", template]
+    with open(log, "wb") as fh:
+        proc = subprocess.Popen(cmd, cwd=str(STACK), stdout=fh, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    return {"ok": True, "pid": proc.pid, "log": str(log), "asset": _rig_slug(asset),
+            "vision": (started or {}).get("message", "already running")}
+
+
+@app.get("/api/rig/auto/status")
+def api_rig_auto_status(asset: str = "asset"):
+    log = RIG / f"auto_{_rig_slug(asset)}.log"
+    txt = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+    done = "[auto] wrote" in txt or "Traceback" in txt or "VLM not reachable" in txt
+    return {"log": txt, "done": done, "failed": ("Traceback" in txt or "VLM not reachable" in txt),
+            "asset": _rig_slug(asset)}
+
+
+@app.get("/api/vr/current")
+def api_vr_current():
+    """Which GLB the room opens by default when no ?src= is given."""
+    f = VR / "current.json"
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {"src": "/vr/pig.glb", "asset": "pig", "name": "pig.glb"}
+
+
 @app.post("/api/assets/use")
 def api_assets_use(path: str):
-    """Copy any GLB into the room as pig.glb so the VR tab picks it up."""
+    """Copy a GLB into the room under its own name and make it the default asset.
+
+    It used to copy everything to `vr/pig.glb`, which is why a human loaded here came
+    back as `pig.glb` and the joint picker then opened the pig's joint set."""
     src = Path(path)
     if not src.is_file() or src.suffix.lower() not in {".glb", ".gltf"}:
         return JSONResponse({"ok": False, "message": "not a GLB"}, status_code=400)
+    slug = _rig_slug(src.stem.replace("_rigged", ""))
+    dest = VR / f"{slug}{src.suffix.lower()}"
     try:
-        shutil.copy(src, VR / "pig.glb")
+        if src.resolve() != dest.resolve():
+            shutil.copy(src, dest)
+        (VR / "current.json").write_text(json.dumps(
+            {"src": f"/vr/{dest.name}", "asset": slug, "name": dest.name}, indent=1))
     except Exception as exc:
         return {"ok": False, "message": f"copy failed: {exc}"}
-    return {"ok": True, "message": f"room now uses {src.name}"}
+    return {"ok": True, "src": f"/vr/{dest.name}", "asset": slug,
+            "message": f"room now uses {dest.name} (asset '{slug}')"}
 
 
 @app.get("/api/comfy/job")

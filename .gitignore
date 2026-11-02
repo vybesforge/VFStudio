@@ -53,6 +53,11 @@ train/models/
 *.gltf
 gold-standard/
 rig/joints_*.json
+rig/attic/
+rig/auto_*.log
+# which GLB the room opens + the rendered views the joint auto-placer works from
+vr/current.json
+scratch/rig-views/
 stems/.venv/
 
 # training / stems / node packs are re-created by install.sh

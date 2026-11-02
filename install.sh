@@ -98,7 +98,7 @@ if [ ! -x "$STACK/tools/.venv/bin/python" ]; then
   uv venv --python 3.12 "$STACK/tools/.venv"
 fi
 uv pip install -q --python "$STACK/tools/.venv/bin/python" build123d trimesh pymeshfix networkx numpy-stl pygltflib \
-  moviepy pedalboard librosa soundfile pillow imageio-ffmpeg requests websocket-client scipy
+  moviepy pedalboard librosa soundfile pillow imageio-ffmpeg requests websocket-client scipy rtree
 ok "build123d, trimesh, moviepy, pedalboard, librosa"
 
 # ─── 4b. stems venv (Demucs stem separation, torch/MPS) ─────────────────────────

@@ -58,6 +58,10 @@ print(f"[rig] scaled x{factor:.3f} to length {TARGET_LEN:.2f} m")
 raw = json.loads(open(JOINTS_JSON).read())
 J = {}
 for name, p in raw.items():
+    # The picker saves bookkeeping alongside the joints (_template, _source, _src); those
+    # are strings, and indexing one as a point is what crashed the build on 2026-11-02.
+    if name.startswith("_") or not isinstance(p, dict) or not {"x", "y", "z"} <= set(p):
+        continue
     J[name] = Vector((p["x"], -p["z"], p["y"])) * factor
 print(f"[rig] {len(J)} joints: {', '.join(sorted(J))}")
 
