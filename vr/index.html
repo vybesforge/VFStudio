@@ -36,18 +36,20 @@
   <button id="rot">Rotate</button>
   <button id="grid" class="on">Grid</button>
   <button id="light">Bright</button>
+  <button id="anim" title="play / pause the asset's animation clip">Anim</button>
   <button id="rigtoggle">Rig</button>
   <div id="meta">loading…</div>
 </div>
 <div id="rig">
   <h2>Rig — pick joints</h2>
-  <div class="s">Click a joint, then click the model (auto-advances). In VR: point the right controller, pull the trigger. Joint sets are saved per asset.</div>
+  <div class="s">Click a joint, then click the model (auto-advances). In VR: point the right controller, pull the trigger. Joint sets are saved per asset. <b>AI auto-place</b> seeds all the joints from the local vision model (Qwen3-VL) — review and nudge before building.</div>
   <div class="grp">Template</div>
   <select id="rigtpl"><option value="quadruped">quadruped (hog / dog / horse)</option><option value="biped">biped (human)</option></select>
   <div class="grp">Body</div><div id="rig-body"></div>
   <div class="grp">Limbs</div><div id="rig-legs"></div>
   <div style="margin-top:10px">
     <button id="rigsave">Save joints</button>
+    <button id="rigauto" title="render orthographic views, ask the local vision model for each landmark, snap them onto the mesh">AI auto-place</button>
     <button id="rigbuild" class="primary" disabled>Build rig</button>
     <button id="rigundo">Undo <kbd>U</kbd></button>
     <button id="rigmirror" title="copy every placed left-side joint to its right-side twin, mirrored across the model's centre">Mirror L→R</button>
@@ -66,12 +68,15 @@ import { GLTFLoader } from './vendor/GLTFLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 
 const q = new URLSearchParams(location.search);
-// Any GLB can be loaded: ?src=/files/output/3d/thing.glb (default: the room's pig.glb).
-const SRC = q.get('src') || './pig.glb';
-const ASSET = (q.get('asset') || SRC.split('/').pop().replace(/\.(glb|gltf)$/i, '')).replace(/[^a-zA-Z0-9_-]+/g, '-');
+// Any GLB can be loaded: ?src=/files/output/3d/thing.glb. With no ?src the room asks the
+// panel which asset is current (the 3D tab's "set in room"), and only then falls back to
+// its own pig.glb. The asset slug names the saved joint set, so it must come from the real
+// file name — that is what keeps a human from loading the pig's joints.
+const slugOf = (s) => (s || '').split('/').pop().replace(/\.(glb|gltf)$/i, '').replace(/[^a-zA-Z0-9_-]+/g, '-');
+let SRC = q.get('src') || null;
+let ASSET = q.get('asset') || slugOf(SRC);
 const err = (m) => { const e = document.getElementById('err'); e.style.display = 'block'; e.textContent = m; };
 const meta = document.getElementById('meta');
-document.getElementById('assetname').textContent = ASSET;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x070c16);
@@ -102,6 +107,8 @@ pole.position.set(-1.5, 0.9, -1.5); scene.add(pole);
 // ── asset ────────────────────────────────────────────────────────────────
 const holder = new THREE.Group(); scene.add(holder);
 let mixer = null, roomModel = null, triCount = 0;
+let jointSource = null, animOn = false;
+function loadAsset() {
 new GLTFLoader().load(SRC, (gltf) => {
   const obj = gltf.scene; roomModel = obj;
   const box = new THREE.Box3().setFromObject(obj);
@@ -111,12 +118,30 @@ new GLTFLoader().load(SRC, (gltf) => {
   holder.add(obj);
   obj.traverse(o => { if (o.isMesh) { triCount += o.geometry.index ? o.geometry.index.count / 3 : o.geometry.attributes.position.count / 3;
     const m = o.material; if (m && m.map) m.map.anisotropy = 8; o.frustumCulled = true; } });
-  if (gltf.animations && gltf.animations.length) { mixer = new THREE.AnimationMixer(obj); mixer.clipAction(gltf.animations[0]).play(); }
+  if (gltf.animations && gltf.animations.length) {
+    mixer = new THREE.AnimationMixer(obj); mixer.clipAction(gltf.animations[0]).play();
+    const ab = document.getElementById('anim');
+    ab.disabled = false; ab.classList.add('on'); ab.title = `play / pause ${gltf.animations[0].name || 'the clip'}`;
+    animOn = true;
+  }
   const anim = gltf.animations && gltf.animations.length ? ` · anim: ${gltf.animations[0].name || 'clip 1'}` : ' · no anim';
   const heavy = triCount > 300000 ? ` <span class="warn">⚠ ${Math.round(triCount / 1000)}k tris — heavy for VR; run optimize_glb.sh --target-tris 150000</span>` : '';
   meta.innerHTML = `${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)} m · ${Math.round(triCount).toLocaleString()} tris${anim}${heavy}`;
   if (q.get('rig') === '1') document.getElementById('rigtoggle').click();
 }, undefined, () => { meta.textContent = `${SRC} not found`; err(`${SRC} missing. Use the panel's 3D tab → "set in room", or pass ?src=/files/…glb`); });
+}
+
+(async () => {
+  if (!SRC) {
+    try {
+      const cur = await (await fetch('/api/vr/current')).json();
+      SRC = cur.src || './pig.glb';
+      if (!q.get('asset')) ASSET = cur.asset || slugOf(SRC);
+    } catch (e) { SRC = './pig.glb'; ASSET = ASSET || slugOf(SRC); }
+  }
+  document.getElementById('assetname').textContent = ASSET;
+  loadAsset();
+})();
 
 // ── desktop controls ─────────────────────────────────────────────────────
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -166,6 +191,19 @@ function onXRSelect(ctl) {
 }
 
 // ── HUD ──────────────────────────────────────────────────────────────────
+// Animation toggle. A skinned asset that is playing bobs under the cursor, so a click lands
+// on a moving surface and the joint is stored against the bind pose anyway — rig mode pauses
+// the clip and rewinds it, which is the only pose the picker's coordinates mean anything in.
+const animBtn = document.getElementById('anim');
+animBtn.disabled = true;
+animBtn.title = 'asset has no animation clip';
+function setAnim(on) {
+  animOn = !!on && !!mixer;
+  if (mixer) mixer.timeScale = animOn ? 1 : 0;
+  animBtn.classList.toggle('on', animOn);
+}
+animBtn.onclick = () => setAnim(!animOn);
+
 document.getElementById('wire').onclick = (ev) => { const on = !ev.target.classList.contains('on'); holder.traverse(o => { if (o.isMesh) o.material.wireframe = on; }); ev.target.classList.toggle('on', on); };
 let spinning = false;
 document.getElementById('rot').onclick = (ev) => { spinning = !spinning; ev.target.classList.toggle('on', spinning); };
@@ -238,15 +276,26 @@ addEventListener('keydown', (e) => { if (!rigMode) return; if (e.key === 'u' || 
 
 async function loadJoints() {
   try { const j = await (await fetch(`/api/rig/joints?asset=${ASSET}`)).json(); const jj = j.joints || {};
+    jointSource = jj._source || null;
     if (jj._template && TEMPLATES[jj._template]) { template = jj._template; document.getElementById('rigtpl').value = template; RJ = TEMPLATES[template]; }
     for (const [k, v] of Object.entries(jj)) if (!k.startsWith('_')) { rigState[k] = v; if (roomModel) rigMarker(k, new THREE.Vector3(v.x, v.y, v.z)); }
+    // No saved set and no template: guess from the silhouette so a human does not open a
+    // hoof/fetlock list. Taller than it is wide or deep = biped; an AI run overwrites this.
+    if (!jj._template && !Object.keys(rigState).length && roomModel) {
+      const s = new THREE.Box3().setFromObject(roomModel).getSize(new THREE.Vector3());
+      template = s.y > 1.15 * Math.max(s.x, s.z) ? 'biped' : 'quadruped';
+      document.getElementById('rigtpl').value = template; RJ = TEMPLATES[template];
+    }
   } catch (e) { /* offline */ }
 }
 document.getElementById('rigtpl').onchange = (ev) => { template = ev.target.value; RJ = TEMPLATES[template]; document.getElementById('rigclear').click(); };
 document.getElementById('rigtoggle').onclick = async (ev) => {
   rigMode = !rigMode; rigEl.classList.toggle('open', rigMode); ev.target.classList.toggle('on', rigMode); spinning = false;
+  if (rigMode && mixer) { setAnim(false); mixer.setTime(0); }   // pick against the bind pose
   if (rigMode) { await loadJoints(); rigArmed = RJ.find(([n]) => !rigState[n])?.[0] || null; rigRender();
-    rigStatus.textContent = Object.keys(rigState).length ? `loaded saved joints for ${ASSET}` : `no saved joints for ${ASSET} — start clicking`; }
+    const n = Object.keys(rigState).length;
+    rigStatus.textContent = n ? `loaded ${n} saved joints for ${ASSET}${jointSource ? ` (${jointSource})` : ''}`
+                              : `no saved joints for ${ASSET} — AI auto-place or start clicking`; }
 };
 document.getElementById('rigsave').onclick = async () => {
   rigStatus.textContent = 'saving…';
@@ -278,9 +327,49 @@ document.getElementById('rigmirror').onclick = () => {
   rigArmed = RJ.find(([k]) => !rigState[k])?.[0] || null; rigRender();
   rigStatus.textContent = `mirrored ${n} joints across x=${cx.toFixed(3)} (mesh asymmetry is NOT corrected — nudge any that float off the surface)`;
 };
+function filePath(src) {
+  // panel URL space -> path relative to ~/media-stack (what the rig tools take)
+  if (src.startsWith('/files/')) return src.replace('/files/output/', 'output/').replace('/files/comfy_output/', 'ComfyUI/output/').replace('/files/scratch/', 'scratch/');
+  if (src.startsWith('/vr/')) return 'vr/' + src.slice(4);
+  return 'vr/' + src.replace('./', '');
+}
+function clearMarkers() {
+  for (const [n, m] of rigMarkers) { m.parent && m.parent.remove(m); }
+  rigMarkers.clear();
+  for (const n of Object.keys(rigState)) delete rigState[n];
+}
+
+document.getElementById('rigauto').onclick = async () => {
+  if (!rigMode) document.getElementById('rigtoggle').click();
+  if (!roomModel) { rigStatus.textContent = 'asset still loading'; return; }
+  const tpl = document.getElementById('rigtpl').value;
+  rigLog.style.display = 'block'; rigLog.textContent = '';
+  rigStatus.textContent = `rendering views + asking the local VLM (${tpl})… first call loads the model, ~30 s`;
+  try {
+    const r = await (await fetch('/api/rig/auto', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset: ASSET, source: filePath(SRC), template: tpl }) })).json();
+    if (!r.ok) { rigStatus.textContent = 'auto-place failed: ' + JSON.stringify(r); return; }
+    if (r.vision && !/already/.test(r.vision)) rigLog.textContent = r.vision + '\n';
+    for (let i = 0; i < 150; i++) {
+      await new Promise(res => setTimeout(res, 2000));
+      const s = await (await fetch(`/api/rig/auto/status?asset=${encodeURIComponent(ASSET)}`)).json();
+      rigLog.textContent = s.log || ''; rigLog.scrollTop = rigLog.scrollHeight;
+      if (s.done) {
+        if (s.failed) { rigStatus.textContent = 'auto-place failed — see the log'; return; }
+        clearMarkers();
+        await loadJoints();
+        rigArmed = null; rigRender();
+        rigStatus.textContent = `AI placed ${Object.keys(rigState).length} joints (${jointSource || 'vlm'}, ${template}) — click any joint to nudge it, then Save`;
+        return;
+      }
+    }
+    rigStatus.textContent = 'still running — check the log';
+  } catch (e) { rigStatus.textContent = 'auto-place error: ' + e.message; }
+};
+
 rigBuildBtn.onclick = async () => {
   rigStatus.textContent = 'building…'; rigLog.style.display = 'block'; rigLog.textContent = '';
-  const srcPath = SRC.startsWith('/files/') ? SRC.replace('/files/output/', 'output/').replace('/files/comfy_output/', 'ComfyUI/output/').replace('/files/scratch/', 'scratch/') : 'vr/' + SRC.replace('./', '');
+  const srcPath = filePath(SRC);
   const dest = `vr/${ASSET}_rigged.glb`;
   try {
     const r = await (await fetch('/api/rig/build', { method: 'POST', headers: { 'Content-Type': 'application/json' },

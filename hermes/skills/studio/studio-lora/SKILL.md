@@ -34,10 +34,18 @@ unload-all first (`--keep-models` skips that). Do not run `gen` jobs during trai
 
 ## Dataset rules (follow exactly)
 - 8–20 images of ONE subject, 768–1024 px, varied angles/backgrounds, no other subjects.
+  **20 is a floor for variety, not a cap**: 30–60 images are worth generating when the
+  variety is real (different camera angles, poses, outfits, expressions) — redundant
+  near-duplicates are what damage a small dataset, not the count.
 - One `.txt` per image with a caption that contains the literal token `[trigger]`,
-  e.g. `[trigger], three-quarter view, studio light, white background`.
+  e.g. `[trigger], three-quarter view, studio light, white background`. Caption the
+  wardrobe and pose explicitly so the trigger binds identity, not a costume.
 - Folder: `~/media-stack/train/datasets/<name>/`. Generate a synthetic set with klein:
   `~/media-stack/train/gen_dataset.sh` shows the pattern (10 × `gen image … --model klein --seed N`).
+- **A real person needs a different recipe than a synthetic subject**: build the set
+  with Qwen-Image-Edit from one hero photo (identity anchor + A-pose body master +
+  neck-up face master, then orbit/extreme-camera/pose/outfit/expression batches).
+  Procedure, prompt rules and cost: `references/character-dataset.md`.
 
 ## Recipes
 ```bash

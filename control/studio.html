@@ -582,7 +582,7 @@ async function loadGames(){
       ${g.kind==='godot'?`<button onclick="navigator.clipboard.writeText('/Applications/Godot.app/Contents/MacOS/Godot --path ${g.path}');flash('run command copied')">copy run cmd</button>`:`<button onclick="navigator.clipboard.writeText('cd ${g.path} && npm run dev');flash('dev command copied')">copy dev cmd</button>`}
     </div></div>`).join('') : '<div class="card muted">no projects yet — <code>game/new_project.sh 2d|3d Name ~/media-stack/game/Name</code></div>';
 }
-async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
+async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads ${a.name} (asset “${a.asset}” → ${a.joints_file}) · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'nothing in ~/media-stack/vr/ — use “set in room” on a GLB'; }
 
 // inventory
 async function loadInventory(){

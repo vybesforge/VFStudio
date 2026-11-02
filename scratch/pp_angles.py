@@ -254,6 +254,76 @@ OUTFITS = [
 ]
 
 
+# Extreme camera positions. Plain "low angle" was ignored by the editor — it kept
+# returning eye level — but naming the physical camera and the foreshortening does work
+# (verified: feet loom huge, soles visible, underside of the chin). Keep this wording.
+EXTREMES = [
+    ("floor_front",
+     "Very low camera placed on the floor at her feet, tilted up forty five degrees so the "
+     "shot looks up at her from below. Her feet are the largest thing in the frame, her legs "
+     "foreshorten dramatically, we see the soles of her feet and the underside of her chin. "
+     "Upward perspective distortion, wide lens",
+     "extreme low camera at her feet looking up, feet largest in frame"),
+    ("floor_back",
+     "Very low camera placed on the floor behind her heels, tilted up forty five degrees, "
+     "looking up her back from below. Her heels are the largest thing in the frame, her legs "
+     "foreshorten upward, the back of her head is small and far away at the top. Upward "
+     "perspective distortion, wide lens",
+     "extreme low camera behind her feet looking up, rear view"),
+    ("floor_side",
+     "Very low camera placed on the floor beside her foot, tilted up forty five degrees, "
+     "looking up her side from below. Her foot is the largest thing in the frame, her body "
+     "rises away into the distance, strong upward perspective distortion",
+     "extreme low camera beside her foot looking up, side view"),
+    ("high_45",
+     "Camera raised high on a boom above and in front of her, tilted down forty five degrees "
+     "so the shot looks down at her from above. The floor spreads out behind her feet, her "
+     "shoulders and the top of her head are large, her feet are small and far away. Downward "
+     "perspective distortion",
+     "high camera above her looking down at forty five degrees"),
+    ("straight_down",
+     "Directly overhead bird's-eye view: the camera is mounted on the ceiling pointing straight "
+     "down at her. We see the top of her hair bun, her forehead and nose foreshortened, her "
+     "shoulders, the tops of her arms and the floor spread around her feet. Circular top-down "
+     "perspective, no horizon line",
+     "top-down bird's-eye view straight down, floor around her"),
+    ("knee_level_close",
+     "Camera at knee height, very close to her, tilted up so her hips and torso dominate the "
+     "frame and her head is near the top edge. Shallow depth of field, foreground knees sharp",
+     "knee-height close camera tilted up, hips and torso dominant"),
+]
+
+
+# Facial expression set — runs against the FACE master (pepper_face_MASTER.png), not the
+# body master, so the mouth/eyes have the pixels to work with.
+EXPRESSIONS = [
+    ("expr_neutral", "Neutral relaxed face, lips closed, looking straight into the lens",
+     "neutral expression, close-up face portrait"),
+    ("expr_smile", "Warm closed-lip smile, eyes crinkling slightly at the corners",
+     "warm smile, close-up face portrait"),
+    ("expr_laugh", "Genuine open laugh, teeth showing, head tipped back a little",
+     "laughing, teeth showing, close-up face portrait"),
+    ("expr_serious", "Serious intense stare, jaw set, brows slightly lowered",
+     "serious intense expression, close-up face portrait"),
+    ("expr_surprised", "Surprised expression, eyebrows raised high, lips parted in a small O",
+     "surprised expression, eyebrows raised, close-up face portrait"),
+    ("expr_angry", "Angry glare, brows drawn down hard, lips pressed together",
+     "angry glare, close-up face portrait"),
+    ("expr_smirk", "Confident half smirk, one corner of the mouth raised",
+     "confident half smirk, close-up face portrait"),
+    ("expr_eyes_closed", "Eyes gently closed, calm relaxed face, head slightly tilted",
+     "eyes closed, calm relaxed face, close-up face portrait"),
+    ("expr_wink", "Playful wink with one eye closed and a small smile",
+     "winking with a small smile, close-up face portrait"),
+    ("expr_bite_lip", "Playful expression biting her lower lip, eyes looking up at the lens",
+     "biting lower lip, close-up face portrait"),
+    ("expr_look_away", "Thoughtful expression looking off to her left, not at the camera",
+     "looking away thoughtfully, three-quarter face portrait"),
+    ("expr_tongue", "Silly playful expression with her tongue slightly out and a grin",
+     "playful expression with tongue out, close-up face portrait"),
+]
+
+
 def api(path, payload=None, timeout=3600, tries=6):
     """Tolerate the server restarting mid-run: ComfyUI came back from a blip once and
     killed a whole batch with ConnectionRefused."""
@@ -335,7 +405,7 @@ def main():
     ap.add_argument("--fast", action="store_true")
     ap.add_argument("--lora-strength", type=float, default=1.0)
     ap.add_argument("--only", default=None)
-    ap.add_argument("--set", default="angles", choices=["angles", "poses", "outfits", "all"],
+    ap.add_argument("--set", default="angles", choices=["angles", "poses", "outfits", "extremes", "expressions", "all"],
                     help="angles = camera orbit around the A-pose; poses = body-pose and "
                          "camera-position variety")
     a = ap.parse_args()
@@ -356,6 +426,10 @@ def main():
         todo = POSES
     elif a.set == "outfits":
         todo = OUTFITS
+    elif a.set == "extremes":
+        todo = EXTREMES
+    elif a.set == "expressions":
+        todo = EXPRESSIONS
     elif a.set == "all":
         todo = ANGLES + POSES + OUTFITS
     if a.only:
@@ -371,7 +445,7 @@ def main():
         if not wait_idle():
             print("[ang] queue never drained, aborting", flush=True)
             break
-        close = name in {"head_front", "head_q34", "head_left", "head_right", "head_back",
+        close = a.set == "expressions" or name in {"head_front", "head_q34", "head_left", "head_right", "head_back",
                          "head_top", "torso_front", "torso_q34", "hands_front",
                          "hands_side", "feet_front", "feet_side", "waist_detail"}
         framing = ("This is a close-up detail shot, that body part fills the frame."

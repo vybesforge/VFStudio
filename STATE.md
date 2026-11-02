@@ -1,5 +1,48 @@
 # Project state — read this first
 
+## 2026-11-02 (desktop): rig joints — local VLM places them, and the pig.glb identity bug
+
+**Bug that made the picker load the wrong joints.** `POST /api/assets/use` ("set in room") copied
+*every* GLB to `vr/pig.glb`. The room names a joint set after the file it loaded, so a human loaded
+that way came back as `pig` and opened `rig/joints_pig.json`. Now each asset is copied under its own
+name (`vr/<slug>.glb`) and remembered in `vr/current.json`; the room asks `GET /api/vr/current` when
+no `?src=` is given. `vr/pig.glb` was overwritten by a pepper render during this bug's life and was
+restored from `ComfyUI/output/3d/ComfyUI_00009.glb` (1,199,738 tris, 77.2 MB, identical to the
+documented pig). Old hand-seeded joint files are in `rig/attic/` — they were written in a Z-up frame,
+so those markers never sat on the model.
+
+**AI auto-place** (`tools/rig/auto_joints.py`, ~90 s, `stack rig auto <glb> [asset]`,
+`POST /api/rig/auto`, "AI auto-place" button in the room's rig panel):
+1. `tools/rig/render_views.py` (Blender workbench) renders ±X/±Y orthographic views at 1024 px plus a
+   manifest whose pixel↔world map is measured with `world_to_camera_view`.
+2. Qwen3-VL-8B (:8082) classifies the asset (biped/quadruped), picks the face-on or profile view, then
+   answers each landmark as a **cell on a 20×20 labelled grid** (A–T / 1–20). Cell names, not
+   coordinates: the same model answers coordinates in percent, in a 0-1000 grid or in pixels, and
+   mixes two of those inside one reply, which is what wrecked the first attempts.
+3. Each guess is snapped to the mesh: a thin slab of vertices around the in-plane point, clustered
+   across the limb axis (left/right) or the depth axis (near/far leg), medianed for depth.
+4. One review round: the labelled overlay goes back to the VLM, which moves what it thinks is wrong.
+5. Writes `rig/joints_<slug>.json` in glTF space with `_template`/`_source`, which the picker loads for
+   nudging. `Build rig` still needs all quadruped joints; biped sets go to `tools/anim/rigify_auto.py`.
+
+Measured on this rig: T-pose human (pig.glb) and Pepper — 17/17 joints, all landmarks on the right
+anatomy, hips ~2-3 cm low; hog — 16/16, `FL_hip`/`FR_hip` land a little forward of the scapula. Good
+enough to skip 17 clicks, not good enough to skip the review.
+
+**Surface picks → inside the joint.** Clicking in the room means clicking skin, so every hand-picked
+joint sits on the surface (0.2–1.1 mm from it) and the bones then run along the front of the body.
+`tools/rig/center_joints.py <glb> [--asset SLUG] [--factor 0..1] [--write]` casts inward from the
+nearest surface point (that triangle's own normal, then the depth axis, then the flipped normal),
+takes the midpoint of the first solid run, refuses to let a joint slide toward the midline, and only
+keeps points the mesh actually contains. Pepper's 17 hand picks went from ≤1.1 mm to 7.6–59.3 mm
+inside, with the left/right pairs still mirrored to a couple of cm. `--factor 0.5` goes half way.
+It writes a timestamped backup to `rig/attic/` before replacing the file.
+
+**Checking a set:** `tools/rig/inspect_joints.py <glb> [--asset SLUG]` prints per-joint distance to
+the surface and height fraction, flags body joints out of order / pairs that are not mirrored /
+points off the mesh, and writes `check_front.png` + `check_side.png` into `scratch/rig-views/<asset>/`.
+Both tools need `rtree` in the tools venv (now in `install.sh`) for trimesh's ray/contains paths.
+
 ## 2026-11-02 (desktop): Services tab → Endpoints ("point other programs here")
 
 `control/panel.py` gained an `ENDPOINTS` list + `GET /api/endpoints`; the **Services** tab renders one

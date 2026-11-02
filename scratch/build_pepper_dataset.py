@@ -21,18 +21,35 @@ TRIGGER = "pepper"
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default="/Users/dcruse/media-stack/output/image/pepper_angles")
+    ap.add_argument("--src", action="append",
+                    default=None,
+                    help="dataset dir with a manifest.json (repeatable). Defaults to the "
+                         "angle/pose/outfit dir plus the expression dir.")
     ap.add_argument("--dest", default="/Users/dcruse/media-stack/train/datasets/pepper")
     ap.add_argument("--long-side", type=int, default=1024)
     a = ap.parse_args()
 
-    src, dest = Path(a.src), Path(a.dest)
-    man = json.loads((src / "manifest.json").read_text())
+    srcs = [Path(p) for p in (a.src or [
+        "/Users/dcruse/media-stack/output/image/pepper_angles",
+        "/Users/dcruse/media-stack/output/image/pepper_expr",
+    ])]
+    dest = Path(a.dest)
     dest.mkdir(parents=True, exist_ok=True)
+
+    man = {}
+    for s in srcs:
+        mf = s / "manifest.json"
+        if not mf.exists():
+            print(f"[ds] no manifest in {s}")
+            continue
+        for name, meta in json.loads(mf.read_text()).items():
+            item = dict(meta)
+            item["dir"] = str(s)
+            man[name] = item
 
     made = []
     for name, meta in sorted(man.items()):
-        f = src / meta["file"]
+        f = Path(meta["dir"]) / meta["file"]
         if not f.exists():
             print(f"[ds] missing {name}")
             continue
