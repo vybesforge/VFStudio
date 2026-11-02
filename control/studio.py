@@ -158,17 +158,61 @@ ROOTS = {
 }
 
 
+GAME_DIR = STACK / "game"
+GAME_SKIP = {"node_modules", ".godot", "dist", "build", ".git", "templates", "__pycache__", ".import"}
+
+
+def _game_projects():
+    """Every folder under ~/media-stack/game that is a Godot or web project (templates excluded)."""
+    out = []
+    if not GAME_DIR.is_dir():
+        return out
+    for d in sorted(GAME_DIR.iterdir()):
+        if not d.is_dir() or d.name in GAME_SKIP or d.name == "tools":
+            continue
+        kind = "godot" if (d / "project.godot").exists() else "web" if (d / "package.json").exists() or (d / "index.html").exists() else None
+        if not kind:
+            continue
+        counts = {}
+        for p in d.rglob("*"):
+            if any(part in GAME_SKIP for part in p.relative_to(d).parts[:-1]) or not p.is_file():
+                continue
+            for k, exts in EXT.items():
+                if p.suffix.lower() in exts:
+                    counts[k] = counts.get(k, 0) + 1
+        play = None
+        if kind == "web" and (d / "dist" / "index.html").exists():
+            play = f"/files/game/{d.name}/dist/index.html"
+        readme = next((p for p in d.glob("README*")), None)
+        out.append({"name": d.name, "kind": kind, "path": str(d), "assets": counts, "play": play,
+                    "readme": readme.read_text(errors="replace")[:600] if readme else "",
+                    "mtime": d.stat().st_mtime, "when": time.strftime("%m-%d %H:%M", time.localtime(d.stat().st_mtime))})
+    out.sort(key=lambda x: -x["mtime"])
+    return out
+
+
+@router.get("/games")
+def games():
+    return {"projects": _game_projects()}
+
+
 @router.get("/outputs")
 def outputs(kind: str = "image", limit: int = 48):
     if kind not in ROOTS:
         raise HTTPException(400, "unknown kind")
     exts = EXT[kind]
     seen, items = set(), []
-    for d, mount in ROOTS[kind]:
+    roots = list(ROOTS[kind])
+    # game projects contribute their own assets (models, audio, sprites) to every gallery
+    for g in _game_projects():
+        roots.append((Path(g["path"]), f"/files/game/{g['name']}"))
+    for d, mount in roots:
         if not d.is_dir():
             continue
         for p in d.rglob("*"):
             if not p.is_file() or p.suffix.lower() not in exts or ".part" in p.name:
+                continue
+            if d.parent == GAME_DIR and any(part in GAME_SKIP for part in p.relative_to(d).parts[:-1]):
                 continue
             rp = p.resolve()
             if rp in seen:

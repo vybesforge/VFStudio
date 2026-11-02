@@ -57,3 +57,9 @@ stems/.venv/
 
 # training / stems / node packs are re-created by install.sh
 ComfyUI/custom_nodes/ComfyUI-GGUF/
+
+# game projects: source yes, builds/deps no (GLBs already excluded above)
+game/*/node_modules/
+game/*/dist/
+game/*/build/
+game/*/.godot/

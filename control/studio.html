@@ -173,6 +173,8 @@
     <div class="btns" style="margin:0"><button class="primary" onclick="window.open('/vr/index.html','_blank')">Open full screen (WebXR)</button>
       <button onclick="window.open('/vr/index.html?rig=1','_blank')">Joint picker</button><button onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
   <iframe id="room" class="room" src="/vr/index.html" allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"></iframe>
+  <div class="row" style="margin-top:14px"><h2 style="margin:0">Game projects <span class="muted" style="font-weight:400;font-size:12px">~/media-stack/game/ — their models, audio and sprites also appear in the galleries</span></h2><button onclick="loadGames()">Refresh</button></div>
+  <div id="games" class="grid"></div>
   <div class="grid" style="margin-top:14px">
     <div class="card"><div class="name">Photo → mesh</div><div class="desc">TRELLIS.2 (gold path) runs through the ComfyUI UI template; it cannot be driven from this page. Recipe: skill <code>local-media-stack</code> → <code>photo-to-3d-gold-standard.md</code>. Progress shows in the bar above while it runs.</div>
       <div class="btns"><button onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div></div>
@@ -540,7 +542,17 @@ async function loadGallery(kind){
         <button onclick="window.open('${it.url}','_blank')">open</button></div></div></div>`;}).join('');
 }
 async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }
-async function refreshVr(){ const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
+async function loadGames(){
+  const d=await (await fetch('/api/studio/games')).json();
+  $('games').innerHTML = d.projects.length ? d.projects.map(g=>`<div class="card"><div class="name">${g.name} <span class="muted" style="font-weight:400">· ${g.kind==='godot'?'Godot 4':'web (Three.js)'} · ${g.when}</span></div>
+    <div class="desc" style="white-space:pre-wrap;max-height:90px;overflow:hidden">${(g.readme||'').replace(/[#*`]/g,'').trim().slice(0,320)}</div>
+    <div class="muted" style="margin:6px 0">${Object.entries(g.assets).map(([k,v])=>`${v} ${k}`).join(' · ')||'no media assets'}</div>
+    <div class="btns">${g.play?`<button class="primary" onclick="window.open('${g.play}','_blank')">▶ Play in browser</button>`:''}
+      <button onclick="navigator.clipboard.writeText('${g.path}');flash('path copied')">copy path</button>
+      ${g.kind==='godot'?`<button onclick="navigator.clipboard.writeText('/Applications/Godot.app/Contents/MacOS/Godot --path ${g.path}');flash('run command copied')">copy run cmd</button>`:`<button onclick="navigator.clipboard.writeText('cd ${g.path} && npm run dev');flash('dev command copied')">copy dev cmd</button>`}
+    </div></div>`).join('') : '<div class="card muted">no projects yet — <code>game/new_project.sh 2d|3d Name ~/media-stack/game/Name</code></div>';
+}
+async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
 
 // inventory
 async function loadInventory(){

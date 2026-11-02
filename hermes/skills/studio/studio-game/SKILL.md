@@ -18,6 +18,9 @@ project from them, and the exact commands to run, self-test, import GLBs / sprit
 macOS + Windows builds without opening the editor. Everything runs on this Mac; nothing phones home.
 For making the *assets* (sprite sheets, rigged GLBs, 2D animation) load `studio-animation`.
 
+## Where projects live (so the VF Studio panel sees them)
+Put every game under **`~/media-stack/game/<name>/`** (Godot: has `project.godot`; web: has `package.json` or `index.html`). The panel's *3D & VR → Game projects* card lists them automatically and merges their GLB/audio/sprite files into the galleries. For a web game run the production build (`npm run build` → `dist/index.html`) — the panel serves it at `http://127.0.0.1:8787/files/game/<name>/dist/index.html` behind a **▶ Play in browser** button. Projects elsewhere on disk are invisible to the panel.
+
 ## When to Use
 - "Make me a 2D platformer / 3D walking sim / game prototype" → Recipe 1, then edit scripts.
 - "Put this GLB / character in a game and play its animation" → Recipe 3 (3D template loads any GLB).
