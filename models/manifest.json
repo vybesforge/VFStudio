@@ -123,7 +123,7 @@
           "qwen-image-vae"
         ],
         "skip_note": "fp8 upcasts to ~39 GB on Apple Silicon \u2014 use qwen-image-edit-2509-gguf. Not a Metal path.",
-        "note": "CUDA/ROCm fp8 edit path. Needs about 24 GB on one card; it does not fit an RTX 4080."
+        "note": "CUDA/ROCm fp8 edit path. Needs about 24 GB on one card."
       }
     },
     {
@@ -262,7 +262,7 @@
           "qwen-2.5-vl-7b",
           "qwen-image-vae"
         ],
-        "note": "Q4 GGUF edit path. Primary on Apple Silicon and on GPUs under 24 GB. Run it alone on a 32 GB Mac."
+        "note": "Q4 GGUF edit path. Primary on Apple Silicon and on GPUs under 24 GB. Run it on its own near that minimum."
       }
     },
     {
@@ -309,7 +309,7 @@
           "wan2.2-vae",
           "umt5-xxl-fp8"
         ],
-        "note": "Wan 2.2 TI2V 5B, the fast video path. The umt5 fp8 encoder upcasts on Apple Silicon; run video alone on a 32 GB Mac."
+        "note": "Wan 2.2 TI2V 5B, the fast video path. The umt5 fp8 encoder upcasts on Apple Silicon; run video on its own near 32 GB unified or 12 GB VRAM."
       }
     },
     {
@@ -355,7 +355,7 @@
         "includes": [
           "t5-base"
         ],
-        "note": "Stable Audio Open 1.0. Fits a 6 GB card such as the RTX 2060."
+        "note": "Stable Audio Open 1.0. Fits a 6 GB card."
       }
     },
     {
@@ -493,7 +493,7 @@
           "amd",
           "apple"
         ],
-        "note": "ACE-Step 1.5 songs with lyrics. Run it alone on a 32 GB Mac or a 16 GB NVIDIA card."
+        "note": "ACE-Step 1.5 songs with lyrics. Run it on its own near 32 GB unified or 16 GB VRAM."
       }
     },
     {

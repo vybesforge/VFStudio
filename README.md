@@ -18,10 +18,12 @@ git clone <your-fork-url> ~/media-stack && cd ~/media-stack
 bin/forge-recommend                  # OS, CPU, RAM, GPUs, free disk, and the model ids that fit
 bin/fetch-models --profile auto      # essentials + quality for this box (add --dry-run to preview)
 stack start comfy
-gen image "a brass compass on an old map" --model klein --seed 1
+# then run the smoke line forge-recommend printed
 ```
 
-`forge-recommend` only prints. `--profile essentials` is the small set, `--profile auto` adds the daily models, `--profile full` also fetches optional heavy files that still fit. Weak GPUs get an explicit skip list (Flux, HunyuanVideo, the fp8 editor, …) instead of a silent full download. Apple Silicon is recommended the MLX voice / vision / writer repos and the Qwen-Image-Edit GGUF, not the fp8 file. The same command with `--fixture billie`, `--fixture 4080`, or `--fixture mac64` shows the calibration for those boxes without probing.
+Works on any Windows, Linux, or Mac. The command reads this machine only: OS, CPU, RAM, GPU vendor and VRAM (or unified memory), and free disk. From that it picks quants and backends — CUDA, ROCm, MLX, or CPU — and prints what to skip. It does not assume a particular card or a previous install.
+
+`forge-recommend` only prints. `--profile essentials` is the small set, `--profile auto` adds the models that fit, `--profile full` also fetches optional heavy files that still fit. The report ends with a smoke command for whatever image model it kept. On Apple Silicon that set includes the MLX voice, vision, and writer repos and the Qwen-Image-Edit GGUF, not the fp8 file. On NVIDIA and AMD those MLX repos are skipped; the CUDA and ROCm stand-ins are in [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md).
 
 Windows can run `python tools/forge/recommend.py`. `fetch-models` is a bash script (Git Bash or WSL). Gated downloads: `huggingface-cli login` or `HF_TOKEN` — the token is not stored in the repo.
 

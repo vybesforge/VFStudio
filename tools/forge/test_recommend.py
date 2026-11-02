@@ -113,12 +113,12 @@ class RuleTests(unittest.TestCase):
 
         sp.run = boom
         try:
-            run("billie")
+            run("nvidia-32gb")
         finally:
             sp.run = orig
 
-    def test_billie_full_quality_on_the_v100(self):
-        result = run("billie")
+    def test_nvidia_32gb_keeps_the_large_card(self):
+        result = run("nvidia-32gb")
         self.assertEqual({m["id"] for m in result["models"] if m["bucket"] == "essentials"}, INSTALLER_ESSENTIALS)
         for model_id in ("flux1-dev-fp8", "qwen-image-edit-2509", "wan2.2-ti2v-5b",
                          "hyvideo15-720p-i2v", "hyvideo15-480p-t2v", "flux2-klein-4b"):
@@ -130,14 +130,14 @@ class RuleTests(unittest.TestCase):
         self.assertNotIn("qwen-image-edit-2509-gguf", rec.ids_for(result, "recommended"))
         self.assertIn("flux1-dev-fp8", rec.ids_for(result, "recommended"))
         text = " ".join(result["notes"])
-        self.assertIn("RTX 2060", text)
+        self.assertIn("NVIDIA 6 GB", text)
         self.assertIn("not split", text)
         self.assertEqual(result["hf"]["essentials"], [])
         self.assertTrue(result["hf"]["skip"])
         self.assertIn("MLX", result["hf"]["skip"][0]["reason"])
 
-    def test_4080_uses_gguf_and_skips_hyvideo(self):
-        result = run("4080")
+    def test_nvidia_16gb_uses_gguf_and_skips_20gb_video(self):
+        result = run("nvidia-16gb")
         self.assertEqual(result["machine"]["os"], "windows")
         self.assertEqual(bucket(result, "qwen-image-edit-2509-gguf")[0], "quality")
         self.assertEqual(bucket(result, "flux1-dev-fp8")[0], "quality")
@@ -156,7 +156,7 @@ class RuleTests(unittest.TestCase):
         self.assertIn("qwen-image-edit-2509-gguf", ids)
 
     def test_nvidia_smi_mib_still_counts_as_16gb(self):
-        gpus = rec.parse_nvidia_smi("0, NVIDIA GeForce RTX 4080, 16376, 560.35.03\n")
+        gpus = rec.parse_nvidia_smi("0, NVIDIA 16 GB, 16376, 560.35.03\n")
         self.assertEqual(gpus[0]["driver"], "560.35.03")
         self.assertAlmostEqual(gpus[0]["vram_gb"], 15.992, places=3)
         machine = rec.normalize({
@@ -169,8 +169,8 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(bucket(result, "hyvideo15-720p-i2v")[0], "skip")
         self.assertEqual(bucket(result, "qwen-image-edit-2509")[0], "skip")
 
-    def test_mac64_is_mlx_first_and_matches_installer_essentials(self):
-        result = run("mac64")
+    def test_apple_64gb_is_mlx_and_matches_installer_essentials(self):
+        result = run("apple-64gb")
         self.assertEqual({m["id"] for m in result["models"] if m["bucket"] == "essentials"}, INSTALLER_ESSENTIALS)
         self.assertEqual(bucket(result, "qwen-image-edit-2509-gguf")[0], "quality")
         b, reason = bucket(result, "qwen-image-edit-2509")
@@ -188,8 +188,8 @@ class RuleTests(unittest.TestCase):
         self.assertNotIn("kokoro-82m", ids)
         self.assertNotIn("qwen-image-edit-2509", ids)
 
-    def test_mac32_skips_flux_hyvideo_and_27b(self):
-        result = run("mac32")
+    def test_apple_32gb_skips_flux_heavy_video_and_27b(self):
+        result = run("apple-32gb")
         self.assertEqual(bucket(result, "z-image-turbo")[0], "essentials")
         self.assertEqual(bucket(result, "qwen-image-edit-2509-gguf")[0], "quality")
         for model_id in ("flux1-dev-fp8", "hyvideo15-720p-i2v", "qwen-image-edit-2509"):
@@ -201,7 +201,7 @@ class RuleTests(unittest.TestCase):
         self.assertNotIn("qwen3.8-27b-writer", {m["id"] for m in result["hf"]["quality"]})
 
     def test_mid_promotes_klein_and_names_vram_skips(self):
-        result = run("mid")
+        result = run("nvidia-10gb")
         b, reason = bucket(result, "flux2-klein-4b")
         self.assertEqual(b, "essentials")
         self.assertIn("promoted", reason)
@@ -213,14 +213,14 @@ class RuleTests(unittest.TestCase):
         self.assertIn("z-image-te", rec.ids_for(result, "essentials"))
 
     def test_weak_and_cpu_keep_upscalers_only(self):
-        for name in ("weak", "cpu"):
+        for name in ("nvidia-4gb", "cpu"):
             result = run(name)
             kept = {m["id"] for m in result["models"] if m["bucket"] != "skip"}
             self.assertEqual(kept, {"4x-ultrasharp", "realesrgan-x4plus"}, name)
-            self.assertIn("VRAM" if name == "weak" else "GPU", bucket(result, "z-image-turbo")[1])
+            self.assertIn("VRAM" if name == "nvidia-4gb" else "GPU", bucket(result, "z-image-turbo")[1])
 
     def test_tight_disk_drops_zimage_and_keeps_sao(self):
-        result = run("tight")
+        result = run("apple-disk-22gb")
         self.assertEqual(bucket(result, "stable-audio-open-1.0")[0], "essentials")
         self.assertEqual(bucket(result, "realesrgan-x4plus")[0], "essentials")
         self.assertEqual(bucket(result, "seedvr2-3b-int8")[0], "quality")
@@ -231,19 +231,40 @@ class RuleTests(unittest.TestCase):
         self.assertIn("kokoro-82m", {m["id"] for m in result["hf"]["essentials"]})
         self.assertIn("disk", next(m["reason"] for m in result["hf"]["skip"] if m["id"] == "whisper-large-v3-turbo"))
 
+    def test_amd_8gb_follows_vram_and_skips_mlx(self):
+        result = run("amd-8gb")
+        self.assertEqual(result["machine"]["gpu_class"], "amd")
+        self.assertEqual(bucket(result, "flux2-klein-4b")[0], "essentials")
+        b, reason = bucket(result, "z-image-turbo")
+        self.assertEqual(b, "skip")
+        self.assertIn("VRAM", reason)
+        self.assertEqual(result["hf"]["essentials"], [])
+        self.assertIn("MLX", result["hf"]["skip"][0]["reason"])
+        self.assertIn("AMD", " ".join(result["notes"]))
+
+    def test_apple_24gb_unified_stops_at_the_memory_floor(self):
+        result = run("apple-24gb")
+        self.assertEqual(bucket(result, "z-image-turbo")[0], "essentials")
+        b, reason = bucket(result, "trellis2-int8")
+        self.assertEqual(b, "skip")
+        self.assertIn("unified", reason)
+        self.assertEqual(bucket(result, "qwen-image-edit-2509-gguf")[0], "skip")
+        self.assertIn("kokoro-82m", {m["id"] for m in result["hf"]["essentials"]})
+        self.assertIn("qwen3.8-27b-writer", {m["id"] for m in result["hf"]["skip"]})
+
 
 class ProbeTests(unittest.TestCase):
     def test_classify(self):
-        v100 = [{"vendor": "nvidia", "vram_gb": 32}, {"vendor": "nvidia", "vram_gb": 6}]
-        self.assertEqual(rec.classify("linux", "x86_64", "Xeon", v100), "nvidia")
-        self.assertEqual(rec.classify("darwin", "arm64", "Apple M3 Max", [{"vendor": "apple"}]), "apple")
+        two_nvidia = [{"vendor": "nvidia", "vram_gb": 32}, {"vendor": "nvidia", "vram_gb": 6}]
+        self.assertEqual(rec.classify("linux", "x86_64", "Xeon", two_nvidia), "nvidia")
+        self.assertEqual(rec.classify("darwin", "arm64", "Apple Silicon", [{"vendor": "apple"}]), "apple")
         self.assertEqual(
-            rec.classify("darwin", "arm64", "Apple M3 Max", [{"vendor": "nvidia", "vram_gb": 16}, {"vendor": "apple"}]),
+            rec.classify("darwin", "arm64", "Apple Silicon", [{"vendor": "nvidia", "vram_gb": 16}, {"vendor": "apple"}]),
             "nvidia",
         )
         self.assertEqual(rec.classify("linux", "x86_64", "Ryzen", [{"vendor": "amd", "vram_gb": 16}]), "amd")
         self.assertEqual(rec.classify("linux", "x86_64", "cpu", [{"vendor": "intel"}]), "cpu")
-        self.assertTrue(rec.is_apple_silicon("darwin", "arm64", "Apple M3 Max"))
+        self.assertTrue(rec.is_apple_silicon("darwin", "arm64", "Apple Silicon"))
         self.assertFalse(rec.is_apple_silicon("linux", "x86_64", "Xeon"))
 
     def test_live_probe_shape(self):
@@ -260,26 +281,42 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("fetch-models --profile auto", text)
         self.assertIn(machine["gpu_class"], text)
 
+    def test_product_surface_does_not_name_a_workshop(self):
+        banned = ("billie", "dspc", "Precision Tower", "V100", "2060", "RTX 4080", "mac64")
+        files = [
+            ROOT / "tools" / "forge" / "recommend.py",
+            ROOT / "bin" / "forge-recommend",
+            ROOT / "bin" / "fetch-models",
+            ROOT / "README.md",
+            ROOT / "INSTALL.md",
+            ROOT / "INSTALL-UBUNTU.md",
+            ROOT / "models" / "manifest.json",
+        ]
+        for path in files:
+            text = path.read_text()
+            for word in banned:
+                self.assertNotIn(word, text, f"{path.name} contains {word}")
+
 
 class CliTests(unittest.TestCase):
     def test_cli_ids_and_json(self):
         script = ROOT / "tools" / "forge" / "recommend.py"
         ids = subprocess.check_output(
-            [sys.executable, str(script), "--fixture", "billie", "--ids"],
+            [sys.executable, str(script), "--fixture", "nvidia-32gb", "--ids"],
             text=True,
         ).split()
         self.assertIn("flux1-dev-fp8", ids)
         self.assertNotIn("qwen-image-edit-2509-gguf", ids)
         self.assertNotIn("stable-audio-3-medium", ids)
         raw = subprocess.check_output(
-            [sys.executable, str(script), "--fixture", "mac64", "--json"],
+            [sys.executable, str(script), "--fixture", "apple-64gb", "--json"],
             text=True,
         )
         data = json.loads(raw)
-        self.assertEqual(data["machine"]["fixture"], "mac64")
+        self.assertEqual(data["machine"]["fixture"], "apple-64gb")
         self.assertEqual(data["summary"]["fetch_command"], "fetch-models --profile auto")
         ess = subprocess.check_output(
-            [sys.executable, str(script), "--fixture", "mac64", "--ids", "--tier", "essentials"],
+            [sys.executable, str(script), "--fixture", "apple-64gb", "--ids", "--tier", "essentials"],
             text=True,
         ).split()
         self.assertEqual(set(ess), INSTALLER_ESSENTIALS)
@@ -287,7 +324,7 @@ class CliTests(unittest.TestCase):
     def test_fetch_models_dry_run_and_fixture_refusal(self):
         script = ROOT / "bin" / "fetch-models"
         out = subprocess.check_output(
-            ["bash", str(script), "--dry-run", "--profile", "auto", "--fixture", "4080"],
+            ["bash", str(script), "--dry-run", "--profile", "auto", "--fixture", "nvidia-16gb"],
             text=True,
         )
         self.assertIn("would fetch qwen-image-edit-2509-gguf", out)
@@ -295,7 +332,7 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("would fetch hyvideo15-720p-i2v", out)
         self.assertIn("nothing downloaded", out)
         refused = subprocess.run(
-            ["bash", str(script), "--profile", "auto", "--fixture", "billie"],
+            ["bash", str(script), "--profile", "auto", "--fixture", "nvidia-32gb"],
             text=True, capture_output=True,
         )
         self.assertEqual(refused.returncode, 2)

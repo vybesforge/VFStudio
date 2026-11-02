@@ -5,9 +5,8 @@ five services are Apple-only (MLX)** and need CUDA stand-ins. Everything else �
 `gen`/`vid`/`slice`/`stems`/`lora` CLIs, the panel, Blender/Godot/OrcaSlicer tooling, the
 skills — is plain Python + ffmpeg and runs unchanged.
 
-> Status: **written from the code, not yet executed on an Ubuntu box.** Dylan's Precision 5810
-> (V100 32 GB + RTX 2060) and the RTX 4080 box are the targets. First person to run it: fix this
-> file where reality differs and commit it. Timings quoted in the skills are Mac numbers.
+> Status: **written from the code, not yet executed on an Ubuntu box.** First person to run it: fix this
+> file where reality differs and commit it. Timings quoted in the skills are from one Apple Silicon machine.
 
 ## What changes
 
@@ -25,20 +24,22 @@ skills — is plain Python + ffmpeg and runs unchanged.
 | Demucs / LoRA training | `--device mps` | `--device cuda` | the CLIs auto-pick CUDA when present |
 | Service manager | `bin/stack` (launchd-free, works as is) | same; optional systemd units in §8 | — |
 
-Memory model is different too: on the Mac everything shared one 64 GB pool; on a GPU box you are
-bound by **VRAM**. Run `bin/forge-recommend` before fetching — it uses the largest card only
-(a model is not split across the V100 and the 2060). The rules, checked against the calibration
-fixtures in `tools/forge/test_recommend.py`:
+On a discrete GPU you are bound by **VRAM on the largest card**, not the sum of cards and not
+the Mac's unified-memory pool. Run `bin/forge-recommend` before fetching. It reads this machine
+and applies the same limits everywhere:
 
-| Box | Largest card | Fetch | Skip |
-|---|---|---|---|
-| billie (Precision 5810) | V100 32 GB (2060 6 GB is ignored for fitting) | `--profile auto`: Z-Image, klein, Flux dev fp8, Qwen-Image-Edit **fp8**, Wan 2.2 5B, HunyuanVideo 1.5, TRELLIS.2, ACE-Step | the Qwen GGUF (the fp8 file fits), MLX repos |
-| dspc RTX 4080 | 16 GB (nvidia-smi reports ~16376 MiB; that still counts as 16) | Z-Image, klein, Flux dev fp8 (tight), Qwen-Image-Edit **GGUF**, Wan 2.2 5B | Qwen fp8 (needs ~24 GB), HunyuanVideo 1.5 (needs ~20 GB), MLX repos |
-| Apple Silicon | unified RAM | MLX voice / vision / writer, Qwen **GGUF** | Qwen fp8 always; Flux dev and the 27B writer under 48 GB |
+| Detected limit | What `--profile auto` keeps | What it skips |
+|---|---|---|
+| NVIDIA/AMD ≥ 24 GB | fp8 edit path, Flux dev fp8, Wan 2.2 5B, HunyuanVideo 1.5 | the Qwen GGUF (the fp8 file fits), MLX repos |
+| NVIDIA/AMD 16 GB (a driver that reports ~16376 MiB still counts as 16) | GGUF edit path, Flux dev fp8 (tight), Wan 2.2 5B | fp8 edit (~24 GB), HunyuanVideo (~20 GB), MLX repos |
+| NVIDIA/AMD 8 GB | FLUX.2 klein, small SFX, classical upscalers | Z-Image, Wan, Flux dev |
+| Apple unified ≥ 48 GB | MLX voice / vision / writer, Qwen GGUF, Flux dev | Qwen fp8 (it upcasts) |
+| Apple unified under 48 GB | GGUF edit, Z-Image if memory allows | Flux dev, HunyuanVideo, the 27B writer |
+| no GPU | RealESRGAN and 4x-UltraSharp | every diffusion model |
 
-V100 32 GB: a 27B Q4 writer (~17 GB) does **not** coexist with ComfyUI — time-share with
-*Unload all*. The 2060 is too small for every diffusion model in the manifest. RTX 4080:
-text encoders offload; use a ≤14B writer (Q4 ≈ 9 GB) via llama-server, not the MLX 27B repo.
+A 27B Q4 writer is about 17 GB and time-shares a card that large (`stack free` first). Under 24 GB
+VRAM, use a ≤14B Q4 GGUF via llama-server. Text encoders offload on cards under 24 GB. MLX weight
+files are not the CUDA or ROCm build.
 
 ## 1. Base packages
 
@@ -76,13 +77,15 @@ bin/fetch-models --dry-run --profile auto
 bin/fetch-models --profile auto      # essentials + quality that fit the largest GPU and the free disk
 bin/fetch-models --list              # ✓/✗ per manifest id
 ```
-`fetch-models --profile essentials` is the small set (on a V100 or 4080: Z-Image, upscalers,
-Stable Audio Open, TRELLIS.2). `--profile full` adds optional files such as Stable Audio 3 medium.
-There is no `--all` flag; fetching every id regardless of VRAM is `bin/fetch-models` with no
-profile. Do that only when you mean to.
+`fetch-models --profile essentials` is the small set that fits (Z-Image, upscalers, Stable Audio
+Open, and TRELLIS.2 when VRAM or unified memory allows). `--profile full` adds optional files
+such as Stable Audio 3 medium. There is no `--all` flag; fetching every id regardless of VRAM is
+`bin/fetch-models` with no profile. Do that only when you mean to.
 
-Windows (the 4080 box): `python tools/forge/recommend.py` runs as-is. `bin/fetch-models` is bash
-— Git Bash or WSL. ComfyUI itself is the CUDA install above, pointed at the same `models/` tree.
+Windows: `python tools/forge/recommend.py` runs as-is. `bin/fetch-models` is bash — Git Bash or
+WSL. ComfyUI itself is the CUDA install above, pointed at the same `models/` tree. AMD uses the
+same VRAM rules with a ROCm PyTorch build; the stack was measured on CUDA and Apple Silicon, so
+smoke-test klein before fetching the quality tier.
 
 ## 3. Tools venv + CLIs (unchanged)
 
@@ -180,12 +183,11 @@ GPU is not held by idle weights.
 
 ## 9. Smoke test
 
-`forge-recommend` prints a `gen` line for whatever image model it kept. On the V100 and the 4080
-that is klein:
+`forge-recommend` prints a `gen` line for whatever image model it kept. When klein is in the set:
 
 ```bash
 stack status
-gen image "a brass compass on an old map" --model klein --seed 1      # expect ~5–8 s on a V100, output/image/klein_*.png
+gen image "a brass compass on an old map" --model klein --seed 1      # output/image/klein_*.png
 voice say "ok" --out /tmp/ok.wav && voice transcribe /tmp/ok.wav
 scribe prose "test" --words 60
 see describe output/image/klein_00001_.png
