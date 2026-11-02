@@ -71,7 +71,12 @@ and the Voice tab records from the mic — Dylan uses the page himself, so a pat
 the first thing he asks is "how do I get my own image/voice in". Code edits need `stack restart panel`
 (uvicorn does not hot-reload); never `pkill python` — it takes the gateway down with it. Header = live ComfyUI progress bar
 (step N/M) for anything submitted as client `gen-cli` — `gen` and the Hermes plugin do; ComfyUI-UI
-jobs show an indeterminate bar. Models tab = manifest + HF inventory. Resources tab has
+jobs show an indeterminate bar. Models tab = manifest + HF inventory. **Services tab = live start/stop cards + an Endpoints block**
+that lists every URL another local program or page can be pointed at (TTS, STT, voice clone, ComfyUI,
+writer LLM, VLM, this panel's own API) with per-row **Copy URL**, a **Details** panel (routes + a
+working curl), and **Copy all → .env / JSON**; a host switch flips every link between `127.0.0.1` and
+the LAN IP. Source of truth is the `ENDPOINTS` list in `control/panel.py` served at `/api/endpoints` —
+add a service there, not in the HTML, or the page and reality drift. Resources tab has
 **Unload all models** and **Stop everything**. There is one page; never add a second UI or a
 "legacy" copy — Dylan asks for consolidation and removes duplicates.
 
