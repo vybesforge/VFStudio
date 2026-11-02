@@ -40,7 +40,7 @@ JOBS_LOG = STACK / "logs" / "studio-jobs.jsonl"
 GEN = STACK / "tools" / "comfy" / "gen"
 VOICE = STACK / "tools" / "voice" / "voice"
 VID = STACK / "tools" / "video" / "vid"
-WRITE = STACK / "tools" / "llm" / "write"
+WRITE = STACK / "tools" / "llm" / "scribe"   # not "write": macOS owns that name
 SEE = STACK / "tools" / "vision" / "see"
 FFMPEG = next((p for p in (HOME / ".hermes" / "tools").glob("ffmpeg-*/ffmpeg")), None)
 
@@ -328,12 +328,17 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
 
 def _run_job(job: dict):
     log = STACK / "logs" / f"studio-job-{job['id']}.log"
-    with open(log, "w") as lf:
-        proc = subprocess.Popen(job["cmd"], stdout=lf, stderr=subprocess.STDOUT, env=_env(),
-                                cwd=str(STACK), start_new_session=True)
+    try:
+        with open(log, "w") as lf:
+            proc = subprocess.Popen(job["cmd"], stdout=lf, stderr=subprocess.STDOUT, env=_env(),
+                                    cwd=str(STACK), start_new_session=True)
+            with _jlock:
+                job["pid"] = proc.pid
+            rc = proc.wait()
+    except Exception as exc:  # e.g. missing executable — never leave a job "running" forever
         with _jlock:
-            job["pid"] = proc.pid
-        rc = proc.wait()
+            job.update(status="failed", rc=-1, finished=time.time(), pid=None, log_tail=f"spawn failed: {exc!r}")
+        return
     text = log.read_text(errors="replace")
     result = None
     for line in reversed(text.strip().splitlines()):
@@ -352,14 +357,17 @@ def _run_job(job: dict):
             s = line.strip().split(" ")[0]
             if s.startswith("/") and Path(s).exists():
                 files.append(s)
+    text_out = None
     if result and result.get("out") and os.path.exists(str(result["out"])):
         files.append(result["out"])
+        if str(result["out"]).endswith((".md", ".txt", ".json", ".fountain", ".srt")):
+            text_out = Path(result["out"]).read_text(errors="replace")[:20000]
     if result and result.get("file") and os.path.exists(str(result["file"])) and result["file"] not in files:
         files.append(result["file"])
     with _jlock:
         job.update(status="done" if rc == 0 and (result is None or result.get("ok", True)) else "failed",
                    rc=rc, finished=time.time(), result=result, files=files,
-                   text=(result or {}).get("text") if result else None,
+                   text=((result or {}).get("text") or text_out) if result else None,
                    log_tail=text[-1500:], pid=None)
     with open(JOBS_LOG, "a") as f:
         f.write(json.dumps({k: v for k, v in job.items() if k != "log_tail"}) + "\n")
