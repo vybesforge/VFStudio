@@ -1,16 +1,16 @@
 #!/Users/dcruse/media-stack/llm/.venv/bin/python
-"""write — local, uncensored creative-writing CLI over the mlx-lm server (:8081).
+"""scribe — local, uncensored creative-writing CLI over the mlx-lm server (:8081).
 
-  write chat "prompt"                                   plain completion with the writer system prompt
-  write prose "premise" [--genre noir] [--pov first] [--words 1200] [--tone ...]
-  write outline "premise" [--chapters 12]               chapter-by-chapter outline (JSON-ish markdown)
-  write chapter outline.md --n 3 [--words 2500] [--prev chapter2.md]   next chapter from an outline
-  write screenplay "logline" [--pages 5]                Fountain-format scene(s)
-  write dialogue "scene setup" [--chars "Mara, Ivo"] [--branches 3]   game dialogue tree (JSON)
-  write lore "world concept" [--items 10]               bible entries: places, factions, items
-  write revise draft.md --note "tighten pacing, more sensory detail"
-  write continue draft.md [--words 800]
-  write status
+  scribe chat "prompt"                                   plain completion with the writer system prompt
+  scribe prose "premise" [--genre noir] [--pov first] [--words 1200] [--tone ...]
+  scribe outline "premise" [--chapters 12]               chapter-by-chapter outline (JSON-ish markdown)
+  scribe chapter outline.md --n 3 [--words 2500] [--prev chapter2.md]   next chapter from an outline
+  scribe screenplay "logline" [--pages 5]                Fountain-format scene(s)
+  scribe dialogue "scene setup" [--chars "Mara, Ivo"] [--branches 3]   game dialogue tree (JSON)
+  scribe lore "world concept" [--items 10]               bible entries: places, factions, items
+  scribe revise draft.md --note "tighten pacing, more sensory detail"
+  scribe continue draft.md [--words 800]
+  scribe status
 
 Flags for every subcommand: --out file.md (default: print), --temp 0.9, --max-tokens N,
 --system "override system prompt", --model <repo> (server must have it loaded).
@@ -54,8 +54,11 @@ def server_models():
         return None
 
 
-def complete(messages, model=None, temp=0.9, max_tokens=2048, stream=True):
-    payload = {"messages": messages, "temperature": temp, "max_tokens": max_tokens, "stream": stream}
+def complete(messages, model=None, temp=0.9, max_tokens=2048, stream=True, think=False):
+    # Qwen3.x "thinks" by default and burns the whole max_tokens budget on it for long prose
+    # (a 350-word request came back EMPTY). Prose does not need chain-of-thought; disable it.
+    payload = {"messages": messages, "temperature": temp, "max_tokens": max_tokens, "stream": stream,
+               "chat_template_kwargs": {"enable_thinking": bool(think)}}
     if model:
         payload["model"] = model
     req = urllib.request.Request(HOST + "/v1/chat/completions", data=json.dumps(payload).encode(),
@@ -89,12 +92,13 @@ def strip_think(text):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="write", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(prog="scribe", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
         sp.add_argument("--out"); sp.add_argument("--temp", type=float, default=0.9)
         sp.add_argument("--max-tokens", type=int, default=None); sp.add_argument("--system"); sp.add_argument("--model")
+        sp.add_argument("--think", action="store_true", help="allow the model's hidden reasoning (slower, needs a bigger --max-tokens)")
 
     s = sub.add_parser("chat"); s.add_argument("prompt"); common(s)
     s = sub.add_parser("prose"); s.add_argument("prompt"); s.add_argument("--genre", default="literary"); s.add_argument("--pov", default="third", choices=["first", "second", "third"])
@@ -135,7 +139,7 @@ def main():
     max_tokens = a.max_tokens or max(1024, int(words * 2.2))
     messages = [{"role": "system", "content": a.system or BASE_SYSTEM}, {"role": "user", "content": user}]
     t0 = time.time()
-    text = strip_think(complete(messages, a.model, a.temp, max_tokens))
+    text = strip_think(complete(messages, a.model, a.temp, max_tokens, think=a.think))
     if a.out:
         os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
         open(a.out, "w").write(text + "\n")

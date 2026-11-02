@@ -51,7 +51,7 @@ TOOLS = [
     ("gen", GEN, "ComfyUI pipelines: image / control / upscale / video / sfx / music"),
     ("voice", VOICE, "TTS, voice clone, transcribe, enhance (mlx-audio)"),
     ("vid", VID, "ffmpeg wrapper: trim / concat / captions / gif / loudness"),
-    ("write", WRITE, "uncensored creative writing over the local LLM (prose/outline/screenplay/dialogue/lore)"),
+    ("scribe", WRITE, "uncensored creative writing over the local LLM (prose/outline/screenplay/dialogue/lore)"),
     ("see", SEE, "local vision: describe / ask / ocr / compare, camera snap"),
     ("imagesnap", Path("/opt/homebrew/bin/imagesnap"), "camera capture"),
     ("vse_build.py", STACK / "tools" / "video" / "vse_build.py", "Blender VSE timeline assembler"),
@@ -423,6 +423,40 @@ def cancel(jid: str):
     except Exception:
         pass
     return {"ok": True}
+
+
+@router.post("/unload-all")
+def unload_all(payload: dict = Body(default={})):
+    """Hand unified memory back without stopping ComfyUI: /free unloads its models; the LLM and
+    VLM servers hold their weights for life, so they are stopped; mlx-audio keeps every model it
+    ever loaded resident, so it is restarted (if it was running). `hard: true` stops everything."""
+    import panel as _panel  # same process; reuse its service control
+    import urllib.request as u
+    hard = bool(payload.get("hard"))
+    before = _panel._mem_stats()
+    steps = []
+    try:
+        u.urlopen(u.Request("http://127.0.0.1:8188/free", data=json.dumps({"unload_models": True, "free_memory": True}).encode(),
+                            headers={"Content-Type": "application/json"}, method="POST"), timeout=10)
+        steps.append("ComfyUI: models unloaded")
+    except Exception as exc:
+        steps.append(f"ComfyUI: not reachable ({exc.__class__.__name__})")
+    for name in ("llm", "vision"):
+        if _panel.read_pid(name) or _panel.port_open(_panel.SERVICES[name]["port"]):
+            _panel.stop(name); steps.append(f"{name}: stopped (weights released)")
+    if _panel.read_pid("audio"):
+        _panel.stop("audio")
+        if hard:
+            steps.append("audio: stopped")
+        else:
+            _panel.start("audio"); steps.append("audio: restarted empty (models reload on demand)")
+    if hard and _panel.read_pid("comfy"):
+        _panel.stop("comfy"); steps.append("comfy: stopped")
+    time.sleep(2)
+    after = _panel._mem_stats()
+    freed = (before.get("used", 0) - after.get("used", 0)) / 2**30
+    return {"ok": True, "steps": steps, "freed_gb": round(freed, 1),
+            "used_gb": round(after.get("used", 0) / 2**30, 1), "message": f"freed ~{freed:.1f} GB · " + "; ".join(steps)}
 
 
 @router.get("/voices")

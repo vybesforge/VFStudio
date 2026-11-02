@@ -96,8 +96,9 @@ Full stats of any GLB: `~/media-stack/tools/vr/gltf inspect /ABS/file.glb` (tabl
 Then confirm Godot loads the result with Recipe 1's headless check (expect `GLB_LOAD OK` and the new `tris=`).
 
 ### 4. Existing WebXR room (Three.js, browser)
-Intent: view `~/media-stack/vr/pig.glb` in a browser / WebXR headset without Godot.
-- URL: `http://127.0.0.1:8787/vr/` (panel "VR Room" tab). Page: `~/media-stack/vr/index.html`, which loads `./pig.glb` (hard-coded; to show another model copy/overwrite a GLB **into a scratch copy of the room**, never the gold `pig.glb`, or edit the `loader.load('./pig.glb'` line in a copy of `index.html`).
+Intent: view any GLB in a browser / WebXR headset without Godot, and pick rig joints on it.
+- URL: `http://127.0.0.1:8787/vr/index.html` (panel "3D & VR" tab). Loads `./pig.glb` by default; **any served GLB** via `?src=/files/output/3d/thing.glb` (the 3D gallery's "room" / "rig" buttons build these links). `&rig=1` opens the joint picker: templates `quadruped` (16 joints, buildable via `/api/rig/build` → `vr/<asset>_rigged.glb`) and `biped` (17 joints, saved for `tools/anim/rigify_auto.py`; in-room build disabled). Joint sets are saved per asset slug (`rig/joints_<asset>.json`). `Mirror L→R` copies left joints to the right side across the model's centre; `U` = undo, `N` = skip.
+- In VR: right/left controller rays; **trigger** places the armed joint (rig mode) or teleports to the pointed floor spot; **grip** toggles rotation. `renderer.xr.setFoveation(1)` is on; assets over 300k tris show a ⚠ with the `optimize_glb.sh` hint — use it, a 1.2M-tri GLB will not hold 90 fps.
 - Three.js is vendored in `~/media-stack/vr/vendor/` (`three.module.js`, `GLTFLoader.js`, `VRButton.js`, `OrbitControls.js`) — no CDN.
 - WebXR only works in a secure context: `http://localhost` / `http://127.0.0.1` or HTTPS. A LAN URL like `http://192.168.x.x:8787/vr/` shows the room flat but the "Enter VR" button will not work. For a headset on the LAN use an HTTPS reverse proxy or port-forward to localhost on the headset's PC (e.g. `ssh -L 8787:127.0.0.1:8787`).
 - No `MeshoptDecoder` is registered in `index.html`: only plain GLBs (optimize_glb.sh default) load there.

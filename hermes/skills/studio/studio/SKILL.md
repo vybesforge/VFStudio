@@ -38,18 +38,23 @@ are copy-pasteable as written.
 | Sound effect | `gen sfx "prompt" --seconds 8` | this file |
 | Music / full song with lyrics | `gen music "tags" --lyrics "..."` (ACE-Step 1.5) | this file |
 | Speech, voice clone, transcription | `voice say/clone/transcribe/enhance` | `studio-voice` |
+| Fiction, screenplay, game dialogue, lore (uncensored, local) | `scribe prose|outline|chapter|screenplay|dialogue|lore|revise` | `studio-writing` |
+| Look at an image / camera, OCR, compare renders (local) | `see describe|ask|ocr|compare|snap` | `studio-vision` |
 | 3D model from a photo | TRELLIS.2 via ComfyUI UI (`scratch/run_trellis2.py`) | `local-media-stack` (gold-standard recipe) |
 | Fix / rig / render a mesh | Blender via `~/media-stack/bin/blender -b -P script.py` | `local-media-stack`, `blender` |
 | Parametric part → STL → G-code | `cad_examples/*.py`, `meshcheck.py`, `slice --preset bambu|generic` | `studio-3d-print` |
 | View asset in VR / build SteamVR app | Godot room, `optimize_glb.sh`, WebXR room | `studio-vr` |
+| 2D/3D game prototype, run/export Godot headless | `~/media-stack/game/new_project.sh 2d\|3d Name dest` | `studio-game` |
+| Auto-rig + test cycle → GLB, Grease Pencil 2D, sprite sheets, Krita/Tahoma2D path | `tools/anim/rigify_auto.py`, `gp_anim.py`, `spritesheet.py` | `studio-animation` |
 | Vector / raster hand-editing (human) | Inkscape, Krita, Audacity, OpenSCAD, MeshLab in /Applications | — |
 
 ## Services (check first, start if down)
 
 ```bash
-stack status                 # ComfyUI :8188, mlx-audio :8000, panel :8787
+stack status                 # ComfyUI :8188, mlx-audio :8000, writer LLM :8081, vision VLM :8082, panel :8787
 stack start comfy            # images / video / sfx / music / 3D
 stack start audio            # TTS / STT / voice clone
+stack start llm              # uncensored 27B writer (16 GB) · stack start vision = Qwen3-VL 8B (5 GB)
 gen status                   # which ComfyUI model sets are installed + queue depth
 fetch-models --list          # ✓/✗ every model in models/manifest.json; `fetch-models` downloads the ✗
 ```
@@ -120,6 +125,10 @@ disk inflates every timing 2-3×.
 | ACE-Step 1.5 AIO | 10 | music |
 | Stable Audio 3 medium | 10 | sfx/music |
 | mlx-audio (Kokoro + Whisper + Qwen3-TTS) | 6 | separate process |
+| writer LLM (Qwen3.8 27B 4-bit) | 16 | stop before Flux dev / Qwen-Edit |
+| vision VLM (Qwen3-VL 8B 4-bit) | 5 | |
+
+**Out of memory?** Panel → Resources → "Unload all models / free memory" (ComfyUI `/free`, LLM+VLM stopped, mlx-audio recycled; measured 25 GB back in one click) or `curl -X POST :8787/api/studio/unload-all`.
 
 Switching families pays the load cost again. `stack free` unloads ComfyUI models without
 stopping the server. Swap in use (panel → Resources) is the honest warning.

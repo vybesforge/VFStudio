@@ -1,8 +1,24 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>studio · media stack</title>
+<html><head><meta charset="utf-8"><title>VF Studio</title><link rel="icon" href="/brand/vf-logo.png">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  :root{color-scheme:dark;--bg:#0b0d10;--card:#14171c;--line:#232830;--mut:#8b929c;--fg:#e6e8eb;--acc:#1f6feb;--ok:#37d67a;--warn:#f5a623;--err:#e05561}
+  /* VybesForge palette (vybesforge.com): forge orange + amber core, cyan / magenta neon, deep navy */
+  :root{color-scheme:dark;--bg:#02060f;--bg2:#070c16;--card:#0b121d;--line:#1a2333;--mut:#8f99ad;--fg:#e8ecf5;--acc:#fd6c0f;--amber:#ffb000;--cyan:#29d5e9;--magenta:#bf338a;--ok:#29d5e9;--warn:#ffb000;--err:#e05561}
+  body{background:radial-gradient(1200px 500px at 10% -10%,#16101a 0%,transparent 60%),radial-gradient(900px 400px at 100% 0%,#0a1a22 0%,transparent 55%),var(--bg)}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand img{width:42px;height:42px;border-radius:10px;box-shadow:0 0 18px #fd6c0f55,0 0 2px #29d5e9aa}
+  .brand h1{font-size:19px;letter-spacing:.02em}
+  .brand h1 b{background:linear-gradient(90deg,var(--amber),var(--acc));-webkit-background-clip:text;background-clip:text;color:transparent}
+  nav button.active{border-bottom-color:var(--acc);text-shadow:0 0 12px #fd6c0f66}
+  button.primary{background:linear-gradient(180deg,#ff7d1f,#e55f08);border-color:#ff8a33;color:#fff;text-shadow:0 1px 0 #0006}
+  button.primary:hover{background:linear-gradient(180deg,#ff8e3b,#f06a10)}
+  .bar>i{background:linear-gradient(90deg,var(--amber),var(--acc))}
+  .bar.g>i{background:linear-gradient(90deg,var(--cyan),#1aa6b8)}
+  .on{background:var(--cyan);box-shadow:0 0 8px #29d5e988}
+  .tag.ok{color:var(--cyan);border-color:#17505a} .chip.done{color:var(--cyan);border-color:#17505a}
+  .chip.run{color:var(--amber);border-color:#5a4418}
+  a{color:var(--cyan)}
+  footer{padding:10px 28px 22px;color:#5a6478;font-size:11px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
   *{box-sizing:border-box}
   body{margin:0;font:14px/1.5 ui-sans-serif,-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
   header{padding:18px 28px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap}
@@ -71,7 +87,7 @@
   .hint{font-size:11px;color:#6f7681;margin-top:6px}
 </style></head><body>
 <header>
-  <div><h1>studio</h1><div class="sub">local asset generation · M3 Max 64 GB · nothing leaves the machine</div></div>
+  <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge · M3 Max 64 GB · nothing leaves the machine</div></div></div>
   <div class="card" id="progress" style="min-width:360px;flex:1;max-width:720px;padding:10px 14px"></div>
 </header>
 <nav>
@@ -140,7 +156,7 @@
 <section class="tab" id="tab-3d">
   <div class="row" style="margin-bottom:10px"><div><div class="name">Asset room</div><div class="desc" id="vr-asset">checking…</div></div>
     <div class="btns" style="margin:0"><button class="primary" onclick="window.open('/vr/index.html','_blank')">Open full screen (WebXR)</button>
-      <button onclick="window.open('/vr/rig.html','_blank')">Joint picker</button><button onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
+      <button onclick="window.open('/vr/index.html?rig=1','_blank')">Joint picker</button><button onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
   <iframe id="room" class="room" src="/vr/index.html" allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"></iframe>
   <div class="grid" style="margin-top:14px">
     <div class="card"><div class="name">Photo → mesh</div><div class="desc">TRELLIS.2 (gold path) runs through the ComfyUI UI template; it cannot be driven from this page. Recipe: skill <code>local-media-stack</code> → <code>photo-to-3d-gold-standard.md</code>. Progress shows in the bar above while it runs.</div>
@@ -220,7 +236,7 @@
         <div><label>characters (dialogue)</label><input id="wr-chars" placeholder="Mara, Ivo"></div><div><label>entries (lore)</label><input id="wr-items" value="8"></div>
       </div>
       <div class="btns"><button class="primary" onclick="writeJob()">Write</button></div>
-      <div class="hint">CLI: <code>write prose "premise" --genre noir --words 1200</code> · outputs saved to <code>output/text/</code>. 27B model: ~15 tok/s; a 900-word scene ≈ 1-2 min.</div>
+      <div class="hint">CLI: <code>scribe prose "premise" --genre noir --words 1200</code> · outputs saved to <code>output/text/</code>. 27B model: ~15 tok/s; a 900-word scene ≈ 1-2 min.</div>
     </div>
     <div id="jobs-write" class="card" style="margin-top:12px"></div>
   </div>
@@ -271,6 +287,9 @@ skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-p
 
 <!-- RESOURCES -->
 <section class="tab" id="tab-resources">
+  <div class="card" style="margin-bottom:14px"><div class="row"><div><div class="name">Memory control</div><div class="desc">Unload = ComfyUI models out of memory, writer LLM + vision VLM stopped, mlx-audio recycled — services stay up. Stop everything = all four services down.</div></div>
+    <div class="btns" style="margin:0"><button class="primary" onclick="unloadAll(false)">Unload all models / free memory</button><button class="danger" onclick="unloadAll(true)">Stop everything</button></div></div>
+    <div class="meta" id="unload-result"></div></div>
   <div class="stats" id="stats"></div>
   <h2>Top processes by memory</h2>
   <div class="card"><table id="procs"><thead><tr><th>process</th><th class="r">pid</th><th class="r">rss</th><th class="r">cpu%</th></tr></thead><tbody></tbody></table></div>
@@ -278,6 +297,7 @@ skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-p
 </section>
 </main>
 
+<footer><span><b style="color:var(--amber)">VF</b> Studio · <a href="https://vybesforge.com" target="_blank" rel="noopener">vybesforge.com</a> · everything generated here is local</span><span><a href="http://127.0.0.1:8188" target="_blank">ComfyUI</a> · <a href="/vr/index.html" target="_blank">VR room</a></span></footer>
 <div id="modal" onclick="if(event.target.id==='modal')closeModal()"><div class="box"><div class="hd"><span id="modal-title"></span><button onclick="closeModal()">close</button></div><div class="ct" id="modal-ct"></div></div></div>
 
 <script>
@@ -381,7 +401,7 @@ async function loadGallery(kind){
         ${kind==='image'?`<button onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
         ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
         ${kind==='video'||kind==='image'?`<button onclick="$('vd-img').value='${it.path}';flash('start image set')">→ video</button>`:''}
-        ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button>`:''}
+        ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}','_blank')">room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}&rig=1','_blank')">rig</button>`:''}
         ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}
         ${kind==='text'?`<button onclick="$('wr-file').value='${it.path}';flash('draft set')">as draft</button>`:''}
         <button onclick="window.open('${it.url}','_blank')">open</button></div></div></div>`;}).join('');
@@ -405,7 +425,7 @@ async function refreshServices(){
   $('services').innerHTML=Object.entries(s.services).map(([k,x])=>{const cls=x.responding?'on':(x.running?'warn':'off');const st=x.responding?'running':(x.running?'starting':'stopped');
     return `<div class="card"><div class="row"><div><div class="name">${x.label}</div><div class="desc">${x.desc}</div></div><div style="font-size:12px"><span class="dot ${cls}"></span>${st}</div></div>
     <div class="meta">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div><div class="btns"><button class="primary" onclick="act('start/${k}')">Start</button><button onclick="act('restart/${k}')">Restart</button><button class="danger" onclick="act('stop/${k}')">Stop</button>${k==='comfy'?'<button onclick="act(\'comfy/free\')">Free VRAM</button>':''}<button onclick="svcLog('${k}')">Log</button></div><pre id="slog-${k}" style="display:none"></pre></div>`;}).join('')
-    +`<div class="card"><div class="name">panel</div><div class="desc">this page · :8787 · <a href="/legacy" style="color:var(--mut)">legacy view</a></div><div class="meta">PANEL_HOST=0.0.0.0 stack panel exposes it to the LAN (WebXR still needs localhost/HTTPS)</div></div>`;
+    +`<div class="card"><div class="name">panel</div><div class="desc">this page · :8787</div><div class="meta">PANEL_HOST=0.0.0.0 stack panel exposes it to the LAN (WebXR still needs localhost/HTTPS)</div></div>`;
 }
 async function svcLog(n){const p=$('slog-'+n);const j=await (await fetch('/api/logs/'+n+'?lines=60')).json();p.textContent=j.text||'(empty)';p.style.display=p.style.display==='none'?'block':'none';}
 function bar(pct,tone){const x=Math.max(0,Math.min(100,pct));const t=tone||(x>88?'r':x>70?'a':x>40?'':'g');return `<div class="bar ${t}"><i style="width:${x}%"></i></div>`;}
@@ -419,6 +439,7 @@ async function refreshResources(){
   $('procs').querySelector('tbody').innerHTML=(r.procs||[]).map(p=>`<tr><td><code>${p.comm}</code></td><td class="r">${p.pid}</td><td class="r">${p.rss>GB?(p.rss/GB).toFixed(2)+' GB':(p.rss/MB).toFixed(0)+' MB'}</td><td class="r">${p.cpu.toFixed(1)}</td></tr>`).join('');
   $('disk').textContent=`${(d.used/GB).toFixed(0)} / ${(d.total/GB).toFixed(0)} GB used · ${(d.free/GB).toFixed(0)} GB free`; $('diskbar').style.width=(d.total?d.used/d.total*100:0)+'%';
 }
+async function unloadAll(hard){ $('unload-result').textContent='working…'; const j=await (await fetch('/api/studio/unload-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hard})})).json(); $('unload-result').textContent=j.message||JSON.stringify(j); flash(`freed ~${j.freed_gb} GB`); setTimeout(refreshResources,1500); }
 async function loadVoices(){ try{const j=await (await fetch('/api/studio/voices')).json(); if(j.voices&&j.voices.length) $('vo-voice').innerHTML=j.voices.map(x=>`<option${x==='af_heart'?' selected':''}>${x}</option>`).join('');}catch(e){} }
 
 refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();

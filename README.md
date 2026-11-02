@@ -26,7 +26,11 @@ stack panel                                  # http://127.0.0.1:8787
 | Photo → 3D | ComfyUI TRELLIS.2 template (`scratch/run_trellis2.py`) | TRELLIS.2 + DINOv3 + BiRefNet |
 | Mesh repair / rig / render | `bin/blender -b -P …` | Blender 5.2 |
 | CAD → STL → G-code | `tools/print/cad_examples/*.py` · `meshcheck.py` · `slice --preset bambu\|generic` | build123d · trimesh · OrcaSlicer 2.4 CLI |
-| VR | `vr-godot/` · `tools/vr/optimize_glb.sh` · WebXR room `vr/` | Godot 4.7 OpenXR · gltf-transform · Three.js |
+| VR | `vr-godot/` · `tools/vr/optimize_glb.sh` · WebXR room `vr/` (any GLB, joint picker, controllers) | Godot 4.7 OpenXR · gltf-transform · Three.js |
+| Games 2D/3D | `game/new_project.sh 2d\|3d <name> <dest>`, templates with headless run/export | Godot 4.7 |
+| Animation | `tools/anim/rigify_auto.py` · `gp_anim.py` · `spritesheet.py` · `pngseq_to_vse.py` | Blender Rigify + Grease Pencil · Krita · Tahoma2D |
+| Writing (uncensored) | `scribe prose\|outline\|chapter\|screenplay\|dialogue\|lore\|revise` | Qwen3.8-27B-Uncensored (mlx-lm, :8081) |
+| Vision + camera | `see describe\|ask\|ocr\|compare\|snap` | Qwen3-VL-8B (mlx-vlm, :8082) · imagesnap |
 
 Every `gen` call prints one JSON line (`{"ok":true,"files":[…],"seconds":…}`), waits for an idle
 GPU queue, and fails loudly when ComfyUI reports success without writing a file.
@@ -37,11 +41,11 @@ http://127.0.0.1:8787 — one origin, tabs per modality:
 
 | Tab | Contents |
 |---|---|
-| Image / Video / Sound / Voice | run form (same args as the CLI) · jobs list with cancel · gallery with inline preview |
+| Image / Video / Sound / Voice / Write / Vision | run form (same args as the CLI) · jobs list with cancel · gallery with inline preview · camera snap |
 | 3D & VR | WebXR room (iframe + full screen) · joint picker · GLB/STL viewer · meshes & prints gallery · "set in room" |
 | Models | manifest inventory: present / downloading / missing per model, HF-cached audio models, tool checklist |
-| Services | start / stop / restart / logs / Free VRAM for ComfyUI and mlx-audio |
-| Resources | CPU, GPU (IOAccelerator), memory, swap, disk, top processes |
+| Services | start / stop / restart / logs for ComfyUI, mlx-audio, writer LLM, vision VLM |
+| Resources | CPU, GPU (IOAccelerator), memory, swap, disk, top processes · **Unload all models / Stop everything** |
 
 The header shows the **live ComfyUI progress bar** (step N/M, elapsed, queue depth). It works
 because `gen` and the Hermes plugin submit with `client_id: gen-cli` and the panel's websocket
@@ -62,8 +66,8 @@ Outputs: `output/<kind>/` (gen), `ComfyUI/output/` (raw), `scratch/` (experiment
 
 `hermes/` holds the `image_gen` plugin and the skills; `bin/sync-hermes install|export`
 moves them in and out of `~/.hermes`. The **`studio`** skill is the entry point and routes
-to `studio-video-edit`, `studio-voice`, `studio-3d-print`, `studio-vr` and
-`local-media-stack` (deep 3D/TRELLIS/Blender/QC reference). Skills are written for a
+to `studio-video-edit`, `studio-voice`, `studio-3d-print`, `studio-vr`, `studio-game`,
+`studio-animation`, `studio-writing`, `studio-vision` and `local-media-stack` (deep 3D reference). Skills are written for a
 weaker model: exact commands, exact paths, expected output, measured pitfalls.
 
 ## Services
@@ -72,6 +76,8 @@ weaker model: exact commands, exact paths, expected output, measured pitfalls.
 |---|---|---|
 | ComfyUI | 8188 | `POST /prompt`, `GET /history/{id}`, `GET /queue`, `POST /free`, `ws /ws?clientId=` |
 | mlx-audio | 8000 | OpenAI-compatible `/v1/audio/speech`, `/v1/audio/transcriptions`; models by HF repo id, loaded on demand |
+| writer LLM | 8081 | `mlx_lm.server`, OpenAI-compatible chat; Qwen3.8-27B-Uncensored 4-bit (`stack start llm`) |
+| vision VLM | 8082 | `mlx_vlm.server`, OpenAI-compatible chat with image parts; Qwen3-VL-8B 4-bit (`stack start vision`) |
 | panel | 8787 | FastAPI; `PANEL_HOST=0.0.0.0 stack panel` exposes it to the LAN (WebXR still needs localhost/HTTPS) |
 
 ## Hard-won constraints

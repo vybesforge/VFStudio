@@ -13,7 +13,7 @@
 #      mlx-lm / mlx-vlm venv: uncensored writer LLM -> :8081, vision VLM (+camera) -> :8082
 #   4. tools venv (build123d, trimesh, moviepy, pedalboard, librosa…) for the CLIs
 #   5. GUI apps: Blender, Godot (+ export templates), OrcaSlicer, Krita, Audacity, Inkscape,
-#      OpenSCAD, MeshLab       (skip with --no-apps)
+#      OpenSCAD, MeshLab, Tahoma2D (2D animation)       (skip with --no-apps)
 #   6. gltf-transform (npm), symlinks for stack/gen/voice/vid/fetch-models/blender into ~/.local/bin
 #   7. Models: essentials by default (~25 GB); --all-models fetches the full manifest (~136 GB)
 #   8. --hermes: install the image_gen plugin + studio skills into ~/.hermes and point
@@ -95,7 +95,7 @@ for f in tools/comfy/gen tools/print/slice tools/video/vid tools/video/transcrib
   sed -i '' "1s|^#!.*|#!$STACK/tools/.venv/bin/python|" "$STACK/$f"; chmod +x "$STACK/$f"
 done
 sed -i '' "1s|^#!.*|#!$STACK/audio/.venv/bin/python|" "$STACK/tools/voice/voice"; chmod +x "$STACK/tools/voice/voice"
-for f in tools/llm/write tools/vision/see; do sed -i '' "1s|^#!.*|#!$STACK/llm/.venv/bin/python|" "$STACK/$f"; chmod +x "$STACK/$f"; done
+for f in tools/llm/scribe tools/vision/see; do sed -i '' "1s|^#!.*|#!$STACK/llm/.venv/bin/python|" "$STACK/$f"; chmod +x "$STACK/$f"; done
 chmod +x "$STACK"/bin/* "$STACK"/tools/vr/* "$STACK"/tools/print/* 2>/dev/null || true
 
 # ─── 5. apps ────────────────────────────────────────────────────────────────────
@@ -110,6 +110,8 @@ if [ "$APPS" = 1 ]; then
   cask inkscape "Inkscape.app"
   cask openscad@snapshot "OpenSCAD.app"
   cask meshlab "MeshLab2025.07.app" || true
+  # OpenToonz ships x86_64-only on macOS (needs Rosetta + admin); Tahoma2D is the arm64 fork, same .tnz workflow.
+  cask tahoma2d "Tahoma2D.app" || echo "   (tahoma2d cask unavailable — download the arm64 dmg from github.com/tahoma2d/tahoma2d/releases)"
   # Godot export templates for the installed version (needed for headless exports)
   if [ -x /Applications/Godot.app/Contents/MacOS/Godot ]; then
     GV="$(/Applications/Godot.app/Contents/MacOS/Godot --headless --version 2>/dev/null | sed -E 's/^([0-9]+\.[0-9]+(\.[0-9]+)?)\.(stable).*/\1.\3/')"
@@ -131,10 +133,10 @@ for c in stack fetch-models sync-hermes restore-known-good blender; do ln -sf "$
 ln -sf "$STACK/tools/comfy/gen" "$HOME/.local/bin/gen"
 ln -sf "$STACK/tools/voice/voice" "$HOME/.local/bin/voice"
 ln -sf "$STACK/tools/video/vid" "$HOME/.local/bin/vid"
-ln -sf "$STACK/tools/llm/write" "$HOME/.local/bin/write"
+ln -sf "$STACK/tools/llm/scribe" "$HOME/.local/bin/scribe"
 ln -sf "$STACK/tools/vision/see" "$HOME/.local/bin/see"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile" ;; esac
-ok "gen voice vid write see stack fetch-models blender -> ~/.local/bin"
+ok "gen voice vid scribe see stack fetch-models blender -> ~/.local/bin"
 
 # ─── 7. models ──────────────────────────────────────────────────────────────────
 say "models"
@@ -167,5 +169,6 @@ for i in $(seq 1 60); do curl -sf -m 1 http://127.0.0.1:8188/system_stats >/dev/
 "$STACK/tools/comfy/gen" status | head -5
 echo
 echo "Studio panel:  http://127.0.0.1:8787      (open it: stack panel)"
-echo "Try:           gen image \"a brass compass on an old map\"      voice say \"hello\""
+echo "Try:           gen image \"a brass compass on an old map\"      voice say \"hello\"      see snap --ask \"what is this\""
+echo "Writer LLM:    stack start llm   (27B, fetched with --all-models)   scribe prose \"premise\" --words 600"
 echo "Agent entry:   skill 'studio' (hermes/skills/studio/studio/SKILL.md)"

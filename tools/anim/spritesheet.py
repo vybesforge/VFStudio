@@ -48,9 +48,17 @@ def key_color(img, color, tol):
         sys.exit("numpy required for --key (pip install numpy)")
     a = np.asarray(img.convert("RGBA")).astype(np.int32)
     d = np.sqrt(((a[..., :3] - np.array(color)[None, None, :]) ** 2).sum(-1))
-    alpha = np.clip((d - tol * 0.5) / (tol * 0.5), 0, 1)  # soft edge over half the tolerance
+    alpha = np.clip((d - tol) / (tol * 0.25), 0, 1)  # transparent up to tol, soft ramp to 1.25*tol
+    alpha[alpha < 0.08] = 0                           # kill faint haze left by uneven AI backgrounds
     a[..., 3] = (a[..., 3] * alpha).astype(np.int32)
     return Image.fromarray(a.astype(np.uint8), "RGBA")
+
+
+def border_color(img):
+    """Median RGB of the outer 4-px ring — robust against AI backgrounds that are not perfectly flat."""
+    a = np.asarray(img.convert("RGB"))
+    ring = np.concatenate([a[:4].reshape(-1, 3), a[-4:].reshape(-1, 3), a[:, :4].reshape(-1, 3), a[:, -4:].reshape(-1, 3)])
+    return tuple(int(v) for v in np.median(ring, axis=0))
 
 
 def load_frames(args):
@@ -73,7 +81,7 @@ def load_frames(args):
             im = Image.open(f).convert("RGBA")
             if args.key:
                 if args.key == "auto":
-                    color = im.getpixel((0, 0))[:3]
+                    color = border_color(im)
                 else:
                     c = args.key.lstrip("#")
                     color = tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
@@ -145,8 +153,8 @@ def main():
     ap.add_argument("--no-loop", action="store_true")
     ap.add_argument("--trim", action="store_true", help="crop transparent padding (same box for all frames)")
     ap.add_argument("--smooth", action="store_true", help="LANCZOS resize instead of NEAREST (pixel art)")
-    ap.add_argument("--key", help="'auto' (top-left pixel) or hex like ff00ff: make that colour transparent")
-    ap.add_argument("--key-tol", type=float, default=60.0, help="RGB distance tolerance for --key")
+    ap.add_argument("--key", help="'auto' (median of the image border) or hex like ff00ff: make that colour transparent")
+    ap.add_argument("--key-tol", type=float, default=80.0, help="RGB distance below which a pixel is background (--key)")
     ap.add_argument("--tres", help="write a Godot SpriteFrames .tres here")
     ap.add_argument("--res-path", help="res:// path of the sheet inside the Godot project (for .tres)")
     args = ap.parse_args()

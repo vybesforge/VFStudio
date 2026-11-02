@@ -35,7 +35,9 @@ What you get:
 | Studio panel (tabs, progress, previews, inventory) | http://127.0.0.1:8787 — `stack panel` |
 | ComfyUI (image, video, 3D, SFX, music) | :8188 — `stack start comfy` |
 | mlx-audio (TTS, STT, voice clone) | :8000 — `stack start audio` |
-| CLIs on PATH | `gen`, `voice`, `vid`, `stack`, `fetch-models`, `blender` |
+| CLIs on PATH | `gen`, `voice`, `vid`, `scribe`, `see`, `stack`, `fetch-models`, `blender` |
+| Writer LLM / vision VLM | :8081 / :8082 — `stack start llm` / `stack start vision` (models in `models/hf-models.txt`) |
+| Game + animation | `game/templates/godot-{2d,3d}`, `tools/anim/` |
 | Toolkits | `tools/print/` (CAD→STL→G-code), `tools/vr/` (GLB optimize), `tools/video/` (VSE, SRT) |
 | Godot OpenXR room | `vr-godot/` (`Godot --path ~/media-stack/vr-godot --xr-mode off`) |
 
@@ -63,7 +65,9 @@ Essentials (installer default): Z-Image-Turbo (+Qwen3-4B encoder, VAE), RealESRG
 Full set adds: Flux dev fp8, FLUX.2 klein 4B, Z-Image ControlNet Union, Qwen-Image-Edit 2509,
 Wan 2.2 TI2V 5B, Stable Audio 3 medium, ACE-Step 1.5, SeedVR2.
 
-Voice models (Kokoro, Qwen3-TTS, Whisper) download into `~/.cache/huggingface` on first use.
+Hugging Face models (`models/hf-models.txt`): the installer pulls the vision VLM and voice models;
+the 27B writer only with `--all-models` (or `HF_HUB_DISABLE_XET=1 hf download mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit`).
+XET transfer is disabled on purpose — with it on, downloads completed with no weights on disk.
 
 ## 5. Hermes Agent (optional)
 
