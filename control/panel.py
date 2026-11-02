@@ -636,6 +636,7 @@ for _mount, _dir in (("/files/out3d", COMFY / "output" / "3d"),
                      ("/files/output", STACK / "output"),
                      ("/files/comfy_output", COMFY / "output"),
                      ("/files/scratch", STACK / "scratch"),
+                     ("/files/train", STACK / "train" / "datasets"),
                      ("/brand", Path(__file__).parent / "brand")):
     # Create on first boot: a missing directory makes StaticFiles raise at import time.
     _dir.mkdir(parents=True, exist_ok=True)

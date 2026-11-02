@@ -98,6 +98,7 @@
   <button data-tab="voice">Voice</button>
   <button data-tab="write">Write</button>
   <button data-tab="vision">Vision</button>
+  <button data-tab="train">Train</button>
   <button data-tab="models">Models</button>
   <button data-tab="services">Services</button>
   <button data-tab="resources">Resources</button>
@@ -111,11 +112,12 @@
       <label>prompt</label><textarea id="im-prompt">a brass compass on an old map, soft window light, macro</textarea>
       <div class="fields">
         <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option></select></div>
+        <div><label>LoRA (trained in the Train tab)</label><div class="row" style="gap:6px"><select id="im-lora" style="flex:1"><option value="">none</option></select><input id="im-lora-s" value="0.9" size="3" title="strength"></div></div>
         <div><label>size</label><select id="im-size"><option value="1024x1024">1024 × 1024</option><option value="1344x768">1344 × 768 landscape</option><option value="768x1344">768 × 1344 portrait</option><option value="1536x1024">1536 × 1024</option></select></div>
         <div><label>seed (blank = random)</label><input id="im-seed" placeholder="random"></div>
         <div><label>count</label><input id="im-n" value="1" type="number" min="1" max="4"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n')})">Generate</button></div>
+      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n'),lora:v('im-lora'),lora_strength:v('im-lora-s')})">Generate</button></div>
       <div class="hint">CLI: <code>gen image "prompt" --model zimage</code></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Upscale / control</div>
@@ -296,6 +298,41 @@
     <h2>Camera shots &amp; recent images</h2><div class="gal" id="gal-camera"></div></div>
 </div></section>
 
+<!-- TRAIN -->
+<section class="tab" id="tab-train"><div class="two">
+  <div>
+    <div class="card"><div class="name">1 · Dataset — 8–20 photos of ONE subject</div>
+      <div class="fields">
+        <div><label>dataset name</label><input id="tr-ds-name" placeholder="my_robot"></div>
+        <div><label>caption for the uploaded images (keep <code>[trigger]</code>)</label><input id="tr-ds-cap" value="[trigger], photo, natural light"></div>
+      </div>
+      <input type="file" id="tr-ds-files" accept="image/*" multiple style="display:none" onchange="uploadDataset(this.files)">
+      <div class="btns"><button class="primary" onclick="$('tr-ds-files').click()">Add images…</button><span id="tr-ds-status" class="muted"></span></div>
+      <div class="hint">Varied angles and backgrounds, nothing else in frame. You can add more images later with the same name. Captions can be edited in <code>~/media-stack/train/datasets/&lt;name&gt;/NNN.txt</code>.</div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">2 · Train</div>
+      <div class="fields">
+        <div><label>dataset</label><select id="tr-ds"></select></div>
+        <div><label>LoRA name</label><input id="tr-name" placeholder="my_robot"></div>
+        <div><label>trigger word (goes where [trigger] is)</label><input id="tr-trigger" placeholder="vfrobot"></div>
+        <div><label>base model</label><select id="tr-model"><option value="zimage">Z-Image-Turbo (verified)</option><option value="klein">FLUX.2 klein (untested)</option></select></div>
+        <div><label>steps</label><input id="tr-steps" value="1000"></div>
+        <div><label>rank</label><input id="tr-rank" value="16"></div>
+        <div><label>resolution</label><select id="tr-res"><option>512</option><option>768</option></select></div>
+        <div><label>save every</label><input id="tr-save" value="250"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="trainJob()">Start training</button></div>
+      <div class="hint">Measured here: ~12 s/step at 512 px → 1000 steps ≈ 3.5 h. Everything else gets unloaded first; don't generate while it runs. CLI: <code>lora train --dataset DIR --name NAME --trigger WORD</code></div>
+    </div>
+    <div id="jobs-train" class="card" style="margin-top:12px"></div>
+  </div>
+  <div>
+    <div class="row"><h2 style="margin:0">Datasets</h2><button onclick="loadTrain()">Refresh</button></div><div id="tr-datasets" class="card"></div>
+    <h2>Trained LoRAs</h2><div id="tr-loras" class="card"></div>
+    <h2>Recent runs</h2><div id="tr-runs" class="card"></div>
+  </div>
+</div></section>
+
 <!-- MODELS -->
 <section class="tab" id="tab-models">
   <div class="card" id="inv-summary"></div>
@@ -338,12 +375,12 @@ function flash(m){const d=document.createElement('div');d.textContent=m;d.style.
 
 // tabs
 let current='image';
-const KIND_TAB={image:'image',control:'image',upscale:'image',edit:'image',stems:'sound',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice',write:'write',see:'vision'};
+const KIND_TAB={image:'image',control:'image',upscale:'image',edit:'image',stems:'sound',lora:'train',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice',write:'write',see:'vision'};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.dataset.tab;
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('active',s.id==='tab-'+current));
   onTab(current);});
-function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='models') loadInventory(); if(t==='services') refreshServices(); if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
+function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='services') refreshServices(); if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
 
 // progress
 async function refreshProgress(){
@@ -392,6 +429,32 @@ async function toggleRec(){
     _rec.start(250); _t0=Date.now(); b.textContent='■ Stop'; b.classList.add('primary');
     _tick=setInterval(()=>{ $('vo-rectime').textContent=((Date.now()-_t0)/1000).toFixed(1)+' s (aim for 5–15 s, read a full sentence or two)'; },200);
   }catch(e){ flash('mic error: '+e.message); }
+}
+// ── Train tab
+loadLoras();   // the Image tab is open at start and never fires onTab
+async function loadTrain(){
+  const d=await (await fetch('/api/studio/train')).json();
+  $('tr-datasets').innerHTML = d.datasets.length ? d.datasets.map(x=>`<div class="row" style="justify-content:space-between;padding:4px 0">${x.sample?`<img src="${x.sample}" style="height:40px;border-radius:4px">`:''}<b style="flex:1;margin-left:8px">${x.name}</b><span class="muted">${x.images} images · ${x.captioned} captions</span><button onclick="$('tr-ds').value='${x.name}';$('tr-name').value='${x.name}';flash('selected')">use</button></div>`).join('') : '<span class="muted">none yet — add images on the left</span>';
+  $('tr-ds').innerHTML = d.datasets.map(x=>`<option>${x.name}</option>`).join('');
+  $('tr-loras').innerHTML = d.loras.length ? d.loras.map(l=>`<div class="row" style="justify-content:space-between;padding:4px 0"><b>${l.name}</b><span class="muted">${l.mb} MB · ${l.mtime}</span><button onclick="$('im-lora').value='${l.name}';document.querySelector('nav button[data-tab=image]').click();flash('LoRA selected on the Image tab')">use in Image</button></div>`).join('') : '<span class="muted">none yet</span>';
+  $('tr-runs').innerHTML = d.runs.length ? d.runs.map(r=>`<div style="padding:4px 0"><b>${r.name}</b> ${r.done?'<span style="color:var(--cyan)">done</span>':''}<div class="muted" style="font:11px ui-monospace,monospace">${r.last||''}</div></div>`).join('') : '<span class="muted">none yet</span>';
+  loadLoras(d.loras);
+}
+async function loadLoras(list){
+  if(!list){ try{ list=(await (await fetch('/api/studio/train')).json()).loras; }catch(e){ return; } }
+  const sel=$('im-lora'), cur=sel.value; sel.innerHTML='<option value="">none</option>'+list.map(l=>`<option>${l.name}</option>`).join(''); sel.value=cur;
+}
+async function uploadDataset(files){
+  const name=v('tr-ds-name'); if(!name){ flash('give the dataset a name first'); return; }
+  let n=0; for(const f of files){ const fd=new FormData(); fd.append('file',f,f.name);
+    const r=await (await fetch(`/api/studio/upload?kind=dataset&dataset=${encodeURIComponent(name)}&caption=${encodeURIComponent(v('tr-ds-cap'))}`,{method:'POST',body:fd})).json();
+    if(r.ok){ n=r.count; $('tr-ds-status').textContent=`${n} images in ${r.dataset}`; } else flash('upload failed: '+r.error); }
+  $('tr-ds-files').value=''; loadTrain(); $('tr-ds').value=name; $('tr-name').value=name;
+}
+function trainJob(){
+  if(!v('tr-ds')||!v('tr-name')){ flash('pick a dataset and a name'); return; }
+  if(!confirm(`Train "${v('tr-name')}" for ${v('tr-steps')} steps (~${Math.round(v('tr-steps')*12/60)} min)? All other models will be unloaded.`)) return;
+  runJob('lora',{dataset:v('tr-ds'),name:v('tr-name'),model:v('tr-model'),steps:v('tr-steps'),rank:v('tr-rank'),res:v('tr-res'),trigger:v('tr-trigger'),save_every:v('tr-save')});
 }
 // generic uploader: any input that wants a file path gets an "Upload…" button → /api/studio/upload?kind=image|voice|model
 function pickFile(inputId, kind){
