@@ -85,6 +85,12 @@
   iframe.room{width:100%;height:min(70vh,720px);border:0;display:block;border-radius:10px;border:1px solid var(--line)}
   .tag{font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid #2c323c;color:var(--mut)} .tag.ok{color:var(--ok);border-color:#265c3d} .tag.dl{color:var(--warn);border-color:#5a4418}
   .hint{font-size:11px;color:#6f7681;margin-top:6px}
+  /* clickable service status pill: running → stop, stopped → start */
+  .svctog{display:inline-flex;align-items:center;gap:1px;background:#121821;border:1px solid #2c323c;border-radius:20px;padding:4px 11px;font-size:12px;color:var(--fg);white-space:nowrap;min-width:86px;justify-content:center;flex:0 0 auto;margin-left:10px}
+  .svctog:hover{background:#1b2431;border-color:var(--acc);color:#fff}
+  .svctog.on:hover{border-color:var(--err)} .svctog.on:hover .dot{background:var(--err);box-shadow:0 0 8px #e0556188}
+  .svctog.off:hover,.svctog.warn:hover{border-color:var(--cyan)}
+  .svctog:active{transform:translateY(1px)}
 </style></head><body>
 <header>
   <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge · M3 Max 64 GB · nothing leaves the machine</div></div></div>
@@ -639,10 +645,12 @@ function toggleEp(k){ const d=$('epd-'+k); const open=d.style.display==='none'; 
 function copyEnv(){ copyText(['# VF Studio local endpoints — host '+epHost].concat(EP.items.map(it=>`${it.env}=${epEnvValue(it)}`)).join('\n')); }
 function copyEpJson(){ const o={}; EP.items.forEach(it=>o[it.key]=epEnvValue(it)); copyText(JSON.stringify(o,null,2)); }
 async function act(path){ const j=await (await fetch('/api/'+path,{method:'POST'})).json(); if(j.message) flash(j.message); setTimeout(refreshServices,500); }
+async function toggleSvc(k,on){ flash((on?'stopping ':'starting ')+k+'…'); await act((on?'stop/':'start/')+k); setTimeout(refreshServices,900); }
 async function refreshServices(){
   const s=await (await fetch('/api/status')).json(); SVCSTATUS=s.services||{}; if(epLoaded&&$('endpoints')) renderEndpoints();
   $('services').innerHTML=Object.entries(s.services).map(([k,x])=>{const cls=x.responding?'on':(x.running?'warn':'off');const st=x.responding?'running':(x.running?'starting':'stopped');
-    return `<div class="card"><div class="row"><div><div class="name">${x.label}</div><div class="desc">${x.desc}</div></div><div style="font-size:12px"><span class="dot ${cls}"></span>${st}</div></div>
+    const on=x.running, hint=on?'click to stop':'click to start';
+    return `<div class="card"><div class="row" style="flex-wrap:nowrap;align-items:flex-start"><div style="flex:1;min-width:0"><div class="name">${x.label}</div><div class="desc">${x.desc}</div></div><button class="svctog ${cls}" onclick="toggleSvc('${k}',${on})" title="${hint}"><span class="dot ${cls}"></span>${st}</button></div>
     <div class="meta">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div><div class="btns"><button class="primary" onclick="act('start/${k}')">Start</button><button onclick="act('restart/${k}')">Restart</button><button class="danger" onclick="act('stop/${k}')">Stop</button>${k==='comfy'?'<button onclick="act(\'comfy/free\')">Free VRAM</button>':''}<button onclick="svcLog('${k}')">Log</button></div><pre id="slog-${k}" style="display:none"></pre></div>`;}).join('')
     +`<div class="card"><div class="name">panel</div><div class="desc">this page · :8787</div><div class="meta">PANEL_HOST=0.0.0.0 stack panel exposes it to the LAN (WebXR still needs localhost/HTTPS)</div></div>`;
 }
