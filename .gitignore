@@ -57,3 +57,7 @@ stems/.venv/
 
 # training / stems / node packs are re-created by install.sh
 ComfyUI/custom_nodes/ComfyUI-GGUF/
+
+# Pepper's Room — build artefacts and validation frames
+vr-pepper/build/
+vr-pepper/scratch/
