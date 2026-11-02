@@ -297,9 +297,16 @@ def g_edit(a):
     need("edit")
     if a.fast:
         need("edit_lightning")
-    # Prefer the Q4 GGUF: fp8 has no MPS kernel, so ComfyUI upcasts the 20 GB fp8 file to 39 GB bf16
-    # (measured: 10 GB swap, 26-65 s/step). The GGUF stays ~13 GB and needs the ComfyUI-GGUF node pack.
-    gguf = os.path.exists(f"{MODELS}/unet/Qwen-Image-Edit-2509-Q4_K_M.gguf") and not a.fp8
+    # GGUF on Metal and on smaller cards (fp8 upcasts on MPS). fp8 when this machine's
+    # engine map says so (large CUDA / ROCm) or when --fp8 is passed.
+    wants_fp8 = bool(a.fp8)
+    if not wants_fp8:
+        try:
+            eng = json.load(open(os.path.join(STACK, "run", "forge-engines.json")))
+            wants_fp8 = ((eng.get("engines") or eng).get("image") or {}).get("edit") == "fp8"
+        except Exception:
+            wants_fp8 = False
+    gguf = os.path.exists(f"{MODELS}/unet/Qwen-Image-Edit-2509-Q4_K_M.gguf") and not wants_fp8
     if not gguf:
         need("edit_fp8")
     imgs = [upload_image(p) for p in [a.image, a.ref2, a.ref3] if p]

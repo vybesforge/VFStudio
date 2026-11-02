@@ -1,31 +1,29 @@
-# media-stack — a one-stop local studio for Apple Silicon
+# VF Studio — detect the machine, install what fits
 
-Image · video · 3D · VR · 3D-print · sound FX · music · voice, all generated **on the
-machine** (no cloud inference), all drivable by an AI agent through plain CLIs and a web panel.
-**What this repo is:** the studio *loadout* — installer, model manifest, CLIs, panel, skills — so another machine can run the same AI-drivable asset pipeline. **What it is not:** the things made with it. Games (`game/<project>`), models, GLBs, LoRAs, datasets and outputs stay local by `.gitignore`.
+Image, video, 3D, print, sound, music, and voice, generated **on the machine** (no cloud inference).
+Windows, Linux, and Mac each get the engine that matches the probe: CUDA, ROCm, MLX, or CPU.
 
-Built and measured on an M3 Max / 64 GB; see [INSTALL.md](INSTALL.md) to reproduce it on another Mac, or [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md) for an NVIDIA Linux box (ported on paper, not yet run).
-
-```
-./install.sh [--all-models] [--hermes]      # fresh Mac → working studio
-stack panel                                  # http://127.0.0.1:8787
-```
-
-## New machine
+**What this repo is:** the studio loadout — installer, model manifest, CLIs, panel, skills — so another machine can run the same local pipeline. **What it is not:** the things made with it. Games, weights, and outputs stay local.
 
 ```bash
 git clone <your-fork-url> ~/media-stack && cd ~/media-stack
-bin/forge-recommend                  # OS, CPU, RAM, GPUs, free disk, and the model ids that fit
-bin/fetch-models --profile auto      # essentials + quality for this box (add --dry-run to preview)
-stack start comfy
-# then run the smoke line forge-recommend printed
+bin/forge-recommend                         # this machine: OS, RAM, GPUs, free disk, tiers
+bin/fetch-models --dry-run --profile auto   # what would download; stops if a license needs a login
+bin/fetch-models --profile auto             # essentials + quality that fit
+stack panel                                 # http://127.0.0.1:8787
 ```
 
-Works on any Windows, Linux, or Mac. The command reads this machine only: OS, CPU, RAM, GPU vendor and VRAM (or unified memory), and free disk. From that it picks quants and backends — CUDA, ROCm, MLX, or CPU — and prints what to skip. It does not assume a particular card or a previous install.
+| OS | Install |
+|---|---|
+| Apple Silicon | `./install.sh` (Homebrew, MLX for voice / writer / vision, ComfyUI for diffusion) |
+| Linux | `python3 tools/forge/install.py` then the CUDA or ROCm steps in [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md) |
+| Windows | `powershell -File install.ps1` — probe and panel. `fetch-models` runs in Git Bash |
 
-`forge-recommend` only prints. `--profile essentials` is the small set, `--profile auto` adds the models that fit, `--profile full` also fetches optional heavy files that still fit. The report ends with a smoke command for whatever image model it kept. On Apple Silicon that set includes the MLX voice, vision, and writer repos and the Qwen-Image-Edit GGUF, not the fp8 file. On NVIDIA and AMD those MLX repos are skipped; the CUDA and ROCm stand-ins are in [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md).
+The probe never assumes a particular card. It uses the largest GPU, not the sum. `VF_GPU=1` picks another index. Apple Silicon keeps MLX where it is the right engine. NVIDIA and AMD keep ComfyUI for diffusion and use speaches plus llama-server for voice, writing, and vision. The uncensored writer is labeled: it is the Apple default, and opt-in everywhere else (`VF_UNCENSORED=1`, `scribe --uncensored`).
 
-Windows can run `python tools/forge/recommend.py`. `fetch-models` is a bash script (Git Bash or WSL). Gated downloads: `huggingface-cli login` or `HF_TOKEN` — the token is not stored in the repo.
+Checklist: [SMOKE.md](SMOKE.md). Apple Silicon detail: [INSTALL.md](INSTALL.md). CUDA and ROCm detail: [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md).
+
+Gated downloads: `huggingface-cli login` or `HF_TOKEN`. The token is not stored in the repo. `VF_SKIP_GATE=1` continues when you know the URL is public.
 
 ## What's inside
 

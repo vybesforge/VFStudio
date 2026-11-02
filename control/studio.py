@@ -125,7 +125,16 @@ def _recommendation():
         mod = _forge()
         stack = Path(__file__).resolve().parents[1]
         manifest = mod.load_manifest(stack / "models" / "manifest.json")
-        return mod.recommend(manifest, mod.probe(stack))
+        machine = mod.probe(stack)
+        if os.environ.get("VF_UNCENSORED") == "1":
+            machine["uncensored"] = True
+        result = mod.recommend(manifest, machine)
+        engines = result.get("engines")
+        if engines:
+            path = stack / "run" / "forge-engines.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"engines": engines, "backend": engines.get("backend")}, indent=2) + "\n")
+        return result
     except Exception as exc:  # the inventory must still render if the probe fails
         return {"error": str(exc), "models": [], "hf": {}, "summary": {}, "notes": []}
 
@@ -133,6 +142,36 @@ def _recommendation():
 @router.get("/recommend")
 def studio_recommend():
     return _recommendation()
+
+
+@router.post("/fetch")
+def fetch_profile(body: dict | None = Body(default=None)):
+    """Start fetch-models for a profile. Same rules as the CLI, including the license preflight."""
+    profile = (body or {}).get("profile") or "auto"
+    if profile not in ("auto", "essentials", "full", "quality"):
+        raise HTTPException(400, "profile must be auto, essentials, quality, or full")
+    mod = _forge()
+    stack = Path(__file__).resolve().parents[1]
+    manifest = mod.load_manifest(stack / "models" / "manifest.json")
+    machine = mod.probe(stack)
+    if os.environ.get("VF_UNCENSORED") == "1":
+        machine["uncensored"] = True
+    result = mod.recommend(manifest, machine)
+    tier = {"auto": "recommended", "quality": "recommended", "essentials": "essentials", "full": "all"}[profile]
+    report = mod.preflight(manifest, mod.ids_for(result, tier))
+    if not report["ok"]:
+        raise HTTPException(
+            409,
+            "A model in this set needs a Hugging Face login. Run huggingface-cli login or export HF_TOKEN, then try again. The token is not stored here.",
+        )
+    log = stack / "logs" / "fetch-models.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(log, "ab")
+    proc = subprocess.Popen(
+        [str(stack / "bin" / "fetch-models"), "--profile", profile],
+        cwd=str(stack), stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
+    )
+    return {"ok": True, "pid": proc.pid, "profile": profile, "message": f"fetching the {profile} set for this machine"}
 
 
 @router.get("/inventory")
@@ -145,7 +184,10 @@ def inventory():
     for bucket, rows in (advice.get("hf") or {}).items():
         for row in rows:
             if row.get("repo"):
-                hf_fit[row["repo"]] = {"bucket": row.get("bucket") or bucket, "reason": row.get("reason") or ""}
+                hf_fit[row["repo"]] = {
+                    "bucket": row.get("bucket") or bucket, "reason": row.get("reason") or "",
+                    "uncensored": bool(row.get("uncensored")), "gate": row.get("gate") or "open",
+                }
     groups = []
     for label, ids in GROUPS:
         rows = []
@@ -159,7 +201,8 @@ def inventory():
             rows.append({"id": i, "role": m["role"], "gb": m["gb"], "path": m["path"],
                          "present": p.exists(), "downloading": part.exists(),
                          "part_gb": round(part.stat().st_size / 1e9, 2) if part.exists() else 0,
-                         "bucket": fit.get("bucket"), "reason": fit.get("reason") or ""})
+                         "bucket": fit.get("bucket"), "reason": fit.get("reason") or "",
+                         "gate": fit.get("gate") or "open", "license": fit.get("license") or ""})
         groups.append({"label": label, "models": rows})
     known = {i for _, ids in GROUPS for i in ids}
     extra = []
@@ -169,14 +212,16 @@ def inventory():
         fit = fit_by_id.get(m["id"]) or {}
         extra.append({"id": m["id"], "role": m["role"], "gb": m["gb"], "path": m["path"],
                       "present": (MODELS / m["path"]).exists(), "downloading": False, "part_gb": 0,
-                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or ""})
+                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or "",
+                      "gate": fit.get("gate") or "open", "license": fit.get("license") or ""})
     if extra:
         groups.append({"label": "Other", "models": extra})
     audio = []
     for r, n in AUDIO_MODELS:
         fit = hf_fit.get(r) or {}
         audio.append({"id": r, "role": n, "present": _hf_cached(r),
-                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or ""})
+                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or "",
+                      "uncensored": bool(fit.get("uncensored")), "gate": fit.get("gate") or "open"})
     tools = [{"name": n, "path": str(p), "present": p.exists(), "desc": d} for n, p, d in TOOLS]
     present_gb = sum(m["gb"] for g in groups for m in g["models"] if m["present"])
     total_gb = sum(m["gb"] for g in groups for m in g["models"])

@@ -290,7 +290,7 @@
         <div><label>characters (dialogue)</label><input id="wr-chars" placeholder="Mara, Ivo"></div><div><label>entries (lore)</label><input id="wr-items" value="8"></div>
       </div>
       <div class="btns"><button class="primary" title="Draft in the mode you picked." onclick="writeJob()">Write</button></div>
-      <div class="hint">Prose, outline, screenplay, dialogue, lore, or a revision of a draft you already have. CLI: <code>scribe prose "premise" --genre noir --words 1200</code></div>
+      <div class="hint">Prose, outline, screenplay, dialogue, lore, or a revision of a draft you already have. On Apple Silicon the writer is the labeled uncensored Qwen. Elsewhere that model is opt-in (<code>scribe --uncensored</code> or <code>VF_UNCENSORED=1</code>). CLI: <code>scribe prose "premise"</code></div>
     </div>
     <div id="jobs-write" class="card" style="margin-top:12px"></div>
   </div>
@@ -611,18 +611,31 @@ function paintForge(r){
   const gpus=(m.gpus||[]).map(g=>`${esc(g.name)} ${g.vram_gb?esc(g.vram_gb)+' GB':'unified'}${g.driver?' · '+esc(g.driver):''}`).join(' · ')||'no GPU';
   const notes=(r.notes||[]).slice(0,3).map(n=>`<div class="desc">${esc(n)}</div>`).join('');
   const smoke=(s.smoke||[]).map(c=>`<code>${esc(c)}</code>`).join(' · ');
-  el.innerHTML=`<div class="row"><div><div class="name">${esc(s.headline||'This machine')}</div><div class="desc">${esc(m.os_pretty||m.os||'')} · ${esc(m.cpu||'')} · ${esc(m.ram_gb)} GB RAM · ${esc(m.disk_free_gb)} GB free under ${esc(m.disk_path||'')}</div><div class="desc">${gpus}</div></div><button title="Copy the command that fetches the models recommended for this machine." onclick="navigator.clipboard.writeText('fetch-models --profile auto');flash('command copied')">copy fetch command</button></div>
-    <div class="meta">essentials ${esc(s.essentials_gb)} GB · quality ${esc(s.quality_gb)} GB · optional ${esc(s.optional_gb)} GB · ${esc(s.skip_n)} skipped · <code>fetch-models --profile auto</code>${smoke?' · smoke '+smoke:''}</div>${notes}`;
+  const eng=(r.engines&&r.engines.backend)||'';
+  el.innerHTML=`<div class="row"><div><div class="name">${esc(s.headline||'This machine')}</div><div class="desc">${esc(m.os_pretty||m.os||'')} · ${esc(m.cpu||'')} · ${esc(m.ram_gb)} GB RAM · ${esc(m.disk_free_gb)} GB free · engine ${esc(eng)}</div><div class="desc">${gpus}</div></div>
+    <div class="btns" style="margin:0"><button class="primary" title="Download the essentials and quality models this machine can run." onclick="fetchProfile('auto')">Fetch what fits</button>
+    <button title="Also download the optional heavy models that still fit." onclick="fetchProfile('full')">Fetch full</button>
+    <button title="Copy the command that fetches the models recommended for this machine." onclick="navigator.clipboard.writeText('fetch-models --profile auto');flash('command copied')">copy command</button></div></div>
+    <div class="meta">essentials ${esc(s.essentials_gb)} GB · quality ${esc(s.quality_gb)} GB · optional ${esc(s.optional_gb)} GB · ${esc(s.skip_n)} skipped${smoke?' · smoke '+smoke:''}</div>
+    <div class="hint" id="fetch-note"></div>${notes}`;
 }
 async function loadForge(){
   try{ const r=await (await fetch('/api/studio/recommend')).json(); paintForge(r); }catch(e){}
+}
+async function fetchProfile(profile){
+  const note=$('fetch-note'); if(note) note.textContent='checking licenses…';
+  const res=await fetch('/api/studio/fetch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile})});
+  let j={}; try{ j=await res.json(); }catch(e){}
+  const msg=j.message||j.detail||(res.ok?'started':'could not start');
+  if(note) note.textContent=msg;
+  flash(msg);
 }
 async function loadInventory(){
   const inv=await (await fetch('/api/studio/inventory')).json();
   const pct=inv.total_gb?100*inv.present_gb/inv.total_gb:0;
   $('inv-summary').innerHTML=`<div class="row"><div><div class="name">ComfyUI models</div><div class="desc">${inv.present_gb} of ${inv.total_gb} GB present · manifest <code>models/manifest.json</code> · <code>fetch-models --profile auto</code></div></div></div><div class="bar g"><i style="width:${pct}%"></i></div>`;
-  $('inv-groups').innerHTML=inv.groups.map(g=>`<h2>${g.label}</h2><div class="card"><table><thead><tr><th>model</th><th>role</th><th class="r">size</th><th class="r">fit</th><th class="r">state</th></tr></thead><tbody>${g.models.map(m=>`<tr><td><code>${esc(m.id)}</code><div class="desc" style="font-size:10px">${esc(m.path)}</div></td><td class="desc">${esc(m.role)}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${esc(m.gb)} GB</td><td class="r">${bucketTag(m.bucket)}</td><td class="r">${m.present?'<span class="tag ok">present</span>':m.downloading?`<span class="tag dl">downloading ${esc(m.part_gb)}/${esc(m.gb)}</span>`:'<span class="tag">missing</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
-  $('inv-audio').innerHTML=`<table><tbody>${inv.audio.map(m=>`<tr><td><code>${esc(m.id)}</code></td><td class="desc">${esc(m.role)}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${bucketTag(m.bucket)}</td><td class="r">${m.present?'<span class="tag ok">cached</span>':'<span class="tag">on demand</span>'}</td></tr>`).join('')}</tbody></table>`;
+  $('inv-groups').innerHTML=inv.groups.map(g=>`<h2>${g.label}</h2><div class="card"><table><thead><tr><th>model</th><th>role</th><th class="r">size</th><th class="r">fit</th><th class="r">state</th></tr></thead><tbody>${g.models.map(m=>`<tr><td><code>${esc(m.id)}</code><div class="desc" style="font-size:10px">${esc(m.path)}</div></td><td class="desc">${esc(m.role)}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${esc(m.gb)} GB</td><td class="r">${bucketTag(m.bucket)}${m.gate&&m.gate!=='open'?` <span class="tag${m.gate==='hf-login'?' dl':''}" title="${esc(m.license||m.gate)}">${esc(m.gate)}</span>`:''}</td><td class="r">${m.present?'<span class="tag ok">present</span>':m.downloading?`<span class="tag dl">downloading ${esc(m.part_gb)}/${esc(m.gb)}</span>`:'<span class="tag">missing</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
+  $('inv-audio').innerHTML=`<table><tbody>${inv.audio.map(m=>`<tr><td><code>${esc(m.id)}</code></td><td class="desc">${esc(m.role)}${m.uncensored?' · <span class="tag dl">uncensored</span>':''}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${bucketTag(m.bucket)}</td><td class="r">${m.present?'<span class="tag ok">cached</span>':'<span class="tag">on demand</span>'}</td></tr>`).join('')}</tbody></table>`;
   $('inv-tools').innerHTML=`<table><tbody>${inv.tools.map(t=>`<tr><td><span class="dot ${t.present?'on':'off'}"></span><code>${esc(t.name)}</code></td><td class="desc">${esc(t.desc)}</td><td class="desc" style="font-size:10px">${esc(t.path)}</td></tr>`).join('')}</tbody></table>`;
 }
 
