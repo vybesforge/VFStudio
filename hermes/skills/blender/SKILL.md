@@ -4,6 +4,8 @@ description: Avoid common Blender mistakes — transform application, modifier o
 metadata: {"clawdbot":{"emoji":"🧊","os":["linux","darwin","win32"]}}
 ---
 
+> On Dylan's Mac: **save renders/exports under `~/media-stack/output/<kind>/`** (`3d/` for GLB/STL, `image/` for renders, `video/` for animations) — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there.
+
 ## Transforms
 - Apply scale before export — `Ctrl+A` → Scale, or objects deform in game engines
 - Apply rotation for correct orientation — especially for rigged models

@@ -13,6 +13,8 @@ metadata:
 
 # Studio Stems
 
+> **Save deliverables under `~/media-stack/output/stems/<song>/`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 One CLI, `~/media-stack/tools/audio/stems` (also on PATH as `stems`), runs Demucs
 (`htdemucs`, Meta's hybrid transformer) on the Apple GPU (`--device mps`) to split
 a song into `drums / bass / other / vocals` or into `vocals / no_vocals`

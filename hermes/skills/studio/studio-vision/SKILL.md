@@ -13,6 +13,8 @@ metadata:
 
 # studio-vision — local image understanding + camera
 
+> **Save deliverables under `~/media-stack/output/camera/`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 A Qwen3-VL-8B vision model runs in MLX on this Mac (`mlx_vlm.server`, port 8082). It
 describes, answers questions about, compares and OCRs images, and `imagesnap` grabs frames
 from the FaceTime camera. Nothing leaves the machine. Use it instead of a cloud vision call

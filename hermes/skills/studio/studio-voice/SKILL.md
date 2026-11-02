@@ -13,6 +13,8 @@ metadata:
 
 # Studio Voice
 
+> **Save deliverables under `~/media-stack/output/voice/`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 One CLI, `~/media-stack/tools/voice/voice`, drives the local mlx-audio server
 (`http://127.0.0.1:8000`) for text-to-speech (Kokoro), voice cloning
 (Qwen3-TTS 1.7B Base), speech-to-text (Whisper large-v3-turbo) and a
@@ -166,6 +168,9 @@ Qwen3-TTS 0.987-0.992 / 186-201 Hz; Chatterbox-turbo 0.989-0.993 / 188-200 Hz;
 same Kokoro voice (upper bound) 0.998 / 202 Hz; different speaker (control)
 0.971 / 135 Hz. Whisper transcription of every clone matched the requested text
 word for word (Chatterbox dropped punctuation; Qwen3 kept it).
+
+## STT model choice (2026-11-02)
+`voice transcribe` now defaults to **Parakeet-TDT 0.6B v3** (`mlx-community/parakeet-tdt-0.6b-v3`): same transcript as Whisper-turbo on the test clip in 0.6 s instead of 3.5 s, 25 European languages, top of the open WER boards. For other languages pass `--model mlx-community/whisper-large-v3-turbo-asr-fp16` (99 languages) or `--model mlx-community/Qwen3-ASR-1.7B-8bit` (CJK). `voice clone` uses the same default to auto-transcribe references.
 
 ## Pitfalls
 

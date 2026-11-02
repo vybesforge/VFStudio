@@ -37,7 +37,6 @@ are copy-pasteable as written.
 | Edit/cut/caption/concat video | `vid …`, Blender VSE edit list | `studio-video-edit` |
 | Sound effect | `gen sfx "prompt" --seconds 8` | this file |
 | Music / full song with lyrics | `gen music "tags" --lyrics "..."` (ACE-Step 1.5) | this file |
-| Edit an existing image by instruction (keep subject, change scene/outfit/weather) | `gen edit in.png "instruction" --fast` | `studio` (below) |
 | Speech, voice clone, transcription | `voice say/clone/transcribe/enhance` | `studio-voice` |
 | Split a song into stems / karaoke (instrumental, a cappella) | `stems split song.flac` (drums/bass/other/vocals, ~7 s per 30 s) · `stems karaoke song.flac` (no_vocals) | `studio-stems` |
 | Fiction, screenplay, game dialogue, lore (uncensored, local) | `scribe prose|outline|chapter|screenplay|dialogue|lore|revise` | `studio-writing` |
@@ -48,6 +47,7 @@ are copy-pasteable as written.
 | Parametric part → STL → G-code | `cad_examples/*.py`, `meshcheck.py`, `slice --preset bambu|generic` | `studio-3d-print` |
 | View asset in VR / build SteamVR app | Godot room, `optimize_glb.sh`, WebXR room | `studio-vr` |
 | 2D/3D game prototype, run/export Godot headless | `~/media-stack/game/new_project.sh 2d\|3d Name dest` | `studio-game` |
+| Playable 3D game in the browser (Three.js + TS + Vite) | hand-written `package.json` + `npm install`, procedural textures / WebAudio | `browser-3d-game` |
 | Auto-rig + test cycle → GLB, Grease Pencil 2D, sprite sheets, Krita/Tahoma2D path | `tools/anim/rigify_auto.py`, `gp_anim.py`, `spritesheet.py` | `studio-animation` |
 | Vector / raster hand-editing (human) | Inkscape, Krita, Audacity, OpenSCAD, MeshLab in /Applications | — |
 
@@ -63,13 +63,27 @@ fetch-models --list          # ✓/✗ every model in models/manifest.json; `fet
 ```
 
 Panel: http://127.0.0.1:8787 — **VF Studio** page (`control/studio.html` + `studio.py`). Tabs
-Image / Video / 3D & VR / Sound / Voice / Write / Vision each have a run form (same CLI args
+Image / Video / 3D & VR / Sound / Voice / Write / Vision / Train each have a run form (same CLI args
 underneath), a Jobs list with cancel, and an output gallery with inline preview (GLB/STL open in
-`/vr/view.html`; 3D items also get "room" / "rig" buttons). Header = live ComfyUI progress bar
+`/vr/view.html`; 3D items also get "room" / "rig" buttons). Train = dataset upload → `lora train`
+job → LoRA picker on the Image form. **Every path field has an Upload… button** (`/api/studio/upload?kind=image|voice|model|dataset`)
+and the Voice tab records from the mic — Dylan uses the page himself, so a path-only field is a bug:
+the first thing he asks is "how do I get my own image/voice in". Code edits need `stack restart panel`
+(uvicorn does not hot-reload); never `pkill python` — it takes the gateway down with it. Header = live ComfyUI progress bar
 (step N/M) for anything submitted as client `gen-cli` — `gen` and the Hermes plugin do; ComfyUI-UI
-jobs show an indeterminate bar. Models tab = manifest + HF inventory. Resources tab has
+jobs show an indeterminate bar. Models tab = manifest + HF inventory. **Services tab = one card per service, and each card carries its
+own copy-paste endpoint tiles** — mlx-audio holds TTS / STT / voice clone, ComfyUI / writer LLM / VLM /
+the panel's own API hold one each — with per-tile **Copy** and a **curl** panel (routes + a working
+snippet), plus **Copy all → .env / JSON** and a `127.0.0.1`↔LAN host switch in a bar above the grid.
+Fold reference data into the card it describes; a parallel list of the same URLs is the duplication
+Dylan removes. Source of truth is the `ENDPOINTS` list in `control/panel.py` served at `/api/endpoints` —
+add a service there, not in the HTML, or the page and reality drift. Each card's **status pill is the
+start/stop toggle** (running → click stops, stopped → click starts) — a status you cannot act on is a
+bug, and Dylan asks for exactly that. Resources tab has
 **Unload all models** and **Stop everything**. There is one page; never add a second UI or a
-"legacy" copy — Dylan asks for consolidation and removes duplicates.
+"legacy" copy — Dylan asks for consolidation and removes duplicates. Panel UI conventions (which tab
+owns what, endpoint tiles, copy-button pattern, card-layout and re-render pitfalls, how to test a
+copy button): `references/panel-ui.md`.
 
 **Branding (standing preference):** anything web-facing in the stack carries the VybesForge look —
 vendored `control/brand/*.png` (VF monogram, never hot-linked), palette navy `#02060f/#0b121d`,
@@ -109,7 +123,10 @@ Lyrics use ACE-Step section tags: `[Verse]`, `[Chorus]`, `[Bridge]`, `[inst]` fo
 
 **Measured on this machine, idle box, model load included (Nov 2026):** see the table in
 `references/benchmarks.md`. Re-measure before claiming a regression — a download writing to
-disk inflates every timing 2-3×.
+disk inflates every timing 2-3×. **Benchmark alone:** another session or subagent running `gen`
+in between evicts the weights, so a "warm" second run reloads 20 GB and the number is garbage —
+check `gen status` queue is 0 and `logs/comfy.log` shows no `Requested to load` for the model
+between your runs. When delegating, give at most ONE subagent GPU-heavy work at a time.
 
 ## Rules that always apply
 
@@ -147,11 +164,18 @@ disk inflates every timing 2-3×.
 6. **Installer**: venv/package step, brew cask, symlink, `install.sh` header comment; run
    `bash -n install.sh` and then `./install.sh --no-apps` here — it must be a no-op on a built box.
 7. **Skill**: `studio-<area>` in the repo format (description ≤ 60 chars, exact commands, measured
-   numbers, pitfalls you hit) + a row in this table; `bin/sync-hermes export`; commit.
+   numbers, pitfalls you hit) + a row in this table + the name in `SKILLS=` of `bin/sync-hermes`;
+   `bin/sync-hermes export`; commit. A `skill_manage` batch is atomic — if a sibling patch fails, the
+   create is rolled back silently; confirm with `skills_list` before exporting.
 
 ## Publishing
 
-Repo: `~/media-stack` → `github.com/vybesforge/VFStudio` (`main`). Dylan keeps the GitHub token in a
+Repo: `~/media-stack` → `github.com/vybesforge/VFStudio` (`main`). **Code, docs and skills only —
+local assets never go to GitHub** (standing rule): `*.glb`, `gold-standard/`, `rig/joints_*.json`,
+`output/`, `train/{datasets,runs,models,.venv}`, model weights, venvs are gitignored. Before every
+push run `git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' | awk '$1=="blob" && $2>1000000'`
+— anything over ~1 MB that is not vendored JS is a mistake; `*.glb` in the room counts even when
+"small". GitHub warns at 50 MB and refuses at 100 MB, but the rule is about the repo's purpose, not the limit. Dylan keeps the GitHub token in a
 file on his Desktop; read it, pass it through a one-shot `git -c credential.helper=…` so it never lands
 in `.git/config` or shell history, and never echo it. A fine-grained PAT must have **Contents: Read
 and write** on the repo — `git push` and `POST /git/blobs` both 403 without it even though
@@ -164,6 +188,30 @@ gen edit output/image/zimage_00002_.png "Make it a snowy winter night with the b
 ```
 Heaviest model in the stack. **Run it alone**: `curl -s -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8787/api/studio/unload-all` first.
 It prefers `ComfyUI/models/unet/Qwen-Image-Edit-2509-Q4_K_M.gguf` (13 GB, needs the ComfyUI-GGUF node pack — installed) and falls back to the fp8 safetensors (`--fp8` forces it). Measured fp8 path: fp8 has no MPS kernel, ComfyUI upcasts to **39 GB bf16**, 10 GB swap, 26–65 s/step → 5–9 min per edit even with `--fast`. Result quality was correct (scene changed, subject identical). Panel: Image tab → "Edit" card; upload a starting image with the Upload… button.
+
+## Which model for which job (and what was rejected)
+`references/model-choices.md` — installed defaults, why, licences, Mac-fit math, rejected alternatives and the 10-minute re-audit procedure. Read it before proposing a model swap.
+
+## Where to save anything you make (non-negotiable)
+The VF Studio panel shows a file only if it is under one of these trees; it sorts it into a tab by extension:
+
+| Save under | Shows in panel tab |
+|---|---|
+| `~/media-stack/output/image/` (also `control/`, `upscale/`, `edit/`, `renders/`) — png/jpg/webp | Image |
+| `~/media-stack/output/video/` — mp4/webm/gif | Video |
+| `~/media-stack/output/3d/` — glb/gltf/stl/obj | 3D & VR ("set in room", "rig") |
+| `~/media-stack/output/sfx/`, `music/`, `stems/` — wav/flac/mp3 | Sound |
+| `~/media-stack/output/voice/` — wav/mp3 | Voice |
+| `~/media-stack/output/text/` — md/txt/json/fountain/srt | Write |
+| `~/media-stack/output/camera/` | Vision |
+| `~/media-stack/game/<project>/**` (not node_modules/dist/build) | 3D & VR → Game projects + the galleries above |
+
+Any subfolder inside those trees is fine (`output/renders/blender/hero.png` still lands in Image). `scratch/`
+and `ComfyUI/output/` are scanned too but treat them as temporary. Files written anywhere else — home,
+Desktop, `/tmp`, another repo — are **invisible in the panel**. The `gen`, `voice`, `vid`, `scribe`, `see`,
+`stems`, `lora` CLIs already default to the right folder; when you write a file yourself (Blender render,
+ffmpeg output, a script), pass an `--out` under `~/media-stack/output/<kind>/`. Tell Dylan the path
+relative to `~/media-stack/` — each gallery card shows that same folder.
 
 ## Memory budget (64 GB unified)
 

@@ -40,6 +40,9 @@ MODELS = STACK / "ComfyUI" / "models"
 MANIFEST = STACK / "models" / "manifest.json"
 JOBS_LOG = STACK / "logs" / "studio-jobs.jsonl"
 GEN = STACK / "tools" / "comfy" / "gen"
+LORA = STACK / "tools" / "train" / "lora"
+DATASETS = STACK / "train" / "datasets"
+LORAS_DIR = STACK / "ComfyUI" / "models" / "loras"
 VOICE = STACK / "tools" / "voice" / "voice"
 STEMS = STACK / "tools" / "audio" / "stems"
 VID = STACK / "tools" / "video" / "vid"
@@ -136,7 +139,7 @@ EXT = {
     "sound": {".wav", ".flac", ".mp3", ".ogg", ".opus"},
     "voice": {".wav", ".flac", ".mp3"},
     "3d": {".glb", ".gltf", ".obj", ".stl"},
-    "text": {".md", ".txt", ".json", ".fountain"},
+    "text": {".md", ".txt", ".json", ".fountain", ".srt"},
     "camera": {".jpg", ".jpeg", ".png"},
 }
 # where each modality's files live; (dir, url mount)
@@ -155,23 +158,76 @@ ROOTS = {
 }
 
 
+GAME_DIR = STACK / "game"
+GAME_SKIP = {"node_modules", ".godot", "dist", "build", ".git", "templates", "__pycache__", ".import"}
+
+
+def _game_projects():
+    """Every folder under ~/media-stack/game that is a Godot or web project (templates excluded)."""
+    out = []
+    if not GAME_DIR.is_dir():
+        return out
+    for d in sorted(GAME_DIR.iterdir()):
+        if not d.is_dir() or d.name in GAME_SKIP or d.name == "tools":
+            continue
+        kind = "godot" if (d / "project.godot").exists() else "web" if (d / "package.json").exists() or (d / "index.html").exists() else None
+        if not kind:
+            continue
+        counts = {}
+        for p in d.rglob("*"):
+            if any(part in GAME_SKIP for part in p.relative_to(d).parts[:-1]) or not p.is_file():
+                continue
+            for k, exts in EXT.items():
+                if p.suffix.lower() in exts:
+                    counts[k] = counts.get(k, 0) + 1
+        play = None
+        if kind == "web" and (d / "dist" / "index.html").exists():
+            play = f"/files/game/{d.name}/dist/index.html"
+        readme = next((p for p in d.glob("README*")), None)
+        out.append({"name": d.name, "kind": kind, "path": str(d), "assets": counts, "play": play,
+                    "readme": readme.read_text(errors="replace")[:600] if readme else "",
+                    "mtime": d.stat().st_mtime, "when": time.strftime("%m-%d %H:%M", time.localtime(d.stat().st_mtime))})
+    out.sort(key=lambda x: -x["mtime"])
+    return out
+
+
+# Anything an AI writes under these trees is visible in the galleries, whatever subfolder it invents.
+# Extension filter per kind still applies, so a .glb in output/image/ shows under 3D, etc.
+BROAD_ROOTS = [(OUT, "/files/output"), (STACK / "scratch", "/files/scratch"), (COMFY_OUT, "/files/comfy_output"),
+               (Path.home() / ".hermes" / "cache" / "generated" / "images", "/files/images")]
+
+
+@router.get("/games")
+def games():
+    return {"projects": _game_projects()}
+
+
+
 @router.get("/outputs")
 def outputs(kind: str = "image", limit: int = 48):
     if kind not in ROOTS:
         raise HTTPException(400, "unknown kind")
     exts = EXT[kind]
     seen, items = set(), []
-    for d, mount in ROOTS[kind]:
+    roots = list(ROOTS[kind]) + BROAD_ROOTS
+    # game projects contribute their own assets (models, audio, sprites) to every gallery
+    for g in _game_projects():
+        roots.append((Path(g["path"]), f"/files/game/{g['name']}"))
+    for d, mount in roots:
         if not d.is_dir():
             continue
         for p in d.rglob("*"):
             if not p.is_file() or p.suffix.lower() not in exts or ".part" in p.name:
                 continue
-            rp = p.resolve()
-            if rp in seen:
+            if any(part in GAME_SKIP or part.startswith(".") or part == "uploads_tmp" for part in p.relative_to(d).parts[:-1]):
                 continue
-            seen.add(rp)
+            rp = p.resolve()
             st = p.stat()
+            # same file under two roots (gen copies ComfyUI/output/* into output/<kind>/): keep the first root's copy
+            key = (p.name, st.st_size)
+            if rp in seen or key in seen or (d.parent == GAME_DIR and p.name.lower().startswith("readme")):
+                continue
+            seen.add(rp); seen.add(key)
             rel = p.relative_to(d).as_posix()
             items.append({"name": p.name, "path": str(p), "url": f"{mount}/{rel}", "bytes": st.st_size,
                           "mtime": st.st_mtime, "when": time.strftime("%m-%d %H:%M", time.localtime(st.st_mtime)),
@@ -275,8 +331,14 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
         return [name, str(cast(v))] if v not in (None, "", False) else []
 
     if kind == "image":
-        return [str(GEN), "image", a["prompt"], "--model", a.get("model", "zimage"),
-                *flag("--w", cast=int), *flag("--h", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int), *flag("--n", cast=int)]
+        cmd = [str(GEN), "image", a["prompt"], "--model", a.get("model", "zimage"),
+               *flag("--w", cast=int), *flag("--h", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int), *flag("--n", cast=int)]
+        if a.get("lora"):
+            cmd += ["--lora", f"{a['lora']}:{a.get('lora_strength') or 1.0}"]
+        return cmd
+    if kind == "lora":
+        return [str(LORA), "train", "--dataset", str(DATASETS / a["dataset"]), "--name", a["name"], "--model", a.get("model", "zimage"),
+                *flag("--steps", cast=int), *flag("--rank", cast=int), *flag("--res", cast=int), *flag("--trigger"), *flag("--save-every", cast=int), "-v"]
     if kind == "control":
         return [str(GEN), "control", a["prompt"], "--image", a["image"], "--mode", a.get("mode", "canny"),
                 *flag("--strength", cast=float), *flag("--steps", cast=int), *flag("--seed", cast=int), "--save-control"]
@@ -288,10 +350,10 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
             cmd.append("--fast")
         return cmd
     if kind == "video":
-        return [str(GEN), "video", a["prompt"], *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
+        return [str(GEN), "video", a["prompt"], "--model", a.get("model", "wan"), *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
                 *flag("--frames", cast=int), *flag("--fps", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int)]
     if kind == "sfx":
-        return [str(GEN), "sfx", a["prompt"], "--model", a.get("model", "sao"), *flag("--seconds", cast=float),
+        return [str(GEN), "sfx", a["prompt"], "--model", a.get("model", "sa3sfx"), *flag("--seconds", cast=float),
                 *flag("--steps", cast=int), *flag("--seed", cast=int)]
     if kind == "music":
         cmd = [str(GEN), "music", a["prompt"], *flag("--seconds", cast=float), *flag("--bpm", cast=int),
@@ -512,6 +574,15 @@ async def upload(request: Request):
             ff = shutil.which("ffmpeg") or str(next(Path.home().glob(".hermes/tools/ffmpeg-*/ffmpeg"), "ffmpeg"))
             subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(tmp), str(dst)], check=False); tmp.unlink(missing_ok=True)
         return {"ok": True, "kind": "image", "path": str(dst), "url": f"/files/output/image/uploads/{dst.name}"}
+    if kind == "dataset":
+        # training image → train/datasets/<dataset>/NNN.<ext> + NNN.txt caption (defaults to "[trigger]")
+        ds = re.sub(r"[^A-Za-z0-9_-]+", "_", request.query_params.get("dataset") or "untitled")[:40]
+        caption = request.query_params.get("caption") or "[trigger]"
+        ddir = DATASETS / ds; ddir.mkdir(parents=True, exist_ok=True)
+        n = len([p for p in ddir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}]) + 1
+        dst = ddir / f"{n:03d}{ext if ext in {'.png', '.jpg', '.jpeg', '.webp'} else '.png'}"
+        dst.write_bytes(raw); dst.with_suffix(".txt").write_text(caption.strip() + "\n")
+        return {"ok": True, "kind": "dataset", "dataset": ds, "path": str(dst), "count": n}
     if kind == "model":
         updir = OUT / "3d" / "uploads"; updir.mkdir(parents=True, exist_ok=True)
         dst = updir / f"{stem}_{datetime.now():%Y%m%d_%H%M%S}{ext}"
@@ -531,6 +602,32 @@ async def upload(request: Request):
     with wave.open(str(wav)) as w:  # no ffprobe in the bundled ffmpeg dir; the header is enough
         dur = w.getnframes() / float(w.getframerate())
     return {"ok": True, "kind": "voice", "path": str(wav), "url": f"/files/output/voice/uploads/{wav.name}", "seconds": round(dur, 2)}
+
+
+@router.get("/train")
+def train_info():
+    """Datasets (train/datasets/*) and LoRAs ComfyUI can load, for the Train tab."""
+    ds = []
+    if DATASETS.exists():
+        for d in sorted(p for p in DATASETS.iterdir() if p.is_dir()):
+            imgs = [p for p in d.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}]
+            caps = [p for p in imgs if p.with_suffix(".txt").exists()]
+            ds.append({"name": d.name, "images": len(imgs), "captioned": len(caps),
+                       "sample": f"/files/train/{d.name}/{imgs[0].name}" if imgs else None})
+    loras = []
+    if LORAS_DIR.exists():
+        for p in sorted(LORAS_DIR.glob("*.safetensors"), key=lambda p: p.stat().st_mtime, reverse=True):
+            loras.append({"name": p.stem, "mb": round(p.stat().st_size / 1e6, 1), "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime))})
+    runs = []
+    rdir = STACK / "train" / "runs"
+    if rdir.exists():
+        for d in sorted(rdir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[:8]:
+            log = d / "train.log"; tail = ""
+            if log.exists():
+                lines = [l for l in log.read_text(errors="replace")[-6000:].replace("\r", "\n").splitlines() if l.strip() and "it/s]" in l or "s/it" in l or "wrote" in l.lower() or "error" in l.lower()]
+                tail = lines[-1].strip() if lines else ""
+            runs.append({"name": d.name, "last": tail[:160], "done": (d / f"{d.name}.safetensors").exists()})
+    return {"datasets": ds, "loras": loras, "runs": runs}
 
 
 @router.get("/voices")

@@ -85,6 +85,20 @@
   iframe.room{width:100%;height:min(70vh,720px);border:0;display:block;border-radius:10px;border:1px solid var(--line)}
   .tag{font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid #2c323c;color:var(--mut)} .tag.ok{color:var(--ok);border-color:#265c3d} .tag.dl{color:var(--warn);border-color:#5a4418}
   .hint{font-size:11px;color:#6f7681;margin-top:6px}
+  /* clickable service status pill: running → stop, stopped → start */
+  .svctog{display:inline-flex;align-items:center;gap:1px;background:#121821;border:1px solid #2c323c;border-radius:20px;padding:4px 11px;font-size:12px;color:var(--fg);white-space:nowrap;min-width:86px;justify-content:center;flex:0 0 auto;margin-left:10px}
+  .svctog:hover{background:#1b2431;border-color:var(--acc);color:#fff}
+  .svctog.on:hover{border-color:var(--err)} .svctog.on:hover .dot{background:var(--err);box-shadow:0 0 8px #e0556188}
+  .svctog.off:hover,.svctog.warn:hover{border-color:var(--cyan)}
+  .svctog:active{transform:translateY(1px)}
+  /* endpoint tile inside a service card */
+  .ephead{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#6f7681;margin:12px 0 -2px}
+  .eptile{background:#070c14;border:1px solid #161c26;border-radius:8px;padding:8px 10px;margin-top:8px}
+  .epname{font-size:12px;font-weight:600;color:var(--fg)}
+  .epurl{display:block;margin-top:2px;color:var(--cyan);word-break:break-all;user-select:all;font-size:11.5px;line-height:1.4}
+  .eptile .btns{margin-top:0;flex:0 0 auto} .eptile .btns button{padding:3px 8px;font-size:11px}
+  .eptile pre{max-height:150px;margin-top:8px} .eptile table{margin-top:8px}
+  .eptile td{padding:3px 0}
 </style></head><body>
 <header>
   <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge · M3 Max 64 GB · nothing leaves the machine</div></div></div>
@@ -98,6 +112,7 @@
   <button data-tab="voice">Voice</button>
   <button data-tab="write">Write</button>
   <button data-tab="vision">Vision</button>
+  <button data-tab="train">Train</button>
   <button data-tab="models">Models</button>
   <button data-tab="services">Services</button>
   <button data-tab="resources">Resources</button>
@@ -111,11 +126,12 @@
       <label>prompt</label><textarea id="im-prompt">a brass compass on an old map, soft window light, macro</textarea>
       <div class="fields">
         <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option></select></div>
+        <div><label>LoRA (trained in the Train tab)</label><div class="row" style="gap:6px"><select id="im-lora" style="flex:1"><option value="">none</option></select><input id="im-lora-s" value="0.9" size="3" title="strength"></div></div>
         <div><label>size</label><select id="im-size"><option value="1024x1024">1024 × 1024</option><option value="1344x768">1344 × 768 landscape</option><option value="768x1344">768 × 1344 portrait</option><option value="1536x1024">1536 × 1024</option></select></div>
         <div><label>seed (blank = random)</label><input id="im-seed" placeholder="random"></div>
         <div><label>count</label><input id="im-n" value="1" type="number" min="1" max="4"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n')})">Generate</button></div>
+      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n'),lora:v('im-lora'),lora_strength:v('im-lora-s')})">Generate</button></div>
       <div class="hint">CLI: <code>gen image "prompt" --model zimage</code></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Upscale / control</div>
@@ -152,12 +168,13 @@
       <label>start image (optional — image-to-video)</label>
       <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')">Upload…</button></div>
       <div class="fields">
+        <div><label>model</label><select id="vd-model"><option value="wan">Wan 2.2 5B · fast path (measured)</option><option value="hyv15">HunyuanVideo 1.5 8.3B · quality (t2v 480p / i2v 720p, untested)</option></select></div>
         <div><label>size</label><select id="vd-size"><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
         <div><label>frames (24 fps)</label><select id="vd-frames"><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
         <div><label>steps</label><input id="vd-steps" value="20"></div>
         <div><label>seed</label><input id="vd-seed" placeholder="random"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
+      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
       <div class="hint">~14 s/step at 832×480×49f on this GPU. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
     </div>
     <div id="jobs-video" class="card" style="margin-top:12px"></div>
@@ -171,6 +188,8 @@
     <div class="btns" style="margin:0"><button class="primary" onclick="window.open('/vr/index.html','_blank')">Open full screen (WebXR)</button>
       <button onclick="window.open('/vr/index.html?rig=1','_blank')">Joint picker</button><button onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
   <iframe id="room" class="room" src="/vr/index.html" allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"></iframe>
+  <div class="row" style="margin-top:14px"><h2 style="margin:0">Game projects <span class="muted" style="font-weight:400;font-size:12px">~/media-stack/game/ — their models, audio and sprites also appear in the galleries</span></h2><button onclick="loadGames()">Refresh</button></div>
+  <div id="games" class="grid"></div>
   <div class="grid" style="margin-top:14px">
     <div class="card"><div class="name">Photo → mesh</div><div class="desc">TRELLIS.2 (gold path) runs through the ComfyUI UI template; it cannot be driven from this page. Recipe: skill <code>local-media-stack</code> → <code>photo-to-3d-gold-standard.md</code>. Progress shows in the bar above while it runs.</div>
       <div class="btns"><button onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div></div>
@@ -187,7 +206,7 @@
     <div class="card"><div class="name">Sound effect</div>
       <label>describe the sound</label><textarea id="sx-prompt">heavy wooden door creaks open slowly, stone hall reverb</textarea>
       <div class="fields">
-        <div><label>model</label><select id="sx-model"><option value="sao">Stable Audio Open 1.0 · 50 steps</option><option value="sa3">Stable Audio 3 medium · 8 steps, up to 150 s</option></select></div>
+        <div><label>model</label><select id="sx-model"><option value="sa3sfx">Stable Audio 3 Small-SFX · dedicated SFX, 8 steps (~4 s)</option><option value="sao">Stable Audio Open 1.0 · 50 steps (~12 s)</option><option value="sa3">Stable Audio 3 medium · 8 steps, up to 150 s</option></select></div>
         <div><label>seconds</label><input id="sx-sec" value="8"></div>
       </div>
       <div class="btns"><button class="primary" onclick="runJob('sfx',{prompt:v('sx-prompt'),model:v('sx-model'),seconds:v('sx-sec')})">Generate SFX</button></div>
@@ -296,6 +315,41 @@
     <h2>Camera shots &amp; recent images</h2><div class="gal" id="gal-camera"></div></div>
 </div></section>
 
+<!-- TRAIN -->
+<section class="tab" id="tab-train"><div class="two">
+  <div>
+    <div class="card"><div class="name">1 · Dataset — 8–20 photos of ONE subject</div>
+      <div class="fields">
+        <div><label>dataset name</label><input id="tr-ds-name" placeholder="my_robot"></div>
+        <div><label>caption for the uploaded images (keep <code>[trigger]</code>)</label><input id="tr-ds-cap" value="[trigger], photo, natural light"></div>
+      </div>
+      <input type="file" id="tr-ds-files" accept="image/*" multiple style="display:none" onchange="uploadDataset(this.files)">
+      <div class="btns"><button class="primary" onclick="$('tr-ds-files').click()">Add images…</button><span id="tr-ds-status" class="muted"></span></div>
+      <div class="hint">Varied angles and backgrounds, nothing else in frame. You can add more images later with the same name. Captions can be edited in <code>~/media-stack/train/datasets/&lt;name&gt;/NNN.txt</code>.</div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">2 · Train</div>
+      <div class="fields">
+        <div><label>dataset</label><select id="tr-ds"></select></div>
+        <div><label>LoRA name</label><input id="tr-name" placeholder="my_robot"></div>
+        <div><label>trigger word (goes where [trigger] is)</label><input id="tr-trigger" placeholder="vfrobot"></div>
+        <div><label>base model</label><select id="tr-model"><option value="zimage">Z-Image-Turbo (verified)</option><option value="klein">FLUX.2 klein (untested)</option></select></div>
+        <div><label>steps</label><input id="tr-steps" value="1000"></div>
+        <div><label>rank</label><input id="tr-rank" value="16"></div>
+        <div><label>resolution</label><select id="tr-res"><option>512</option><option>768</option></select></div>
+        <div><label>save every</label><input id="tr-save" value="250"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="trainJob()">Start training</button></div>
+      <div class="hint">Measured here: ~12 s/step at 512 px → 1000 steps ≈ 3.5 h. Everything else gets unloaded first; don't generate while it runs. CLI: <code>lora train --dataset DIR --name NAME --trigger WORD</code></div>
+    </div>
+    <div id="jobs-train" class="card" style="margin-top:12px"></div>
+  </div>
+  <div>
+    <div class="row"><h2 style="margin:0">Datasets</h2><button onclick="loadTrain()">Refresh</button></div><div id="tr-datasets" class="card"></div>
+    <h2>Trained LoRAs</h2><div id="tr-loras" class="card"></div>
+    <h2>Recent runs</h2><div id="tr-runs" class="card"></div>
+  </div>
+</div></section>
+
 <!-- MODELS -->
 <section class="tab" id="tab-models">
   <div class="card" id="inv-summary"></div>
@@ -306,6 +360,17 @@
 
 <!-- SERVICES -->
 <section class="tab" id="tab-services">
+  <div class="card" style="margin-bottom:14px;padding:10px 14px">
+    <div class="row">
+      <div class="desc" id="ep-note" style="flex:1;min-width:260px">Each service card carries its own copy-paste endpoints — pick the host and every URL below follows it.</div>
+      <div class="btns" style="margin:0">
+        <button id="ep-h-local" onclick="setEpHost('127.0.0.1')">127.0.0.1</button>
+        <button id="ep-h-lan" onclick="setEpHost(EP.lan_ip||location.hostname)">LAN</button>
+        <button class="primary" onclick="copyEnv()">Copy all → .env</button>
+        <button onclick="copyEpJson()">Copy all → JSON</button>
+      </div>
+    </div>
+  </div>
   <div class="grid" id="services"></div>
   <h2>Quick reference</h2>
   <div class="card"><pre style="margin:0;max-height:none">stack status | start comfy | start audio | stop comfy | free | logs comfy
@@ -338,12 +403,12 @@ function flash(m){const d=document.createElement('div');d.textContent=m;d.style.
 
 // tabs
 let current='image';
-const KIND_TAB={image:'image',control:'image',upscale:'image',edit:'image',stems:'sound',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice',write:'write',see:'vision'};
+const KIND_TAB={image:'image',control:'image',upscale:'image',edit:'image',stems:'sound',lora:'train',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice',write:'write',see:'vision'};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.dataset.tab;
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('active',s.id==='tab-'+current));
   onTab(current);});
-function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='models') loadInventory(); if(t==='services') refreshServices(); if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
+function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='services'){refreshServices();} if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
 
 // progress
 async function refreshProgress(){
@@ -392,6 +457,32 @@ async function toggleRec(){
     _rec.start(250); _t0=Date.now(); b.textContent='■ Stop'; b.classList.add('primary');
     _tick=setInterval(()=>{ $('vo-rectime').textContent=((Date.now()-_t0)/1000).toFixed(1)+' s (aim for 5–15 s, read a full sentence or two)'; },200);
   }catch(e){ flash('mic error: '+e.message); }
+}
+// ── Train tab
+loadLoras();   // the Image tab is open at start and never fires onTab
+async function loadTrain(){
+  const d=await (await fetch('/api/studio/train')).json();
+  $('tr-datasets').innerHTML = d.datasets.length ? d.datasets.map(x=>`<div class="row" style="justify-content:space-between;padding:4px 0">${x.sample?`<img src="${x.sample}" style="height:40px;border-radius:4px">`:''}<b style="flex:1;margin-left:8px">${x.name}</b><span class="muted">${x.images} images · ${x.captioned} captions</span><button onclick="$('tr-ds').value='${x.name}';$('tr-name').value='${x.name}';flash('selected')">use</button></div>`).join('') : '<span class="muted">none yet — add images on the left</span>';
+  $('tr-ds').innerHTML = d.datasets.map(x=>`<option>${x.name}</option>`).join('');
+  $('tr-loras').innerHTML = d.loras.length ? d.loras.map(l=>`<div class="row" style="justify-content:space-between;padding:4px 0"><b>${l.name}</b><span class="muted">${l.mb} MB · ${l.mtime}</span><button onclick="$('im-lora').value='${l.name}';document.querySelector('nav button[data-tab=image]').click();flash('LoRA selected on the Image tab')">use in Image</button></div>`).join('') : '<span class="muted">none yet</span>';
+  $('tr-runs').innerHTML = d.runs.length ? d.runs.map(r=>`<div style="padding:4px 0"><b>${r.name}</b> ${r.done?'<span style="color:var(--cyan)">done</span>':''}<div class="muted" style="font:11px ui-monospace,monospace">${r.last||''}</div></div>`).join('') : '<span class="muted">none yet</span>';
+  loadLoras(d.loras);
+}
+async function loadLoras(list){
+  if(!list){ try{ list=(await (await fetch('/api/studio/train')).json()).loras; }catch(e){ return; } }
+  const sel=$('im-lora'), cur=sel.value; sel.innerHTML='<option value="">none</option>'+list.map(l=>`<option>${l.name}</option>`).join(''); sel.value=cur;
+}
+async function uploadDataset(files){
+  const name=v('tr-ds-name'); if(!name){ flash('give the dataset a name first'); return; }
+  let n=0; for(const f of files){ const fd=new FormData(); fd.append('file',f,f.name);
+    const r=await (await fetch(`/api/studio/upload?kind=dataset&dataset=${encodeURIComponent(name)}&caption=${encodeURIComponent(v('tr-ds-cap'))}`,{method:'POST',body:fd})).json();
+    if(r.ok){ n=r.count; $('tr-ds-status').textContent=`${n} images in ${r.dataset}`; } else flash('upload failed: '+r.error); }
+  $('tr-ds-files').value=''; loadTrain(); $('tr-ds').value=name; $('tr-name').value=name;
+}
+function trainJob(){
+  if(!v('tr-ds')||!v('tr-name')){ flash('pick a dataset and a name'); return; }
+  if(!confirm(`Train "${v('tr-name')}" for ${v('tr-steps')} steps (~${Math.round(v('tr-steps')*12/60)} min)? All other models will be unloaded.`)) return;
+  runJob('lora',{dataset:v('tr-ds'),name:v('tr-name'),model:v('tr-model'),steps:v('tr-steps'),rank:v('tr-rank'),res:v('tr-res'),trigger:v('tr-trigger'),save_every:v('tr-save')});
 }
 // generic uploader: any input that wants a file path gets an "Upload…" button → /api/studio/upload?kind=image|voice|model
 function pickFile(inputId, kind){
@@ -461,11 +552,15 @@ const galCache={};
 async function loadGallery(kind){
   const j=await (await fetch('/api/studio/outputs?kind='+kind)).json(); galCache[kind]=j.items;
   const el=$('gal-'+kind); if(!j.items.length){ el.innerHTML='<div class="desc">nothing generated yet</div>'; return; }
-  el.innerHTML=j.items.map((it,i)=>{
+  el.innerHTML=j.items.map((it,i)=>renderItem(it,i,kind)).join('');
+}
+function renderItem(it,i,kind,cache){
+    cache=cache||`galCache['${kind}']`;
     const audio=['wav','flac','mp3','ogg','opus'].includes(it.ext)?`<audio src="${it.url}" controls preload="none"></audio>`:'';
     const is3d=['glb','gltf'].includes(it.ext);
-    return `<div class="it"><div class="th" onclick="openItem(galCache['${kind}'][${i}])">${thumb(it,kind)}<span class="pill">${it.ext}</span></div>
-      <div class="bd"><div class="fn">${it.name}</div><div class="kv">${fmtB(it.bytes)} · ${it.when}</div>${audio}
+    const where=it.path.replace(/^\/Users\/[^/]+\/media-stack\//,'').replace(/\/[^/]*$/,'');
+    return `<div class="it"><div class="th" onclick="openItem(${cache}[${i}])">${thumb(it,kind)}<span class="pill">${it.ext}</span></div>
+      <div class="bd"><div class="fn">${it.name}</div><div class="kv">${fmtB(it.bytes)} · ${it.when} · <span title="${it.path}">${where}</span></div>${audio}
       <div class="acts"><button onclick="openItem(galCache['${kind}'][${i}])">preview</button>
         ${kind==='image'?`<button onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
         ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
@@ -474,10 +569,20 @@ async function loadGallery(kind){
         ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}','_blank')">room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}&rig=1','_blank')">rig</button>`:''}
         ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}
         ${kind==='text'?`<button onclick="$('wr-file').value='${it.path}';flash('draft set')">as draft</button>`:''}
-        <button onclick="window.open('${it.url}','_blank')">open</button></div></div></div>`;}).join('');
+        <button onclick="window.open('${it.url}','_blank')">open</button><button onclick="navigator.clipboard.writeText('${it.path}');flash('path copied')">path</button></div></div></div>`;
 }
 async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }
-async function refreshVr(){ const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
+async function loadGames(){
+  const d=await (await fetch('/api/studio/games')).json();
+  $('games').innerHTML = d.projects.length ? d.projects.map(g=>`<div class="card"><div class="name">${g.name} <span class="muted" style="font-weight:400">· ${g.kind==='godot'?'Godot 4':'web (Three.js)'} · ${g.when}</span></div>
+    <div class="desc" style="white-space:pre-wrap;max-height:90px;overflow:hidden">${(g.readme||'').replace(/[#*`]/g,'').trim().slice(0,320)}</div>
+    <div class="muted" style="margin:6px 0">${Object.entries(g.assets).map(([k,v])=>`${v} ${k}`).join(' · ')||'no media assets'}</div>
+    <div class="btns">${g.play?`<button class="primary" onclick="window.open('${g.play}','_blank')">▶ Play in browser</button>`:''}
+      <button onclick="navigator.clipboard.writeText('${g.path}');flash('path copied')">copy path</button>
+      ${g.kind==='godot'?`<button onclick="navigator.clipboard.writeText('/Applications/Godot.app/Contents/MacOS/Godot --path ${g.path}');flash('run command copied')">copy run cmd</button>`:`<button onclick="navigator.clipboard.writeText('cd ${g.path} && npm run dev');flash('dev command copied')">copy dev cmd</button>`}
+    </div></div>`).join('') : '<div class="card muted">no projects yet — <code>game/new_project.sh 2d|3d Name ~/media-stack/game/Name</code></div>';
+}
+async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
 
 // inventory
 async function loadInventory(){
@@ -488,16 +593,93 @@ async function loadInventory(){
   $('inv-tools').innerHTML=`<table><tbody>${inv.tools.map(t=>`<tr><td><span class="dot ${t.present?'on':'off'}"></span><code>${t.name}</code></td><td class="desc">${t.desc}</td><td class="desc" style="font-size:10px">${t.path}</td></tr>`).join('')}</tbody></table>`;
 }
 
-// services + resources (same API as before)
-async function act(path){ const j=await (await fetch('/api/'+path,{method:'POST'})).json(); if(j.message) flash(j.message); setTimeout(refreshServices,500); }
-async function refreshServices(){
-  const s=await (await fetch('/api/status')).json();
-  $('services').innerHTML=Object.entries(s.services).map(([k,x])=>{const cls=x.responding?'on':(x.running?'warn':'off');const st=x.responding?'running':(x.running?'starting':'stopped');
-    return `<div class="card"><div class="row"><div><div class="name">${x.label}</div><div class="desc">${x.desc}</div></div><div style="font-size:12px"><span class="dot ${cls}"></span>${st}</div></div>
-    <div class="meta">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div><div class="btns"><button class="primary" onclick="act('start/${k}')">Start</button><button onclick="act('restart/${k}')">Restart</button><button class="danger" onclick="act('stop/${k}')">Stop</button>${k==='comfy'?'<button onclick="act(\'comfy/free\')">Free VRAM</button>':''}<button onclick="svcLog('${k}')">Log</button></div><pre id="slog-${k}" style="display:none"></pre></div>`;}).join('')
-    +`<div class="card"><div class="name">panel</div><div class="desc">this page · :8787</div><div class="meta">PANEL_HOST=0.0.0.0 stack panel exposes it to the LAN (WebXR still needs localhost/HTTPS)</div></div>`;
+// services + endpoints — one card per service, its endpoints as tiles inside it
+let SVCSTATUS={}, svcRendered=false;
+let EP={hosts:['127.0.0.1'],lan_ip:null,items:[]}, epHost='127.0.0.1', epLoaded=false, epOpen=new Set(), logOpen=new Set();
+const logText={};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const epOrigin=it=>`http://${epHost}:${it.port}`;
+const epBase=it=>epOrigin(it)+it.path;
+const epSnip=it=>(it.snippet||'').replaceAll('{{base_origin}}',epOrigin(it)).replaceAll('{{base}}',epBase(it));
+const epEnvValue=it=>epOrigin(it)+(it.envsuffix===undefined?it.path:it.envsuffix);
+const epItem=k=>EP.items.find(x=>x.key===k);
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); flash('copied'); return true; }
+  catch(e){
+    const ta=document.createElement('textarea'); ta.value=t; ta.style.cssText='position:fixed;top:-1000px';
+    document.body.appendChild(ta); ta.select(); let ok=false; try{ ok=document.execCommand('copy'); }catch(_){}
+    ta.remove(); flash(ok?'copied':'copy blocked — select the text instead'); return ok;
+  }
 }
-async function svcLog(n){const p=$('slog-'+n);const j=await (await fetch('/api/logs/'+n+'?lines=60')).json();p.textContent=j.text||'(empty)';p.style.display=p.style.display==='none'?'block':'none';}
+function epTile(it){
+  const rows=(it.paths||[]).map(([m,u,n])=>`<tr><td><code>${esc(m)}</code></td><td><code>${esc(u)}</code></td><td class="desc">${esc(n)}</td></tr>`).join('');
+  return `<div class="eptile">
+    <div class="row" style="flex-wrap:nowrap;align-items:flex-start;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div class="epname">${esc(it.label)}</div>
+        <code class="epurl">${esc(epBase(it))}</code>
+        <div class="desc" style="font-size:11px;margin-top:4px">${esc(it.desc)}</div>
+      </div>
+      <div class="btns"><button onclick="copyEp('${it.key}')" title="copy this URL">Copy</button><button onclick="toggleEp('${it.key}')" title="routes + a working curl">curl</button></div>
+    </div>
+    <div id="epd-${it.key}" style="display:${epOpen.has(it.key)?'block':'none'}">
+      <table><thead><tr><th>method</th><th>path</th><th>what</th></tr></thead><tbody>${rows}</tbody></table>
+      <pre>${esc(epSnip(it))}</pre>
+      <div class="btns" style="margin-top:6px"><button onclick="copyEpSnip('${it.key}')">Copy snippet</button></div>
+    </div></div>`;
+}
+function svcCard(k,x){
+  const cls=x.responding?'on':(x.running?'warn':'off'), st=x.responding?'running':(x.running?'starting':'stopped');
+  const eps=EP.items.filter(it=>it.svc===k);
+  return `<div class="card">
+    <div class="row" style="flex-wrap:nowrap;align-items:flex-start">
+      <div style="flex:1;min-width:0"><div class="name">${esc(x.label)}</div><div class="desc">${esc(x.desc)}</div></div>
+      <button id="svct-${k}" class="svctog ${cls}" onclick="toggleSvc('${k}',${x.running})" title="${x.running?'click to stop':'click to start'}"><span class="dot ${cls}"></span>${st}</button>
+    </div>
+    <div class="meta" id="svcm-${k}">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div>
+    <div class="btns"><button class="primary" onclick="act('start/${k}')">Start</button><button onclick="act('restart/${k}')">Restart</button><button class="danger" onclick="act('stop/${k}')">Stop</button>${k==='comfy'?`<button onclick="act('comfy/free')">Free VRAM</button>`:''}<button onclick="svcLog('${k}')">Log</button></div>
+    ${eps.length?`<div class="ephead">endpoints · copy &amp; paste</div>`+eps.map(epTile).join(''):''}
+    <pre id="slog-${k}" style="display:${logOpen.has(k)?'block':'none'}">${esc(logText[k]||'')}</pre>
+  </div>`;
+}
+function panelCard(){
+  const eps=EP.items.filter(it=>it.svc==='panel');
+  return `<div class="card"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">
+    <div style="flex:1;min-width:0"><div class="name">panel</div><div class="desc">this page · :8787</div></div><span class="tag ok">this page</span></div>
+    <div class="meta">PANEL_HOST=0.0.0.0 stack panel exposes it to the LAN (WebXR still needs localhost/HTTPS)</div>
+    ${eps.length?`<div class="ephead">endpoints · copy &amp; paste</div>`+eps.map(epTile).join(''):''}</div>`;
+}
+function renderServices(){
+  $('ep-note').innerHTML = epHost==='127.0.0.1'
+    ? `Each card below carries its own copy-paste endpoints — links use <code>127.0.0.1</code>, the address every CLI on this Mac already uses.`
+    : `Each card below carries its own copy-paste endpoints — links use <code>${esc(epHost)}</code>. Only the panel is LAN-bound (<code>PANEL_HOST=0.0.0.0</code>); the others answer only after a 0.0.0.0 listen.`;
+  $('ep-h-local').className = epHost==='127.0.0.1'?'primary':'';
+  $('ep-h-lan').className = epHost!=='127.0.0.1'?'primary':'';
+  $('services').innerHTML = Object.entries(SVCSTATUS).map(([k,x])=>svcCard(k,x)).join('') + panelCard();
+  updateServiceState();
+}
+function updateServiceState(){
+  Object.entries(SVCSTATUS).forEach(([k,x])=>{
+    const cls=x.responding?'on':(x.running?'warn':'off'), st=x.responding?'running':(x.running?'starting':'stopped');
+    const b=$('svct-'+k);
+    if(b){ b.className='svctog '+cls; b.title=x.running?'click to stop':'click to start'; b.onclick=()=>toggleSvc(k,x.running); b.innerHTML=`<span class="dot ${cls}"></span>${st}`; }
+    const m=$('svcm-'+k); if(m) m.textContent=`port ${x.port}${x.pid?` · pid ${x.pid}`:''}`;
+  });
+}
+async function refreshServices(){
+  if(!epLoaded){ try{ EP=await (await fetch('/api/endpoints')).json(); epLoaded=true; if(!EP.hosts.includes(epHost)) epHost=EP.hosts[0]; }catch(e){} }
+  try{ SVCSTATUS=(await (await fetch('/api/status')).json()).services||{}; }catch(e){ return; }
+  if(!svcRendered){ renderServices(); svcRendered=true; } else updateServiceState();
+}
+function setEpHost(h){ if(!h) return; epHost=h; svcRendered=false; refreshServices(); }
+function copyEp(k){ copyText(epBase(epItem(k))); }
+function copyEpSnip(k){ copyText(epSnip(epItem(k))); }
+function toggleEp(k){ const d=$('epd-'+k); const open=d.style.display==='none'; d.style.display=open?'block':'none'; open?epOpen.add(k):epOpen.delete(k); }
+function copyEnv(){ copyText(['# VF Studio local endpoints — host '+epHost].concat(EP.items.map(it=>`${it.env}=${epEnvValue(it)}`)).join('\n')); }
+function copyEpJson(){ const o={}; EP.items.forEach(it=>o[it.key]=epEnvValue(it)); copyText(JSON.stringify(o,null,2)); }
+async function act(path){ const j=await (await fetch('/api/'+path,{method:'POST'})).json(); if(j.message) flash(j.message); setTimeout(refreshServices,500); }
+async function toggleSvc(k,on){ flash((on?'stopping ':'starting ')+k+'…'); await act((on?'stop/':'start/')+k); setTimeout(refreshServices,900); }
+async function svcLog(n){const p=$('slog-'+n);const j=await (await fetch('/api/logs/'+n+'?lines=60')).json();logText[n]=j.text||'(empty)';p.textContent=logText[n];const open=p.style.display==='none';p.style.display=open?'block':'none';open?logOpen.add(n):logOpen.delete(n);}
 function bar(pct,tone){const x=Math.max(0,Math.min(100,pct));const t=tone||(x>88?'r':x>70?'a':x>40?'':'g');return `<div class="bar ${t}"><i style="width:${x}%"></i></div>`;}
 async function refreshResources(){
   const r=await (await fetch('/api/resources')).json(); const c=r.cpu||{},m=r.mem||{},g=r.gpu||{},d=r.disk||{};
@@ -515,4 +697,5 @@ async function loadVoices(){ try{const j=await (await fetch('/api/studio/voices'
 refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
 setInterval(refreshProgress,1500); setInterval(refreshJobs,3000);
 setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); },2500);
+setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); },8000);
 </script></body></html>

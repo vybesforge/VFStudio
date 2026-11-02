@@ -13,6 +13,8 @@ metadata:
 
 # Studio: 3D print pipeline (CAD -> STL -> G-code)
 
+> **Save deliverables under `~/media-stack/output/3d/ (STL/GLB; G-code and 3MF next to them)`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 Everything runs on this machine, no cloud. Three stages, one tool each:
 
 | Stage | Tool | Command |

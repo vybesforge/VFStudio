@@ -13,6 +13,8 @@ metadata:
 
 # studio-animation — rig, animate, sprite-sheet (all local)
 
+> **Save deliverables under `~/media-stack/output/3d/ for rigged GLBs, output/video/ for renders, output/image/ for sprite sheets`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 Blender 5.2 headless scripts for 3D auto-rigging (Rigify) with a baked test cycle and glTF export,
 Grease Pencil 2D animation rendered to PNG + mp4, PNG-sequence → VSE mp4, a sprite-sheet /
 Godot `SpriteFrames` builder (with chroma keying for AI-generated sprites), and the hand-drawn path

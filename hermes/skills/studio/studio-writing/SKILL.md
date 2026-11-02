@@ -13,6 +13,8 @@ metadata:
 
 # studio-writing — local, uncensored creative writing
 
+> **Save deliverables under `~/media-stack/output/text/`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 A 27B uncensored model (`mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit`, ~20 GB) runs in
 MLX on this Mac behind `mlx_lm.server` (:8081). `scribe` wraps it with craft-oriented
 templates. Cloud models refuse or sanitise adult, violent or morally grey fiction; this one

@@ -13,6 +13,8 @@ metadata:
 
 # Studio video edit (fully local)
 
+> **Save deliverables under `~/media-stack/output/video/`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 Three tools under `/Users/dcruse/media-stack/tools/video/` cover trimming, joining, captioning,
 audio, GIFs, frame I/O, loudness, multi-clip assembly with crossfades/titles (Blender VSE), and
 speech-to-SRT (local Whisper). Nothing calls a cloud API; inference is the mlx-audio server on

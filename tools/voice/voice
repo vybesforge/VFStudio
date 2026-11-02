@@ -25,7 +25,10 @@ HOME = os.path.expanduser("~")
 SERVER = os.environ.get("VOICE_SERVER", "http://127.0.0.1:8000")
 KOKORO = "mlx-community/Kokoro-82M-bf16"
 CLONE_MODEL = os.environ.get("VOICE_CLONE_MODEL", "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16")
-WHISPER = "mlx-community/whisper-large-v3-turbo-asr-fp16"
+# STT default: Parakeet-TDT 0.6B v3 (25 European languages; measured 0.6 s vs 3.5 s for Whisper-turbo on the
+# same clip, identical transcript; leads the open WER boards). Whisper stays as the fallback for other languages.
+WHISPER = "mlx-community/parakeet-tdt-0.6b-v3"
+WHISPER_FALLBACK = "mlx-community/whisper-large-v3-turbo-asr-fp16"
 def _find_ffmpeg(name="ffmpeg"):
     """FFMPEG env var > PATH > Hermes-bundled build. Portable across machines."""
     import os, shutil, glob
@@ -142,8 +145,8 @@ def srt_time(s):
     return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
 
 
-def whisper(path):
-    body, ctype = multipart({"model": WHISPER}, path)
+def whisper(path, model=None):
+    body, ctype = multipart({"model": model or WHISPER}, path)
     req = urllib.request.Request(SERVER + "/v1/audio/transcriptions", data=body,
                                  headers={"Content-Type": ctype}, method="POST")
     try:
@@ -161,7 +164,7 @@ def cmd_transcribe(a):
     check_server()
     if not os.path.isfile(a.file):
         die(f"file not found: {a.file}")
-    d = whisper(a.file)
+    d = whisper(a.file, getattr(a, "model", None))
     if a.json:
         print(json.dumps(d, indent=1))
     elif a.srt:
@@ -248,7 +251,8 @@ def main():
     s.add_argument("--ref-text", dest="ref_text", help="exact words in --ref (auto-transcribed with Whisper when omitted)")
     s.add_argument("--out"); s.add_argument("--model", default=CLONE_MODEL); s.set_defaults(fn=cmd_clone)
 
-    s = sp.add_parser("transcribe", help="Whisper STT via server"); s.add_argument("file")
+    s = sp.add_parser("transcribe", help="STT via server (Parakeet default; --model for Whisper / Qwen3-ASR)"); s.add_argument("file")
+    s.add_argument("--model", default=None, help=f"STT model id; default {WHISPER}; non-European languages: {WHISPER_FALLBACK} or mlx-community/Qwen3-ASR-1.7B-8bit")
     s.add_argument("--srt", action="store_true"); s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_transcribe)
 

@@ -1,5 +1,31 @@
 # Project state — read this first
 
+## 2026-11-02 (desktop): Services tab → Endpoints ("point other programs here")
+
+`control/panel.py` gained an `ENDPOINTS` list + `GET /api/endpoints`; the **Services** tab renders one
+card per service with that service's **endpoint tiles inside it** — mlx-audio holds TTS
+`/v1/audio/speech`, STT `/v1/audio/transcriptions` and voice clone; then ComfyUI `:8188`, writer LLM
+`:8081/v1`, VLM `:8082/v1`, panel API `:8787`. Each tile has **Copy** and a **curl** panel
+(method/path/schema + a working snippet); **Copy all → .env / JSON** and the host switch sit above the
+grid and flip every link between `127.0.0.1` and the LAN IP (`192.168.1.44`). The service card's status
+pill is the start/stop toggle. Cards re-render only when the host changes — status updates patch the pill
+and port line in place, so an open log or curl panel is not collapsed by the 2.5 s poll.
+Verified both toggle directions on the pill (ComfyUI came back responding in 6 s).
+Verified live: TTS returned a 24 kHz wav, STT transcribed `output/voice/clone_*.wav`, `/object_info`
+returned 1033 nodes; clipboards checked by stubbing `navigator.clipboard.writeText`. Caveat: the
+LLM/VLM rows were checked against `tools/llm/scribe` + `tools/vision/see` request bodies, not by
+starting those 16/5 GB models.
+
+## 2026-11-02: BLUE HOUR (browser extraction shooter)
+
+`game/bluehour` — Three.js/TS/Vite FPS, playable at `npm run dev` (:5199). Verified: movement/collision,
+gunplay, AI nav, contracts, extraction, results/restart, 19 unit tests.
+Second pass added: **dialogue** (Meridian radio VO + branching Voss/Kess conversations, 25 Kokoro lines
+generated locally via `tools/gen_vo.sh` → `public/vo/*.mp3`), **Blender-authored infected bodies**
+(`tools/zombie_build.py` → `public/models/zombie.glb`, 11 bone-space parts + face decals + emissive eyes),
+and **post-processing** (bloom + blue-hour grade + vignette/grain, `src/render/post.ts`).
+Skill `browser-3d-game` holds the harness workflow. FPS not measurable here (SwiftShader only).
+
 Last updated: 2026-11-01 late (desktop session) — **studio build-out, round 2**
 
 ## 2026-11-01 (evening): round 2 — what changed since the table below
@@ -14,7 +40,7 @@ Last updated: 2026-11-01 late (desktop session) — **studio build-out, round 2*
 - **Ubuntu port**: `INSTALL-UBUNTU.md` written from the code (speaches + llama-server replace MLX; CUDA ComfyUI). **Not executed anywhere yet.**
 - **Deferred — lip-sync / talking head**: Wan 2.2 S2V 14B is ~30 GB fp8 → ~60 GB bf16 on MPS; not viable on this Mac alongside anything. Run it (or LatentSync) on the RTX 4080 / V100 box instead; template `video_wan2_2_14B_s2v` exists in ComfyUI.
 
-Open items: GGUF edit timing; finish + verify first LoRA; headset test (Godot .exe, WebXR controller picking); run `install.sh` on a clean Mac; run `INSTALL-UBUNTU.md` once on the Precision box.
+Open items: first `gen video --model hyv15` run (graph untested) and GGUF edit timing; finish + verify first LoRA; headset test (Godot .exe, WebXR controller picking); run `install.sh` on a clean Mac; run `INSTALL-UBUNTU.md` once on the Precision box.
 
 ## 2026-11-01: one-stop studio (image · video · 3D · VR · print · sound · music · voice)
 

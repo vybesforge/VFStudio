@@ -2,6 +2,8 @@
 
 Image · video · 3D · VR · 3D-print · sound FX · music · voice, all generated **on the
 machine** (no cloud inference), all drivable by an AI agent through plain CLIs and a web panel.
+**What this repo is:** the studio *loadout* — installer, model manifest, CLIs, panel, skills — so another machine can run the same AI-drivable asset pipeline. **What it is not:** the things made with it. Games (`game/<project>`), models, GLBs, LoRAs, datasets and outputs stay local by `.gitignore`.
+
 Built and measured on an M3 Max / 64 GB; see [INSTALL.md](INSTALL.md) to reproduce it on another Mac, or [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md) for an NVIDIA Linux box (ported on paper, not yet run).
 
 ```

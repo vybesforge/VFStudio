@@ -13,10 +13,15 @@ metadata:
 
 # studio-game — Godot 4.7 game toolkit (local, headless-checkable)
 
+> **Save deliverables under `~/media-stack/game/<project>/ (the panel lists it; web builds get a Play button)`** — that is where the VF Studio panel (http://127.0.0.1:8787) looks; files elsewhere never show up or preview there. Any subfolder inside is fine.
+
 Two ready Godot 4.7.2 templates (2D platformer, 3D first/third-person), a script that stamps a new
 project from them, and the exact commands to run, self-test, import GLBs / sprite sheets, and export
 macOS + Windows builds without opening the editor. Everything runs on this Mac; nothing phones home.
 For making the *assets* (sprite sheets, rigged GLBs, 2D animation) load `studio-animation`.
+
+## Where projects live (so the VF Studio panel sees them)
+Put every game under **`~/media-stack/game/<name>/`** (Godot: has `project.godot`; web: has `package.json` or `index.html`). The panel's *3D & VR → Game projects* card lists them automatically and merges their GLB/audio/sprite files into the galleries. For a web game run the production build (`npm run build` → `dist/index.html`) — the panel serves it at `http://127.0.0.1:8787/files/game/<name>/dist/index.html` behind a **▶ Play in browser** button. Projects elsewhere on disk are invisible to the panel.
 
 ## When to Use
 - "Make me a 2D platformer / 3D walking sim / game prototype" → Recipe 1, then edit scripts.
