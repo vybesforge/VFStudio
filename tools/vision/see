@@ -1,0 +1,111 @@
+#!/Users/dcruse/media-stack/llm/.venv/bin/python
+"""see — local vision: describe / question images, capture from the camera. mlx-vlm server :8082.
+
+  see describe photo.jpg                       detailed description
+  see ask photo.jpg "what breed is this hog?"  answer a question about the image
+  see compare a.png b.png "which has sharper texture?"
+  see ocr scan.png                             transcribe all visible text
+  see snap [--out shot.jpg] [--device N] [--warmup 2]   capture a frame from the Mac camera (imagesnap)
+  see snap --ask "what am I holding?"          capture then ask in one go
+  see devices                                  list cameras
+  see status
+
+Output is one JSON line {"ok":true,"text":...} unless stdout is a TTY (then plain text).
+Nothing leaves the machine: the VLM runs in MLX on this Mac, images are sent to 127.0.0.1 only.
+"""
+import argparse, base64, json, os, shutil, subprocess, sys, time, urllib.request
+
+HOST = os.environ.get("VLM_HOST", "http://127.0.0.1:8082")
+MODEL = os.environ.get("VLM_MODEL", "mlx-community/Qwen3-VL-8B-Instruct-4bit")
+OUT = os.path.expanduser("~/media-stack/output/camera")
+
+
+def die(m, c=2):
+    print(json.dumps({"ok": False, "error": m})); sys.exit(c)
+
+
+def up():
+    try:
+        urllib.request.urlopen(HOST + "/v1/models", timeout=3); return True
+    except Exception:
+        return False
+
+
+def img_part(path):
+    if not os.path.exists(path):
+        die(f"no such image: {path}")
+    ext = path.rsplit(".", 1)[-1].lower()
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/png")
+    b64 = base64.b64encode(open(path, "rb").read()).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+
+
+def ask(images, question, max_tokens=700, temp=0.2):
+    content = [img_part(p) for p in images] + [{"type": "text", "text": question}]
+    payload = {"model": MODEL, "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens, "temperature": temp, "stream": False}
+    req = urllib.request.Request(HOST + "/v1/chat/completions", data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=600) as r:
+        j = json.loads(r.read())
+    return j["choices"][0]["message"]["content"].strip()
+
+
+def snap(out=None, device=None, warmup=2.0):
+    exe = shutil.which("imagesnap") or "/opt/homebrew/bin/imagesnap"
+    if not os.path.exists(exe):
+        die("imagesnap not installed: brew install imagesnap")
+    os.makedirs(OUT, exist_ok=True)
+    out = out or os.path.join(OUT, f"snap_{time.strftime('%Y%m%d_%H%M%S')}.jpg")
+    cmd = [exe, "-q", "-w", str(warmup)] + (["-d", device] if device else []) + [out]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 or not os.path.exists(out):
+        die(f"camera capture failed: {r.stderr.strip() or r.stdout.strip()} (grant Terminal camera access in System Settings > Privacy)")
+    return out
+
+
+def emit(d, plain=None):
+    if sys.stdout.isatty() and plain is not None:
+        print(plain)
+    else:
+        print(json.dumps(d))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="see", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("describe"); s.add_argument("image"); s.add_argument("--max-tokens", type=int, default=600)
+    s = sub.add_parser("ask"); s.add_argument("image"); s.add_argument("question"); s.add_argument("--max-tokens", type=int, default=500)
+    s = sub.add_parser("compare"); s.add_argument("a"); s.add_argument("b"); s.add_argument("question")
+    s = sub.add_parser("ocr"); s.add_argument("image")
+    s = sub.add_parser("snap"); s.add_argument("--out"); s.add_argument("--device"); s.add_argument("--warmup", type=float, default=2.0); s.add_argument("--ask")
+    sub.add_parser("devices"); sub.add_parser("status")
+    a = p.parse_args()
+
+    if a.cmd == "status":
+        print(json.dumps({"server": HOST, "up": up(), "model": MODEL, "camera": bool(shutil.which("imagesnap"))})); return
+    if a.cmd == "devices":
+        print(subprocess.run([shutil.which("imagesnap") or "imagesnap", "-l"], capture_output=True, text=True).stdout); return
+    if a.cmd == "snap":
+        path = snap(a.out, a.device, a.warmup)
+        if not a.ask:
+            emit({"ok": True, "file": path}, path); return
+        if not up():
+            die(f"vision VLM not running at {HOST}. Start it: stack start vision")
+        t0 = time.time(); text = ask([path], a.ask)
+        emit({"ok": True, "file": path, "text": text, "seconds": round(time.time() - t0, 1)}, text); return
+    if not up():
+        die(f"vision VLM not running at {HOST}. Start it: stack start vision   (first load ~30 s)")
+    t0 = time.time()
+    if a.cmd == "describe":
+        text = ask([a.image], "Describe this image in detail: subject, setting, composition, lighting, style, and any text or defects. Be specific and concrete.", a.max_tokens)
+    elif a.cmd == "ask":
+        text = ask([a.image], a.question, a.max_tokens)
+    elif a.cmd == "compare":
+        text = ask([a.a, a.b], "Two images are given in order (first, second). " + a.question)
+    elif a.cmd == "ocr":
+        text = ask([a.image], "Transcribe all text visible in this image exactly, preserving line breaks. Output only the text.", 1200, 0.0)
+    emit({"ok": True, "cmd": a.cmd, "text": text, "seconds": round(time.time() - t0, 1)}, text)
+
+
+if __name__ == "__main__":
+    main()

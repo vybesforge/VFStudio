@@ -10,6 +10,7 @@
 #   1. Homebrew (if missing — asks for your password once), uv, ffmpeg, node, sox, git-lfs
 #   2. ComfyUI (pinned to COMFYUI_COMMIT) + torch/MPS venv            -> :8188
 #   3. mlx-audio venv (TTS / STT / voice clone / music)              -> :8000
+#      mlx-lm / mlx-vlm venv: uncensored writer LLM -> :8081, vision VLM (+camera) -> :8082
 #   4. tools venv (build123d, trimesh, moviepy, pedalboard, librosa…) for the CLIs
 #   5. GUI apps: Blender, Godot (+ export templates), OrcaSlicer, Krita, Audacity, Inkscape,
 #      OpenSCAD, MeshLab       (skip with --no-apps)
@@ -45,7 +46,7 @@ fi
 eval "$(/opt/homebrew/bin/brew shellenv)"
 grep -q 'brew shellenv' "$HOME/.zprofile" 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
 export HOMEBREW_NO_AUTO_UPDATE=1
-for f in uv ffmpeg node sox git-lfs; do have "$f" || brew install "$f"; done
+for f in uv ffmpeg node sox git-lfs imagesnap; do have "$f" || brew install "$f"; done
 ok "brew $(brew --version | head -1 | cut -d' ' -f2) · uv $(uv --version | cut -d' ' -f2) · ffmpeg · node $(node --version) · sox"
 
 # ─── 2. ComfyUI ─────────────────────────────────────────────────────────────────
@@ -72,6 +73,14 @@ if [ ! -x "$STACK/audio/.venv/bin/python" ]; then
 fi
 "$STACK/audio/.venv/bin/python" -c "import mlx_audio, fastapi, websocket" && ok "mlx-audio $("$STACK/audio/.venv/bin/python" -c 'import importlib.metadata as m;print(m.version("mlx-audio"))')"
 
+# ─── 3b. local LLM + VLM (MLX) ───────────────────────────────────────────────────
+say "mlx-lm / mlx-vlm (writer LLM :8081, vision VLM :8082)"
+if [ ! -x "$STACK/llm/.venv/bin/python" ]; then
+  mkdir -p "$STACK/llm"; uv venv --python 3.12 "$STACK/llm/.venv"
+fi
+uv pip install -q --python "$STACK/llm/.venv/bin/python" mlx-lm mlx-vlm huggingface_hub
+ok "mlx-lm $("$STACK/llm/.venv/bin/python" -c 'import importlib.metadata as m;print(m.version("mlx-lm"))') · mlx-vlm $("$STACK/llm/.venv/bin/python" -c 'import importlib.metadata as m;print(m.version("mlx-vlm"))')"
+
 # ─── 4. tools venv ──────────────────────────────────────────────────────────────
 say "tools venv (CAD, mesh, video, audio libs)"
 if [ ! -x "$STACK/tools/.venv/bin/python" ]; then
@@ -86,6 +95,7 @@ for f in tools/comfy/gen tools/print/slice tools/video/vid tools/video/transcrib
   sed -i '' "1s|^#!.*|#!$STACK/tools/.venv/bin/python|" "$STACK/$f"; chmod +x "$STACK/$f"
 done
 sed -i '' "1s|^#!.*|#!$STACK/audio/.venv/bin/python|" "$STACK/tools/voice/voice"; chmod +x "$STACK/tools/voice/voice"
+for f in tools/llm/write tools/vision/see; do sed -i '' "1s|^#!.*|#!$STACK/llm/.venv/bin/python|" "$STACK/$f"; chmod +x "$STACK/$f"; done
 chmod +x "$STACK"/bin/* "$STACK"/tools/vr/* "$STACK"/tools/print/* 2>/dev/null || true
 
 # ─── 5. apps ────────────────────────────────────────────────────────────────────
@@ -121,8 +131,10 @@ for c in stack fetch-models sync-hermes restore-known-good blender; do ln -sf "$
 ln -sf "$STACK/tools/comfy/gen" "$HOME/.local/bin/gen"
 ln -sf "$STACK/tools/voice/voice" "$HOME/.local/bin/voice"
 ln -sf "$STACK/tools/video/vid" "$HOME/.local/bin/vid"
+ln -sf "$STACK/tools/llm/write" "$HOME/.local/bin/write"
+ln -sf "$STACK/tools/vision/see" "$HOME/.local/bin/see"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile" ;; esac
-ok "gen voice vid stack fetch-models blender -> ~/.local/bin"
+ok "gen voice vid write see stack fetch-models blender -> ~/.local/bin"
 
 # ─── 7. models ──────────────────────────────────────────────────────────────────
 say "models"
@@ -134,6 +146,14 @@ else
       stable-audio-open-1.0 t5-base trellis2-int8 trellis2-shape-vae trellis2-texture-vae dinov3-L birefnet
   echo "   essentials done. Everything else: fetch-models            (full list: fetch-models --list)"
 fi
+# Hugging Face models (LLM, VLM, voice). XET transfer is disabled: with it enabled, weights
+# silently failed to land on this network (metadata only) — plain HTTP downloads at full speed.
+say "Hugging Face models (models/hf-models.txt)"
+export HF_HUB_DISABLE_XET=1
+grep -vE '^\s*(#|$)' "$STACK/models/hf-models.txt" | awk '{print $1}' | while read -r repo; do
+  if [ "$ALL_MODELS" = 0 ] && [[ "$repo" == *27B* ]]; then echo "   skip $repo (27B writer — fetch with --all-models or: hf download $repo)"; continue; fi
+  "$STACK/llm/.venv/bin/hf" download "$repo" >/dev/null 2>&1 && ok "$repo" || echo "   ✗ $repo (re-run install.sh to resume)"
+done
 
 # ─── 8. Hermes ──────────────────────────────────────────────────────────────────
 if [ "$HERMES" = 1 ]; then say "Hermes integration"; "$STACK/bin/sync-hermes" install; fi

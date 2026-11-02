@@ -1,0 +1,25 @@
+[gd_scene load_steps=4 format=3 uid="uid://b2dtpl0player"]
+
+[ext_resource type="Script" path="res://player.gd" id="1_player"]
+[ext_resource type="SpriteFrames" path="res://player/player_frames.tres" id="2_frames"]
+
+[sub_resource type="RectangleShape2D" id="PlayerShape"]
+size = Vector2(16, 44)
+
+[node name="Player" type="CharacterBody2D"]
+script = ExtResource("1_player")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+position = Vector2(0, -32)
+sprite_frames = ExtResource("2_frames")
+animation = &"idle"
+autoplay = "idle"
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -22)
+shape = SubResource("PlayerShape")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(0, -40)
+position_smoothing_enabled = true
+position_smoothing_speed = 6.0

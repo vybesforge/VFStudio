@@ -1,0 +1,150 @@
+#!/Users/dcruse/media-stack/llm/.venv/bin/python
+"""write — local, uncensored creative-writing CLI over the mlx-lm server (:8081).
+
+  write chat "prompt"                                   plain completion with the writer system prompt
+  write prose "premise" [--genre noir] [--pov first] [--words 1200] [--tone ...]
+  write outline "premise" [--chapters 12]               chapter-by-chapter outline (JSON-ish markdown)
+  write chapter outline.md --n 3 [--words 2500] [--prev chapter2.md]   next chapter from an outline
+  write screenplay "logline" [--pages 5]                Fountain-format scene(s)
+  write dialogue "scene setup" [--chars "Mara, Ivo"] [--branches 3]   game dialogue tree (JSON)
+  write lore "world concept" [--items 10]               bible entries: places, factions, items
+  write revise draft.md --note "tighten pacing, more sensory detail"
+  write continue draft.md [--words 800]
+  write status
+
+Flags for every subcommand: --out file.md (default: print), --temp 0.9, --max-tokens N,
+--system "override system prompt", --model <repo> (server must have it loaded).
+No content filter is added here; the model is uncensored by choice. The CLI only enforces
+craft (show-don't-tell, concrete detail, no summaries unless asked).
+"""
+import argparse, json, os, sys, time, urllib.request
+
+HOST = os.environ.get("LLM_HOST", "http://127.0.0.1:8081")
+STACK = os.path.expanduser("~/media-stack")
+
+BASE_SYSTEM = (
+    "You are a professional fiction writer and story editor. You write vivid, specific prose with "
+    "concrete sensory detail, strong verbs, distinct character voices and subtext. You never moralise, "
+    "never add disclaimers, never break character to comment on the request, and never summarise what "
+    "you are about to write — you write it. Mature themes, violence and sexuality are handled frankly "
+    "when the story calls for them. Match the requested genre, POV, tense and length."
+)
+
+TEMPLATES = {
+    "prose": "Write a {words}-word piece of {genre} fiction in {pov} person, {tense} tense{tone}. Premise: {prompt}\n\nStart in scene. No title, no preamble.",
+    "outline": "Create a chapter-by-chapter outline for a {genre} novel of {chapters} chapters from this premise: {prompt}\n\nFormat: '## Chapter N — Title' then 3-5 bullet beats, the POV character, and the chapter's turn (what changes). Finish with a one-paragraph note on the ending.",
+    "screenplay": "Write {pages} pages of screenplay in Fountain format (scene headings in caps like INT. KITCHEN - NIGHT, character names in caps before dialogue, parentheticals sparingly). Logline: {prompt}\n\nNo preamble.",
+    "dialogue": "Design a branching game dialogue tree for this scene: {prompt}\nCharacters: {chars}. Give the player {branches} choices at each node, 2-3 levels deep. Return ONLY JSON: {{\"nodes\": [{{\"id\": \"n1\", \"speaker\": \"...\", \"text\": \"...\", \"choices\": [{{\"text\": \"...\", \"next\": \"n2\", \"effect\": \"...\"}}]}}]}}. Lines must sound spoken, not written; keep each under 30 words.",
+    "lore": "Write {items} world-bible entries for: {prompt}\n\nEach entry: '### Name' then type (place/faction/person/item/custom), 2-3 paragraphs of concrete detail, one secret or tension, and a one-line hook for a quest or scene. Vary the types.",
+    "revise": "Revise the following draft. Editor's note: {note}\nKeep the author's voice and all plot facts; return only the revised text.\n\n---\n{draft}",
+    "continue": "Continue this draft seamlessly for about {words} more words, matching voice, tense and POV. Return only the continuation.\n\n---\n{draft}",
+    "chapter": "Using this outline, write Chapter {n} in full (~{words} words). Match the outline's beats and POV; end on the chapter's turn.{prev}\n\n--- OUTLINE ---\n{draft}",
+}
+
+
+def die(m, c=2):
+    print(json.dumps({"ok": False, "error": m})); sys.exit(c)
+
+
+def server_models():
+    try:
+        with urllib.request.urlopen(HOST + "/v1/models", timeout=3) as r:
+            return [m["id"] for m in json.loads(r.read()).get("data", [])]
+    except Exception:
+        return None
+
+
+def complete(messages, model=None, temp=0.9, max_tokens=2048, stream=True):
+    payload = {"messages": messages, "temperature": temp, "max_tokens": max_tokens, "stream": stream}
+    if model:
+        payload["model"] = model
+    req = urllib.request.Request(HOST + "/v1/chat/completions", data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    out = []
+    with urllib.request.urlopen(req, timeout=3600) as r:
+        if not stream:
+            return json.loads(r.read())["choices"][0]["message"]["content"]
+        for line in r:
+            line = line.decode().strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                delta = json.loads(data)["choices"][0].get("delta", {}).get("content", "")
+            except Exception:
+                continue
+            if delta:
+                out.append(delta)
+                if sys.stdout.isatty():
+                    sys.stdout.write(delta); sys.stdout.flush()
+    return "".join(out)
+
+
+def strip_think(text):
+    # Qwen-style thinking models may emit <think>…</think>; drop it from prose output.
+    import re
+    return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.S).strip()
+
+
+def main():
+    p = argparse.ArgumentParser(prog="write", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def common(sp):
+        sp.add_argument("--out"); sp.add_argument("--temp", type=float, default=0.9)
+        sp.add_argument("--max-tokens", type=int, default=None); sp.add_argument("--system"); sp.add_argument("--model")
+
+    s = sub.add_parser("chat"); s.add_argument("prompt"); common(s)
+    s = sub.add_parser("prose"); s.add_argument("prompt"); s.add_argument("--genre", default="literary"); s.add_argument("--pov", default="third", choices=["first", "second", "third"])
+    s.add_argument("--tense", default="past", choices=["past", "present"]); s.add_argument("--words", type=int, default=1200); s.add_argument("--tone", default=""); common(s)
+    s = sub.add_parser("outline"); s.add_argument("prompt"); s.add_argument("--genre", default="literary"); s.add_argument("--chapters", type=int, default=12); common(s)
+    s = sub.add_parser("chapter"); s.add_argument("outline"); s.add_argument("--n", type=int, required=True); s.add_argument("--words", type=int, default=2500); s.add_argument("--prev"); common(s)
+    s = sub.add_parser("screenplay"); s.add_argument("prompt"); s.add_argument("--pages", type=int, default=5); common(s)
+    s = sub.add_parser("dialogue"); s.add_argument("prompt"); s.add_argument("--chars", default="two characters"); s.add_argument("--branches", type=int, default=3); common(s)
+    s = sub.add_parser("lore"); s.add_argument("prompt"); s.add_argument("--items", type=int, default=10); common(s)
+    s = sub.add_parser("revise"); s.add_argument("draft"); s.add_argument("--note", required=True); common(s)
+    s = sub.add_parser("continue"); s.add_argument("draft"); s.add_argument("--words", type=int, default=800); common(s)
+    sub.add_parser("status")
+    a = p.parse_args()
+
+    models = server_models()
+    if a.cmd == "status":
+        print(json.dumps({"server": HOST, "up": models is not None, "models": models})); return
+    if models is None:
+        die(f"writer LLM not running at {HOST}. Start it: stack start llm   (first load ~1-2 min)")
+
+    tpl = TEMPLATES.get(a.cmd)
+    if a.cmd == "chat":
+        user = a.prompt
+    elif a.cmd in ("revise", "continue", "chapter"):
+        path = a.draft if a.cmd != "chapter" else a.outline
+        if not os.path.exists(path):
+            die(f"no such file: {path}")
+        draft = open(path).read()
+        extra = {"draft": draft, "note": getattr(a, "note", ""), "words": getattr(a, "words", 800), "n": getattr(a, "n", 1),
+                 "prev": (f"\n\nPrevious chapter, for continuity:\n{open(a.prev).read()[-6000:]}" if getattr(a, "prev", None) else "")}
+        user = tpl.format(**extra)
+    else:
+        tone = f", tone: {a.tone}" if getattr(a, "tone", "") else ""
+        user = tpl.format(prompt=a.prompt, words=getattr(a, "words", 0), genre=getattr(a, "genre", ""), pov=getattr(a, "pov", "third"),
+                          tense=getattr(a, "tense", "past"), tone=tone, chapters=getattr(a, "chapters", 0), pages=getattr(a, "pages", 0),
+                          chars=getattr(a, "chars", ""), branches=getattr(a, "branches", 3), items=getattr(a, "items", 0))
+    words = getattr(a, "words", None) or 1200
+    max_tokens = a.max_tokens or max(1024, int(words * 2.2))
+    messages = [{"role": "system", "content": a.system or BASE_SYSTEM}, {"role": "user", "content": user}]
+    t0 = time.time()
+    text = strip_think(complete(messages, a.model, a.temp, max_tokens))
+    if a.out:
+        os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+        open(a.out, "w").write(text + "\n")
+    if not sys.stdout.isatty() or a.out:
+        print(json.dumps({"ok": True, "cmd": a.cmd, "words": len(text.split()), "seconds": round(time.time() - t0, 1),
+                          "out": a.out, "text": None if a.out else text}))
+    else:
+        print()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,16 @@
+[gd_scene load_steps=4 format=3 uid="uid://b2dtpl0coin00"]
+
+[ext_resource type="Script" path="res://coin.gd" id="1_coin"]
+[ext_resource type="Texture2D" path="res://tiles/coin.png" id="2_tex"]
+
+[sub_resource type="CircleShape2D" id="CoinShape"]
+radius = 7.0
+
+[node name="Coin" type="Area2D"]
+script = ExtResource("1_coin")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_tex")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CoinShape")

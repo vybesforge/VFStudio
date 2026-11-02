@@ -40,6 +40,8 @@ JOBS_LOG = STACK / "logs" / "studio-jobs.jsonl"
 GEN = STACK / "tools" / "comfy" / "gen"
 VOICE = STACK / "tools" / "voice" / "voice"
 VID = STACK / "tools" / "video" / "vid"
+WRITE = STACK / "tools" / "llm" / "write"
+SEE = STACK / "tools" / "vision" / "see"
 FFMPEG = next((p for p in (HOME / ".hermes" / "tools").glob("ffmpeg-*/ffmpeg")), None)
 
 router = APIRouter(prefix="/api/studio")
@@ -49,6 +51,9 @@ TOOLS = [
     ("gen", GEN, "ComfyUI pipelines: image / control / upscale / video / sfx / music"),
     ("voice", VOICE, "TTS, voice clone, transcribe, enhance (mlx-audio)"),
     ("vid", VID, "ffmpeg wrapper: trim / concat / captions / gif / loudness"),
+    ("write", WRITE, "uncensored creative writing over the local LLM (prose/outline/screenplay/dialogue/lore)"),
+    ("see", SEE, "local vision: describe / ask / ocr / compare, camera snap"),
+    ("imagesnap", Path("/opt/homebrew/bin/imagesnap"), "camera capture"),
     ("vse_build.py", STACK / "tools" / "video" / "vse_build.py", "Blender VSE timeline assembler"),
     ("slice", STACK / "tools" / "print" / "slice", "OrcaSlicer CLI: STL → G-code / 3MF (bambu | generic)"),
     ("meshcheck.py", STACK / "tools" / "print" / "meshcheck.py", "watertight / volume / repair check for STL"),
@@ -80,6 +85,8 @@ AUDIO_MODELS = [
     ("mlx-community/chatterbox-turbo-fp16", "voice cloning (fallback)"),
     ("mlx-community/whisper-large-v3-turbo-asr-fp16", "speech-to-text"),
     ("mlx-community/MiniMax-Music3-8bit", "music (mlx, `stack music`)"),
+    ("mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit", "writer LLM (uncensored, :8081)"),
+    ("mlx-community/Qwen3-VL-8B-Instruct-4bit", "vision VLM (:8082)"),
 ]
 
 
@@ -126,6 +133,8 @@ EXT = {
     "sound": {".wav", ".flac", ".mp3", ".ogg", ".opus"},
     "voice": {".wav", ".flac", ".mp3"},
     "3d": {".glb", ".gltf", ".obj", ".stl"},
+    "text": {".md", ".txt", ".json", ".fountain"},
+    "camera": {".jpg", ".jpeg", ".png"},
 }
 # where each modality's files live; (dir, url mount)
 ROOTS = {
@@ -136,6 +145,8 @@ ROOTS = {
     "sound": [(OUT / "sfx", "/files/output/sfx"), (OUT / "music", "/files/output/music"),
               (COMFY_OUT / "audio", "/files/comfy_output/audio"), (STACK / "scratch", "/files/scratch")],
     "voice": [(OUT / "voice", "/files/output/voice"), (STACK / "scratch" / "voice-test", "/files/scratch/voice-test")],
+    "text": [(OUT / "text", "/files/output/text")],
+    "camera": [(OUT / "camera", "/files/output/camera"), (OUT / "image", "/files/output/image")],
     "3d": [(STACK / "vr", "/vr"), (COMFY_OUT / "3d", "/files/comfy_output/3d"), (OUT / "3d", "/files/output/3d"),
            (STACK / "scratch" / "print-test", "/files/scratch/print-test"), (STACK / "scratch" / "vr-test", "/files/scratch/vr-test")],
 }
@@ -291,6 +302,27 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
         return cmd
     if kind == "transcribe":
         return [str(VOICE), "transcribe", a["file"]] + (["--srt"] if a.get("srt") else [])
+    if kind == "write":
+        mode = a.get("mode", "prose")
+        out = OUT / "text" / f"{mode}_{time.strftime('%Y%m%d_%H%M%S')}.md"
+        cmd = [str(WRITE), mode]
+        if mode in ("revise", "continue", "chapter"):
+            cmd.append(a["file"])
+            if mode == "revise": cmd += ["--note", a.get("note", "tighten and sharpen")]
+            if mode == "chapter": cmd += ["--n", str(a.get("n", 1))]
+        else:
+            cmd.append(a["prompt"])
+        for k in ("genre", "pov", "tense", "tone", "words", "chapters", "pages", "chars", "branches", "items", "temp"):
+            if a.get(k) not in (None, "", False):
+                cmd += [f"--{k}", str(a[k])]
+        return cmd + ["--out", str(out)]
+    if kind == "see":
+        op = a.get("op", "describe")
+        if op == "snap":
+            return [str(SEE), "snap"] + (["--ask", a["question"]] if a.get("question") else [])
+        if op == "ask":
+            return [str(SEE), "ask", a["image"], a["question"]]
+        return [str(SEE), op, a["image"]]
     raise HTTPException(400, f"unknown kind {kind}")
 
 
@@ -320,9 +352,14 @@ def _run_job(job: dict):
             s = line.strip().split(" ")[0]
             if s.startswith("/") and Path(s).exists():
                 files.append(s)
+    if result and result.get("out") and os.path.exists(str(result["out"])):
+        files.append(result["out"])
+    if result and result.get("file") and os.path.exists(str(result["file"])) and result["file"] not in files:
+        files.append(result["file"])
     with _jlock:
         job.update(status="done" if rc == 0 and (result is None or result.get("ok", True)) else "failed",
                    rc=rc, finished=time.time(), result=result, files=files,
+                   text=(result or {}).get("text") if result else None,
                    log_tail=text[-1500:], pid=None)
     with open(JOBS_LOG, "a") as f:
         f.write(json.dumps({k: v for k, v in job.items() if k != "log_tail"}) + "\n")
@@ -333,7 +370,8 @@ def run(payload: dict = Body(...)):
     kind = payload.get("kind")
     args = payload.get("args") or {}
     cmd = _build_cmd(kind, args)
-    (OUT / "voice").mkdir(parents=True, exist_ok=True)
+    for d in ("voice", "text", "camera"):
+        (OUT / d).mkdir(parents=True, exist_ok=True)
     job = {"id": uuid.uuid4().hex[:8], "kind": kind, "args": args, "cmd": cmd, "status": "running",
            "started": time.time(), "finished": None, "pid": None, "result": None, "files": [], "log_tail": ""}
     with _jlock:

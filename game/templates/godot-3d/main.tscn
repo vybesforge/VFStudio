@@ -1,0 +1,66 @@
+[gd_scene load_steps=8 format=3 uid="uid://b3dtpl0main00"]
+
+[ext_resource type="Script" path="res://main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://player.tscn" id="2_player"]
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 1
+background_color = Color(0.5, 0.65, 0.85, 1)
+ambient_light_source = 1
+ambient_light_color = Color(0.6, 0.6, 0.65, 1)
+ambient_light_energy = 0.7
+
+[sub_resource type="StandardMaterial3D" id="FloorMat"]
+albedo_color = Color(0.35, 0.4, 0.3, 1)
+
+[sub_resource type="PlaneMesh" id="FloorMesh"]
+material = SubResource("FloorMat")
+size = Vector2(40, 40)
+
+[sub_resource type="BoxShape3D" id="FloorShape"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="BoxMesh" id="CrateMesh"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 6, 0)
+light_energy = 1.2
+shadow_enabled = true
+
+[node name="Fill" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 3, -2)
+light_energy = 2.0
+omni_range = 12.0
+
+[node name="Floor" type="StaticBody3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("FloorMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+shape = SubResource("FloorShape")
+
+[node name="Crate" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -3)
+mesh = SubResource("CrateMesh")
+
+[node name="Model" type="Node3D" parent="."]
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 2)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 8.0
+offset_top = 6.0
+offset_right = 600.0
+offset_bottom = 30.0
+text = "WASD move, mouse look (click), Space jump, V = 1st/3rd person"

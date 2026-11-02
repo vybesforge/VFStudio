@@ -80,6 +80,8 @@
   <button data-tab="3d">3D &amp; VR</button>
   <button data-tab="sound">Sound</button>
   <button data-tab="voice">Voice</button>
+  <button data-tab="write">Write</button>
+  <button data-tab="vision">Vision</button>
   <button data-tab="models">Models</button>
   <button data-tab="services">Services</button>
   <button data-tab="resources">Resources</button>
@@ -197,6 +199,57 @@
   <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('voice')">Refresh</button></div><div class="gal" id="gal-voice"></div></div>
 </div></section>
 
+<!-- WRITE -->
+<section class="tab" id="tab-write"><div class="two">
+  <div>
+    <div class="card"><div class="name">Creative writing <span class="tag">local · uncensored</span></div>
+      <div class="desc" id="llm-state">checking writer LLM…</div>
+      <label>mode</label><select id="wr-mode" onchange="wrMode()">
+        <option value="prose">prose — scene / short fiction</option><option value="outline">outline — chapter plan</option>
+        <option value="screenplay">screenplay — Fountain</option><option value="dialogue">dialogue — game tree (JSON)</option>
+        <option value="lore">lore — world bible entries</option><option value="chat">chat — free prompt</option>
+        <option value="continue">continue — extend a draft file</option><option value="revise">revise — edit a draft file</option></select>
+      <label id="wr-prompt-l">premise / prompt</label><textarea id="wr-prompt" style="min-height:110px">A lighthouse keeper discovers the fog is listening.</textarea>
+      <div id="wr-file-row" style="display:none"><label>draft file path (.md)</label><input id="wr-file" placeholder="/Users/dcruse/media-stack/output/text/prose_….md"><label>editor's note (revise)</label><input id="wr-note" placeholder="tighten pacing, more sensory detail"></div>
+      <div class="fields">
+        <div><label>genre</label><input id="wr-genre" value="literary horror"></div><div><label>tone</label><input id="wr-tone" placeholder="dry, slow-burn"></div>
+        <div><label>POV</label><select id="wr-pov"><option>third</option><option>first</option><option>second</option></select></div>
+        <div><label>tense</label><select id="wr-tense"><option>past</option><option>present</option></select></div>
+        <div><label>words</label><input id="wr-words" value="900"></div><div><label>temperature</label><input id="wr-temp" value="0.9"></div>
+        <div><label>chapters (outline)</label><input id="wr-chapters" value="12"></div><div><label>pages (screenplay)</label><input id="wr-pages" value="4"></div>
+        <div><label>characters (dialogue)</label><input id="wr-chars" placeholder="Mara, Ivo"></div><div><label>entries (lore)</label><input id="wr-items" value="8"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="writeJob()">Write</button></div>
+      <div class="hint">CLI: <code>write prose "premise" --genre noir --words 1200</code> · outputs saved to <code>output/text/</code>. 27B model: ~15 tok/s; a 900-word scene ≈ 1-2 min.</div>
+    </div>
+    <div id="jobs-write" class="card" style="margin-top:12px"></div>
+  </div>
+  <div><div class="row"><h2 style="margin:0">Latest text</h2><button onclick="loadGallery('text')">Refresh</button></div>
+    <pre id="wr-result" style="max-height:60vh;min-height:200px;font-size:13px;line-height:1.55;color:var(--fg)">(results appear here)</pre>
+    <div class="gal" id="gal-text" style="margin-top:12px"></div></div>
+</div></section>
+
+<!-- VISION -->
+<section class="tab" id="tab-vision"><div class="two">
+  <div>
+    <div class="card"><div class="name">Look at an image <span class="tag">local VLM</span></div>
+      <div class="desc" id="vlm-state">checking vision VLM…</div>
+      <label>image path (or click a gallery item → "ask")</label><input id="vi-image" placeholder="/Users/dcruse/media-stack/output/image/….png">
+      <label>question</label><input id="vi-q" value="Describe this image. Any defects or artifacts?">
+      <div class="btns"><button class="primary" onclick="runJob('see',{op:'ask',image:v('vi-image'),question:v('vi-q')})">Ask</button>
+        <button onclick="runJob('see',{op:'describe',image:v('vi-image')})">Describe</button><button onclick="runJob('see',{op:'ocr',image:v('vi-image')})">OCR</button></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="name">Camera</div><div class="desc">FaceTime HD camera via imagesnap → <code>output/camera/</code>. macOS will ask for camera permission the first time.</div>
+      <div class="btns"><button class="primary" onclick="runJob('see',{op:'snap'})">Snap</button><button onclick="runJob('see',{op:'snap',question:v('vi-q')})">Snap &amp; ask</button></div>
+      <div class="hint">CLI: <code>see snap --ask "what am I holding?"</code> · <code>see describe photo.jpg</code></div>
+    </div>
+    <div id="jobs-vision" class="card" style="margin-top:12px"></div>
+  </div>
+  <div><div class="row"><h2 style="margin:0">Answer</h2><button onclick="loadGallery('camera')">Refresh</button></div>
+    <pre id="vi-result" style="max-height:40vh;min-height:120px;font-size:13px;line-height:1.55;color:var(--fg)">(answers appear here)</pre>
+    <h2>Camera shots &amp; recent images</h2><div class="gal" id="gal-camera"></div></div>
+</div></section>
+
 <!-- MODELS -->
 <section class="tab" id="tab-models">
   <div class="card" id="inv-summary"></div>
@@ -235,12 +288,12 @@ function flash(m){const d=document.createElement('div');d.textContent=m;d.style.
 
 // tabs
 let current='image';
-const KIND_TAB={image:'image',control:'image',upscale:'image',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice'};
+const KIND_TAB={image:'image',control:'image',upscale:'image',video:'video',sfx:'sound',music:'sound',say:'voice',clone:'voice',transcribe:'voice',write:'write',see:'vision'};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.dataset.tab;
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('active',s.id==='tab-'+current));
   onTab(current);});
-function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='models') loadInventory(); if(t==='services') refreshServices(); if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
+function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='models') loadInventory(); if(t==='services') refreshServices(); if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
 
 // progress
 async function refreshProgress(){
@@ -265,6 +318,15 @@ async function runJob(kind,args){
   if(!j.ok){ flash(j.detail||'failed'); return; }
   flash('started: '+j.cmd.slice(0,3).join(' ')+' …'); refreshJobs();
 }
+function wrMode(){ const m=v('wr-mode'); const f=['continue','revise'].includes(m); $('wr-file-row').style.display=f?'block':'none'; $('wr-prompt').parentElement&&($('wr-prompt').style.display=f?'none':'block'); $('wr-prompt-l').style.display=f?'none':'block'; }
+async function writeJob(){ const m=v('wr-mode'); const a={mode:m,prompt:v('wr-prompt'),genre:v('wr-genre'),tone:v('wr-tone'),pov:v('wr-pov'),tense:v('wr-tense'),words:v('wr-words'),temp:v('wr-temp'),chapters:v('wr-chapters'),pages:v('wr-pages'),chars:v('wr-chars'),items:v('wr-items'),file:v('wr-file'),note:v('wr-note')};
+  if(m==='chat'||m==='continue'||m==='revise'){ for(const k of ['genre','tone','pov','tense','chapters','pages','chars','items']) delete a[k]; }
+  if(m!=='prose'){ delete a.pov; delete a.tense; delete a.tone; } if(!['prose','continue'].includes(m)) delete a.words;
+  if(m!=='outline') delete a.chapters; if(m!=='screenplay') delete a.pages; if(m!=='dialogue') delete a.chars; if(m!=='lore') delete a.items; if(!['outline','prose'].includes(m)) delete a.genre;
+  $('wr-result').textContent='writing…'; runJob('write',a); }
+async function svcState(){ try{ const s=await (await fetch('/api/status')).json(); const l=s.services.llm, vv=s.services.vision;
+  $('llm-state').innerHTML=`<span class="dot ${l.responding?'on':'off'}"></span>${l.label} :${l.port} — ${l.responding?'running':'stopped'} ${l.responding?'':'<button onclick="act(\'start/llm\');setTimeout(svcState,3000)">Start (loads ~16 GB, 1-2 min)</button>'}`;
+  $('vlm-state').innerHTML=`<span class="dot ${vv.responding?'on':'off'}"></span>${vv.label} :${vv.port} — ${vv.responding?'running':'stopped'} ${vv.responding?'':'<button onclick="act(\'start/vision\');setTimeout(svcState,3000)">Start (~5 GB, ~30 s)</button>'}`; }catch(e){} }
 async function cloneJob(){ runJob('clone',{ref:v('vo-ref'),ref_text:v('vo-reftext'),text:v('vo-text')}); }
 async function cancelJob(id){ await fetch('/api/studio/jobs/'+id+'/cancel',{method:'POST'}); flash('cancel sent'); refreshJobs(); }
 let lastJobStates={};
@@ -274,7 +336,8 @@ async function refreshJobs(){
   for(const job of j.jobs){ const t=KIND_TAB[job.kind]||'image'; (byTab[t]=byTab[t]||[]).push(job);
     if(lastJobStates[job.id] && lastJobStates[job.id]!==job.status && job.status!=='running'){ flash(`${job.kind} ${job.status} (${job.elapsed}s)`); loadGallery(t); }
     lastJobStates[job.id]=job.status; }
-  for(const t of ['image','video','sound','voice']){
+  for(const job of j.jobs){ if(job.status==='done'&&job.text){ if(job.kind==='write'&&$('wr-result').dataset.id!==job.id){$('wr-result').textContent=job.text;$('wr-result').dataset.id=job.id;} if(job.kind==='see'&&$('vi-result').dataset.id!==job.id){$('vi-result').textContent=job.text;$('vi-result').dataset.id=job.id;} } }
+  for(const t of ['image','video','sound','voice','write','vision']){
     const el=$('jobs-'+t); if(!el) continue; const list=(byTab[t]||[]).slice(0,6);
     el.innerHTML='<div class="name" style="font-size:13px">Jobs</div>'+(list.length?list.map(job=>`<div class="job"><span class="chip ${job.status==='running'?'run':job.status}">${job.status}</span>
       <span style="flex:1"><code>${job.kind}</code> ${(job.args.prompt||job.args.text||job.args.image||job.args.file||'').toString().slice(0,60)}</span>
@@ -288,6 +351,7 @@ function showLog(id){const p=$('log-'+id); p.style.display=p.style.display==='no
 // galleries
 function thumb(it,kind){
   const e=it.ext;
+  if(['md','txt','json','fountain'].includes(e)) return `<div class="ph" style="font-size:22px">¶</div>`;
   if(['png','jpg','jpeg','webp','gif'].includes(e)) return `<img src="${it.url}" loading="lazy">`;
   if(['mp4','webm','mov'].includes(e)) return `<video src="${it.url}#t=0.5" muted preload="metadata"></video>`;
   if(['glb','gltf'].includes(e)) return `<div class="ph">◈</div>`;
@@ -299,6 +363,7 @@ function openItem(it){
   if(['png','jpg','jpeg','webp','gif'].includes(e)) ct.innerHTML=`<img src="${it.url}">`;
   else if(['mp4','webm','mov'].includes(e)) ct.innerHTML=`<video src="${it.url}" controls autoplay loop></video>`;
   else if(['glb','gltf','stl','obj'].includes(e)) ct.innerHTML=`<iframe src="/vr/view.html?src=${encodeURIComponent(it.url)}"></iframe>`;
+  else if(['md','txt','json','fountain'].includes(e)) fetch(it.url).then(r=>r.text()).then(t=>{ct.innerHTML=`<pre style="max-height:100%;height:100%;width:100%;margin:0;border:0;font-size:13px;color:var(--fg);line-height:1.55">${t.replace(/</g,'&lt;')}</pre>`;});
   else ct.innerHTML=`<audio src="${it.url}" controls autoplay style="width:80%"></audio>`;
   $('modal').classList.add('open');
 }
@@ -317,6 +382,8 @@ async function loadGallery(kind){
         ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
         ${kind==='video'||kind==='image'?`<button onclick="$('vd-img').value='${it.path}';flash('start image set')">→ video</button>`:''}
         ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button>`:''}
+        ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}
+        ${kind==='text'?`<button onclick="$('wr-file').value='${it.path}';flash('draft set')">as draft</button>`:''}
         <button onclick="window.open('${it.url}','_blank')">open</button></div></div></div>`;}).join('');
 }
 async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }

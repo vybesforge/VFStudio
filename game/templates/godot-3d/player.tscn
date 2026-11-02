@@ -1,0 +1,35 @@
+[gd_scene load_steps=4 format=3 uid="uid://b3dtpl0player"]
+
+[ext_resource type="Script" path="res://player.gd" id="1_player"]
+
+[sub_resource type="CapsuleShape3D" id="Capsule"]
+radius = 0.3
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh"]
+radius = 0.3
+height = 1.8
+
+[node name="Player" type="CharacterBody3D"]
+
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("Capsule")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("CapsuleMesh")
+
+[node name="Head" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+
+[node name="CameraFP" type="Camera3D" parent="Head"]
+current = true
+
+[node name="SpringArm3D" type="SpringArm3D" parent="Head"]
+spring_length = 4.0
+margin = 0.2
+
+[node name="CameraTP" type="Camera3D" parent="Head/SpringArm3D"]

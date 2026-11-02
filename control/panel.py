@@ -34,6 +34,10 @@ RUN = STACK / "run"
 COMFY = STACK / "ComfyUI"
 VR = STACK / "vr"
 AUDIO_PY = STACK / "audio" / ".venv" / "bin" / "python"
+LLM_PY = STACK / "llm" / ".venv" / "bin" / "python"
+# Local language + vision models (MLX). Uncensored writer and an image-understanding VLM.
+LLM_MODEL = os.environ.get("LLM_MODEL", "mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit")
+VLM_MODEL = os.environ.get("VLM_MODEL", "mlx-community/Qwen3-VL-8B-Instruct-4bit")
 
 for d in (LOGS, RUN, VR):
     d.mkdir(parents=True, exist_ok=True)
@@ -65,6 +69,20 @@ SERVICES = {
         "cmd": [str(AUDIO_PY), "-m", "mlx_audio.server", "--host", "127.0.0.1", "--port", "8000"],
         "cwd": str(STACK / "audio"),
         "desc": "TTS, STT, music + SFX (MLX)",
+    },
+    "llm": {
+        "label": "writer LLM",
+        "port": 8081,
+        "cmd": [str(LLM_PY), "-m", "mlx_lm.server", "--host", "127.0.0.1", "--port", "8081", "--model", LLM_MODEL],
+        "cwd": str(STACK / "llm"),
+        "desc": f"OpenAI-compatible chat · {LLM_MODEL.split('/')[-1]} (uncensored, ~16 GB)",
+    },
+    "vision": {
+        "label": "vision VLM",
+        "port": 8082,
+        "cmd": [str(LLM_PY), "-m", "mlx_vlm.server", "--host", "127.0.0.1", "--port", "8082", "--model", VLM_MODEL],
+        "cwd": str(STACK / "llm"),
+        "desc": f"image understanding · {VLM_MODEL.split('/')[-1]} (~5 GB)",
     },
 }
 
