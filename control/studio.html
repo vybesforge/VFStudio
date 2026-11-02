@@ -346,6 +346,21 @@
 <!-- SERVICES -->
 <section class="tab" id="tab-services">
   <div class="grid" id="services"></div>
+  <h2>Endpoints — point other programs and pages here</h2>
+  <div class="card">
+    <div class="row"><div>
+      <div class="name">Copy-paste URLs</div>
+      <div class="desc">Every service in the stack, ready to paste into a script, an app config or another page. Pick the host once — all the links and snippets below follow it.</div>
+    </div>
+    <div class="btns" style="margin:0">
+      <button id="ep-h-local" onclick="setEpHost('127.0.0.1')">127.0.0.1</button>
+      <button id="ep-h-lan" onclick="setEpHost(EP.lan_ip||location.hostname)">LAN</button>
+      <button class="primary" onclick="copyEnv()">Copy all → .env</button>
+      <button onclick="copyEpJson()">Copy all → JSON</button>
+    </div></div>
+    <div class="meta" id="ep-note"></div>
+    <div id="endpoints" style="margin-top:4px"><div class="meta">loading…</div></div>
+  </div>
   <h2>Quick reference</h2>
   <div class="card"><pre style="margin:0;max-height:none">stack status | start comfy | start audio | stop comfy | free | logs comfy
 gen status | gen image "…" | gen video "…" | gen sfx "…" | gen music "…" | gen upscale f.png
@@ -382,7 +397,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.data
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('active',s.id==='tab-'+current));
   onTab(current);});
-function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='services') refreshServices(); if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
+function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='services'){refreshServices();refreshEndpoints();} if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
 
 // progress
 async function refreshProgress(){
@@ -568,9 +583,64 @@ async function loadInventory(){
 }
 
 // services + resources (same API as before)
+let SVCSTATUS={};
+let EP={hosts:['127.0.0.1'],lan_ip:null,items:[]}, epHost='127.0.0.1', epLoaded=false, epOpen=new Set();
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const epOrigin=it=>`http://${epHost}:${it.port}`;
+const epBase=it=>epOrigin(it)+it.path;
+const epSnip=it=>(it.snippet||'').replaceAll('{{base_origin}}',epOrigin(it)).replaceAll('{{base}}',epBase(it));
+const epEnvValue=it=>epOrigin(it)+(it.envsuffix===undefined?it.path:it.envsuffix);
+const epItem=k=>EP.items.find(x=>x.key===k);
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); flash('copied'); return true; }
+  catch(e){
+    const ta=document.createElement('textarea'); ta.value=t; ta.style.cssText='position:fixed;top:-1000px';
+    document.body.appendChild(ta); ta.select(); let ok=false; try{ ok=document.execCommand('copy'); }catch(_){}
+    ta.remove(); flash(ok?'copied':'copy blocked — select the text instead'); return ok;
+  }
+}
+async function refreshEndpoints(force){
+  if(epLoaded&&!force) return;
+  try{ EP=await (await fetch('/api/endpoints')).json(); epLoaded=true; }
+  catch(e){ $('endpoints').innerHTML='<div class="meta">endpoint list unavailable — is the panel current?</div>'; return; }
+  try{ SVCSTATUS=(await (await fetch('/api/status')).json()).services||{}; }catch(e){}
+  if(!EP.hosts.includes(epHost)) epHost=EP.hosts[0];
+  renderEndpoints();
+}
+function setEpHost(h){ if(!h) return; epHost=h; renderEndpoints(); }
+function renderEndpoints(){
+  $('ep-h-local').className = epHost==='127.0.0.1'?'primary':'';
+  $('ep-h-lan').className = epHost!=='127.0.0.1'?'primary':'';
+  $('ep-note').innerHTML = epHost==='127.0.0.1'
+    ? `Links use <code>127.0.0.1</code> — the same address every CLI on this Mac already uses. Paste straight into a script, an app config or another page.`
+    : `Links use <code>${esc(epHost)}</code>. Only the panel is exposed on the LAN (<code>PANEL_HOST=0.0.0.0 stack panel</code>); ComfyUI, mlx-audio, the writer LLM and the VLM bind 127.0.0.1, so those LAN links answer only after you start them with a 0.0.0.0 listen.`;
+  $('endpoints').innerHTML = EP.items.map(it=>{
+    const st=SVCSTATUS[it.svc], on=it.svc==='panel'||(st&&st.responding);
+    const tag = st? `<span class="tag ${on?'ok':'dl'}">${st.responding?'running':(st.running?'starting':'stopped')}</span>` : '<span class="tag ok">this page</span>';
+    const rows=(it.paths||[]).map(([m,u,n])=>`<tr><td><code>${esc(m)}</code></td><td><code>${esc(u)}</code></td><td class="desc">${esc(n)}</td></tr>`).join('');
+    return `<div style="padding:11px 0;border-bottom:1px solid #16191f">
+      <div class="row"><div style="min-width:0;flex:1">
+        <div class="name" style="font-size:14px">${esc(it.label)} ${tag}</div>
+        <div class="desc">${esc(it.desc)}</div>
+        <code style="display:inline-block;margin-top:6px;user-select:all;word-break:break-all;color:var(--cyan)">${esc(epBase(it))}</code>
+      </div>
+      <div class="btns" style="margin:0"><button onclick="copyEp('${it.key}')">Copy URL</button><button onclick="toggleEp('${it.key}')">Details</button></div>
+      </div>
+      <div id="epd-${it.key}" style="display:${epOpen.has(it.key)?'block':'none'}">
+        <table style="margin-top:8px"><thead><tr><th>method</th><th>path</th><th>what</th></tr></thead><tbody>${rows}</tbody></table>
+        <pre style="max-height:180px">${esc(epSnip(it))}</pre>
+        <div class="btns" style="margin-top:8px"><button onclick="copyEpSnip('${it.key}')">Copy snippet</button></div>
+      </div></div>`;
+  }).join('') + `<div class="meta">Loopback-only by design — nothing leaves this Mac.</div>`;
+}
+function copyEp(k){ copyText(epBase(epItem(k))); }
+function copyEpSnip(k){ copyText(epSnip(epItem(k))); }
+function toggleEp(k){ const d=$('epd-'+k); const open=d.style.display==='none'; d.style.display=open?'block':'none'; open?epOpen.add(k):epOpen.delete(k); }
+function copyEnv(){ copyText(['# VF Studio local endpoints — host '+epHost].concat(EP.items.map(it=>`${it.env}=${epEnvValue(it)}`)).join('\n')); }
+function copyEpJson(){ const o={}; EP.items.forEach(it=>o[it.key]=epEnvValue(it)); copyText(JSON.stringify(o,null,2)); }
 async function act(path){ const j=await (await fetch('/api/'+path,{method:'POST'})).json(); if(j.message) flash(j.message); setTimeout(refreshServices,500); }
 async function refreshServices(){
-  const s=await (await fetch('/api/status')).json();
+  const s=await (await fetch('/api/status')).json(); SVCSTATUS=s.services||{}; if(epLoaded&&$('endpoints')) renderEndpoints();
   $('services').innerHTML=Object.entries(s.services).map(([k,x])=>{const cls=x.responding?'on':(x.running?'warn':'off');const st=x.responding?'running':(x.running?'starting':'stopped');
     return `<div class="card"><div class="row"><div><div class="name">${x.label}</div><div class="desc">${x.desc}</div></div><div style="font-size:12px"><span class="dot ${cls}"></span>${st}</div></div>
     <div class="meta">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div><div class="btns"><button class="primary" onclick="act('start/${k}')">Start</button><button onclick="act('restart/${k}')">Restart</button><button class="danger" onclick="act('stop/${k}')">Stop</button>${k==='comfy'?'<button onclick="act(\'comfy/free\')">Free VRAM</button>':''}<button onclick="svcLog('${k}')">Log</button></div><pre id="slog-${k}" style="display:none"></pre></div>`;}).join('')

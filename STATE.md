@@ -1,5 +1,18 @@
 # Project state — read this first
 
+## 2026-11-02 (desktop): Services tab → Endpoints ("point other programs here")
+
+`control/panel.py` gained an `ENDPOINTS` list + `GET /api/endpoints`; the **Services** tab renders it as
+copy-paste rows: TTS `/v1/audio/speech`, STT `/v1/audio/transcriptions`, voice clone (same speech route
++ ref_audio/ref_text), ComfyUI `:8188`, writer LLM `:8081/v1`, VLM `:8082/v1`, panel API `:8787`.
+Each row has **Copy URL**, **Details** (method/path/schema table + a working curl) and **Copy all → .env
+/ JSON**; a host switch flips every link between `127.0.0.1` and the LAN IP (`192.168.1.44`), with a
+note that only the panel is LAN-bound unless a service is started with a 0.0.0.0 listen.
+Verified live: TTS returned a 24 kHz wav, STT transcribed `output/voice/clone_*.wav`, `/object_info`
+returned 1033 nodes; clipboards checked by stubbing `navigator.clipboard.writeText`. Caveat: the
+LLM/VLM rows were checked against `tools/llm/scribe` + `tools/vision/see` request bodies, not by
+starting those 16/5 GB models.
+
 ## 2026-11-02: BLUE HOUR (browser extraction shooter)
 
 `game/bluehour` — Three.js/TS/Vite FPS, playable at `npm run dev` (:5199). Verified: movement/collision,

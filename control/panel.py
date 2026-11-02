@@ -86,6 +86,110 @@ SERVICES = {
 }
 
 
+def lan_ip() -> str | None:
+    """This machine's LAN address (no packets sent — UDP connect only picks a route)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("1.1.1.1", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return None
+    finally:
+        s.close()
+
+
+KOKORO = "mlx-community/Kokoro-82M-bf16"
+CLONE_MODEL = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16"
+STT_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
+
+# Every row is a URL another local program/page can be pointed at. `path` is appended to
+# http://<host>:<port>. Keep this the single source of truth — the Resources tab renders it.
+ENDPOINTS = [
+    {
+        "key": "tts", "label": "TTS · text → speech", "svc": "audio", "port": 8000,
+        "env": "VF_TTS", "path": "/v1/audio/speech",
+        "desc": "OpenAI-compatible speech endpoint (Kokoro 82M, 50+ voices). POST JSON, get audio bytes back.",
+        "paths": [("POST", "/v1/audio/speech", "JSON {model, voice, input, speed, response_format}"),
+                  ("GET", f"/v1/audio/voices?model={KOKORO}", "voice ids you can pass as voice")],
+        "snippet": (
+            "curl -s -X POST {{base}} -H 'Content-Type: application/json' \\\n"
+            f"  -d '{{\"model\":\"{KOKORO}\",\"voice\":\"af_heart\",\"input\":\"Hello from the forge\",\"response_format\":\"wav\"}}' \\\n"
+            "  -o hello.wav"
+        ),
+    },
+    {
+        "key": "stt", "label": "STT · speech → text", "svc": "audio", "port": 8000,
+        "env": "VF_STT", "path": "/v1/audio/transcriptions",
+        "desc": "OpenAI-compatible transcription (Parakeet 0.6B v3 default; pass a Whisper repo id for other languages).",
+        "paths": [("POST", "/v1/audio/transcriptions", "multipart: file, model, language?, response_format"),
+                  ("GET", "/openapi.json", "live schema for every mlx-audio route")],
+        "snippet": (
+            "curl -s -X POST {{base}} \\\n"
+            f"  -F file=@clip.wav -F model={STT_MODEL} -F response_format=text"
+        ),
+    },
+    {
+        "key": "clone", "label": "Voice clone (Qwen3-TTS)", "svc": "audio", "port": 8000,
+        "env": "VF_CLONE", "path": "/v1/audio/speech",
+        "desc": "Same speech endpoint — add ref_audio (a wav on this Mac) and the ref_text it says.",
+        "paths": [("POST", "/v1/audio/speech", "JSON + ref_audio, ref_text")],
+        "snippet": (
+            "curl -s -X POST {{base}} -H 'Content-Type: application/json' \\\n"
+            f"  -d '{{\"model\":\"{CLONE_MODEL}\",\"input\":\"New line in your voice\",\"ref_audio\":\"/Users/dcruse/media-stack/output/voice/ref.wav\",\"ref_text\":\"the words in the reference\",\"response_format\":\"wav\"}}' \\\n"
+            "  -o clone.wav"
+        ),
+    },
+    {
+        "key": "comfy", "label": "ComfyUI · image / video / 3D / sfx / music", "svc": "comfy", "port": 8188,
+        "env": "VF_COMFY", "path": "",
+        "desc": "Everything diffusion. Submit your own graph as {\"prompt\": {…}} then poll /history/{id}.",
+        "paths": [("POST", "/prompt", "{\"prompt\": <api graph>, \"client_id\": \"<id>\"} → {\"prompt_id\": …}"),
+                  ("GET", "/history/{prompt_id}", "outputs once the job leaves the queue"),
+                  ("GET", "/view?filename=…&subfolder=…&type=output", "fetch a produced file"),
+                  ("GET", "/object_info", "every node + its accepted parameters"),
+                  ("GET", "/queue", "running / pending"),
+                  ("WS", "/ws?clientId=<same id>", "progress events — only to the submitting client id")],
+        "snippet": (
+            "curl -s {{base_origin}}/object_info | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d),\"nodes\")'\n"
+            "curl -s -X POST {{base_origin}}/prompt -H 'Content-Type: application/json' -d @workflow.json   # workflow.json = {\"prompt\": {...}}"
+        ),
+    },
+    {
+        "key": "llm", "label": "Writer LLM (OpenAI-compatible chat)", "svc": "llm", "port": 8081,
+        "env": "VF_LLM", "path": "/v1",
+        "desc": f"{LLM_MODEL.split('/')[-1]} · uncensored, ~16 GB. Drop-in for the OpenAI SDK base_url.",
+        "paths": [("POST", "/v1/chat/completions", "standard OpenAI chat body; add chat_template_kwargs.enable_thinking=false"),
+                  ("GET", "/v1/models", "loaded model id")],
+        "snippet": (
+            "curl -s {{base}}/chat/completions -H 'Content-Type: application/json' \\\n"
+            f"  -d '{{\"model\":\"{LLM_MODEL}\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}],\"chat_template_kwargs\":{{\"enable_thinking\":false}}}}'"
+        ),
+    },
+    {
+        "key": "vision", "label": "Vision VLM (image understanding)", "svc": "vision", "port": 8082,
+        "env": "VF_VISION", "path": "/v1",
+        "desc": f"{VLM_MODEL.split('/')[-1]} · ~5 GB. Same chat shape; content parts carry an image_url (a data: URL or an http/file URL).",
+        "paths": [("POST", "/v1/chat/completions", "messages[].content = [{type:text},{type:image_url}]"),
+                  ("GET", "/v1/models", "loaded model id")],
+        "snippet": (
+            "curl -s {{base}}/chat/completions -H 'Content-Type: application/json' \\\n"
+            f"  -d '{{\"model\":\"{VLM_MODEL}\",\"messages\":[{{\"role\":\"user\",\"content\":[{{\"type\":\"text\",\"text\":\"what is in this image?\"}},{{\"type\":\"image_url\",\"image_url\":{{\"url\":\"data:image/png;base64,<BASE64>\"}}}}]}}],\"chat_template_kwargs\":{{\"enable_thinking\":false}}}}'"
+        ),
+    },
+    {
+        "key": "panel", "label": "Studio API (jobs, status, files)", "svc": "panel", "port": 8787,
+        "env": "VF_PANEL", "envsuffix": "", "path": "/api/status",
+        "desc": "This page's own API: service health, job list, outputs, uploads, unload-all.",
+        "paths": [("GET", "/api/status", "services + installed models"),
+                  ("GET", "/api/resources", "cpu / gpu / mem / swap / disk"),
+                  ("GET", "/api/studio/jobs", "job list"),
+                  ("POST", "/api/studio/unload-all", "free memory ({\"hard\":true} = stop services)"),
+                  ("GET", "/files/output/image/<file>", "any generated file by path")],
+        "snippet": "curl -s {{base}} | python3 -m json.tool | head -40",
+    },
+]
+
+
 def port_open(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.3)
@@ -426,6 +530,21 @@ def api_status():
 @app.get("/api/resources")
 def api_resources():
     return resources()
+
+
+@app.get("/api/endpoints")
+def api_endpoints():
+    """Copy-paste URLs for pointing other local programs/pages at the stack."""
+    hosts = ["127.0.0.1"]
+    lan = lan_ip()
+    if lan and lan not in hosts:
+        hosts.append(lan)
+    out = []
+    for e in ENDPOINTS:
+        url = f"http://{{host}}:{e['port']}{e['path']}"
+        out.append({**e, "url": url, "origin": f"http://{{host}}:{e['port']}",
+                    "status": "loaded" if e["svc"] == "panel" else None})
+    return {"hosts": hosts, "lan_ip": lan, "panel_port": 8787, "items": out}
 
 
 @app.get("/api/logs/{name}")
