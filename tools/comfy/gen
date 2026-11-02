@@ -35,6 +35,7 @@ FILES = {
     "video": ["diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan2.2_vae.safetensors"],
     "sao": ["checkpoints/stable-audio-open-1.0.safetensors", "text_encoders/t5-base.safetensors"],
     "sa3": ["checkpoints/stable_audio_3_medium.safetensors", "text_encoders/t5gemma_b_b_ul2.safetensors"],
+    "sa3sfx": ["checkpoints/stable_audio_3_small_sfx.safetensors", "text_encoders/t5gemma_b_b_ul2.safetensors"],
     "music": ["checkpoints/ace_step_1.5_turbo_aio.safetensors"],
     "edit": ["text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors", "vae/qwen_image_vae.safetensors"],
     "edit_gguf": ["unet/Qwen-Image-Edit-2509-Q4_K_M.gguf"],
@@ -368,9 +369,11 @@ def g_sfx(a):
             "7": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["6", 0], "vae": ["1", 2]}},
             "8": {"class_type": "SaveAudio", "inputs": {"audio": ["7", 0], "filename_prefix": "gen/sfx"}},
         }
-    need("sa3")
+    # sa3 = Stable Audio 3 medium (music-leaning, 8-step distilled); sa3sfx = SA3 Small-SFX, purpose-built for effects.
+    ckpt = "stable_audio_3_small_sfx.safetensors" if a.model == "sa3sfx" else "stable_audio_3_medium.safetensors"
+    need("sa3sfx" if a.model == "sa3sfx" else "sa3")
     return {
-        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "stable_audio_3_medium.safetensors"}},
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "t5gemma_b_b_ul2.safetensors", "type": "stable_audio", "device": "default"}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": a.negative or "", "clip": ["2", 0]}},
@@ -443,7 +446,7 @@ def main():
     s.add_argument("--w", type=int, default=1280); s.add_argument("--h", type=int, default=704); s.add_argument("--frames", type=int, default=121)
     s.add_argument("--fps", type=int, default=24); common(s, "video"); s.set_defaults(steps=20)
 
-    s = sub.add_parser("sfx"); s.add_argument("prompt"); s.add_argument("--model", choices=["sao", "sa3"], default="sao")
+    s = sub.add_parser("sfx"); s.add_argument("prompt"); s.add_argument("--model", choices=["sao", "sa3", "sa3sfx"], default="sa3sfx", help="sao = Stable Audio Open 1.0 (CC, 47 s max); sa3sfx = Stable Audio 3 Small-SFX (dedicated SFX); sa3 = SA3 medium")
     s.add_argument("--seconds", type=float, default=10); s.add_argument("--negative"); common(s, "sfx")
 
     s = sub.add_parser("music"); s.add_argument("prompt", help="style tags, e.g. 'lo-fi hip hop, warm rhodes, vinyl crackle, 85 bpm'")

@@ -189,7 +189,7 @@
     <div class="card"><div class="name">Sound effect</div>
       <label>describe the sound</label><textarea id="sx-prompt">heavy wooden door creaks open slowly, stone hall reverb</textarea>
       <div class="fields">
-        <div><label>model</label><select id="sx-model"><option value="sao">Stable Audio Open 1.0 · 50 steps</option><option value="sa3">Stable Audio 3 medium · 8 steps, up to 150 s</option></select></div>
+        <div><label>model</label><select id="sx-model"><option value="sa3sfx">Stable Audio 3 Small-SFX · dedicated SFX, 8 steps (~4 s)</option><option value="sao">Stable Audio Open 1.0 · 50 steps (~12 s)</option><option value="sa3">Stable Audio 3 medium · 8 steps, up to 150 s</option></select></div>
         <div><label>seconds</label><input id="sx-sec" value="8"></div>
       </div>
       <div class="btns"><button class="primary" onclick="runJob('sfx',{prompt:v('sx-prompt'),model:v('sx-model'),seconds:v('sx-sec')})">Generate SFX</button></div>

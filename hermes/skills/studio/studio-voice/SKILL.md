@@ -167,6 +167,9 @@ same Kokoro voice (upper bound) 0.998 / 202 Hz; different speaker (control)
 0.971 / 135 Hz. Whisper transcription of every clone matched the requested text
 word for word (Chatterbox dropped punctuation; Qwen3 kept it).
 
+## STT model choice (2026-11-02)
+`voice transcribe` now defaults to **Parakeet-TDT 0.6B v3** (`mlx-community/parakeet-tdt-0.6b-v3`): same transcript as Whisper-turbo on the test clip in 0.6 s instead of 3.5 s, 25 European languages, top of the open WER boards. For other languages pass `--model mlx-community/whisper-large-v3-turbo-asr-fp16` (99 languages) or `--model mlx-community/Qwen3-ASR-1.7B-8bit` (CJK). `voice clone` uses the same default to auto-transcribe references.
+
 ## Pitfalls
 
 - **Server path, not upload.** `clone` passes `ref_audio` as an absolute path the

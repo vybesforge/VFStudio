@@ -300,7 +300,7 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
         return [str(GEN), "video", a["prompt"], *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
                 *flag("--frames", cast=int), *flag("--fps", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int)]
     if kind == "sfx":
-        return [str(GEN), "sfx", a["prompt"], "--model", a.get("model", "sao"), *flag("--seconds", cast=float),
+        return [str(GEN), "sfx", a["prompt"], "--model", a.get("model", "sa3sfx"), *flag("--seconds", cast=float),
                 *flag("--steps", cast=int), *flag("--seed", cast=int)]
     if kind == "music":
         cmd = [str(GEN), "music", a["prompt"], *flag("--seconds", cast=float), *flag("--bpm", cast=int),
