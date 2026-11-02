@@ -934,6 +934,35 @@ def api_comfy_jobs():
     return out
 
 
+@app.post("/api/comfy/cancel")
+def api_comfy_cancel(payload: dict = Body(default={})):
+    """Cancel a ComfyUI job from the panel's status bar.
+
+    A pending job is deleted from the queue by id; a running one has to be interrupted
+    (ComfyUI has no per-job stop), so the caller must say which it is — the UI reads that
+    off /api/comfy/jobs rather than guessing."""
+    import urllib.request as _u
+    job_id = payload.get("id")
+    prompt_id = payload.get("prompt_id")
+    kind = payload.get("kind") or ("pending" if job_id else "running")
+    data, path = {}, "/interrupt"
+    if kind == "pending" and job_id is not None:
+        path, data = "/queue", {"delete": [int(job_id)]}
+    elif kind == "pending":
+        path, data = "/queue", {"clear": True}
+    try:
+        req = _u.Request(f"http://127.0.0.1:8188{path}",
+                         data=json.dumps(data).encode() if data else b"",
+                         headers={"Content-Type": "application/json"}, method="POST")
+        with _u.urlopen(req, timeout=5) as r:
+            r.read()
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": f"cancel failed: {exc}"}, status_code=500)
+    return {"ok": True, "kind": kind, "id": job_id, "prompt_id": prompt_id,
+            "message": (f"deleted queued job {job_id}" if kind == "pending"
+                        else "interrupted the running job")}
+
+
 @app.get("/api/comfy/job")
 def api_comfy_job():
     """What ComfyUI is working on right now.

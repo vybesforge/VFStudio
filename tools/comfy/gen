@@ -336,6 +336,34 @@ NEG_WAN = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风�
            "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
 
 
+def _snap16(v):
+    return max(64, int(round(v / 16.0)) * 16)
+
+
+def video_dims(a, default):
+    """Output size for a video job: explicit --w/--h win, else the start image decides.
+
+    An i2v start image is scaled into the latent's width/height, so a fixed 1280x704 latent
+    re-frames a square upload (crop or letterbox) and the clip no longer matches the picture
+    it came from. Taking the aspect from the image (area capped, sides snapped to 16 — the
+    Wan/Hunyuan VAE needs multiples of 16) keeps the framing identical."""
+    if a.w and a.h:
+        return int(a.w), int(a.h)
+    if a.image:
+        try:
+            from PIL import Image
+            with Image.open(a.image) as im:
+                iw, ih = im.size
+            budget = min(1280 * 704, iw * ih)          # never upscale past the source area
+            scale = min(1.0, (budget / float(iw * ih)) ** 0.5, 1280.0 / max(iw, ih))
+            w, h = _snap16(iw * scale), _snap16(ih * scale)
+            print(f"[gen] video size {w}x{h} from {a.image} ({iw}x{ih}), snapped to 16")
+            return w, h
+        except Exception as exc:
+            print(f"[gen] could not read {a.image} for its size ({exc}); using {default}")
+    return default
+
+
 def g_video_hyv15(a):
     """HunyuanVideo 1.5 (8.3B) — the quality path. cfg-distilled checkpoints: cfg 1, no negative needed.
     t2v uses the 480p model (832x480), i2v the 720p model (1280x704). Graph mirrors the official templates
@@ -345,7 +373,7 @@ def g_video_hyv15(a):
     i2v = bool(a.image)
     need("hyv15_i2v" if i2v else "hyv15_t2v")
     unet = "hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors" if i2v else "hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors"
-    w, h = (a.w, a.h) if (a.w, a.h) != (1280, 704) or i2v else (832, 480)   # t2v model is 480p-native
+    w, h = video_dims(a, (1280, 704) if i2v else (832, 480))   # t2v model is 480p-native
     steps = a.steps or 20
     g = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
@@ -380,6 +408,7 @@ def g_video(a):
     if getattr(a, "model", "wan") == "hyv15":
         return g_video_hyv15(a)
     need("video")
+    w, h = video_dims(a, (1280, 704))
     g = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan2.2_ti2v_5B_fp16.safetensors", "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
@@ -387,7 +416,7 @@ def g_video(a):
         "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8.0}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": a.negative or NEG_WAN, "clip": ["2", 0]}},
-        "7": {"class_type": "Wan22ImageToVideoLatent", "inputs": {"vae": ["3", 0], "width": a.w, "height": a.h, "length": a.frames, "batch_size": 1}},
+        "7": {"class_type": "Wan22ImageToVideoLatent", "inputs": {"vae": ["3", 0], "width": w, "height": h, "length": a.frames, "batch_size": 1}},
         "8": {"class_type": "KSampler", "inputs": {"model": ["4", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0],
                                                  "seed": seed_of(a), "steps": a.steps, "cfg": 5.0, "sampler_name": "uni_pc", "scheduler": "simple", "denoise": 1.0}},
         "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
@@ -489,7 +518,8 @@ def main():
 
     s = sub.add_parser("video"); s.add_argument("prompt"); s.add_argument("--image"); s.add_argument("--negative")
     s.add_argument("--model", choices=["wan", "hyv15"], default="wan", help="wan = Wan 2.2 TI2V 5B (fast path, measured); hyv15 = HunyuanVideo 1.5 8.3B (quality path, untested here)")
-    s.add_argument("--w", type=int, default=1280); s.add_argument("--h", type=int, default=704); s.add_argument("--frames", type=int, default=121)
+    # --w/--h default to None so an i2v start image can set the framing (see video_dims)
+    s.add_argument("--w", type=int, default=None); s.add_argument("--h", type=int, default=None); s.add_argument("--frames", type=int, default=121)
     s.add_argument("--fps", type=int, default=24); common(s, "video"); s.set_defaults(steps=20)
 
     s = sub.add_parser("sfx"); s.add_argument("prompt"); s.add_argument("--model", choices=["sao", "sa3", "sa3sfx"], default="sa3sfx", help="sao = Stable Audio Open 1.0 (CC, 47 s max); sa3sfx = Stable Audio 3 Small-SFX (dedicated SFX); sa3 = SA3 medium")

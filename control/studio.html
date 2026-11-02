@@ -169,13 +169,13 @@
       <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')">Upload…</button></div>
       <div class="fields">
         <div><label>model</label><select id="vd-model"><option value="wan">Wan 2.2 5B · fast path (measured)</option><option value="hyv15">HunyuanVideo 1.5 8.3B · quality (t2v 480p / i2v 720p, untested)</option></select></div>
-        <div><label>size</label><select id="vd-size"><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
+        <div><label>size</label><select id="vd-size" onchange="void 0"><option value="auto">auto · match the start image</option><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
         <div><label>frames (24 fps)</label><select id="vd-frames"><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
         <div><label>steps</label><input id="vd-steps" value="20"></div>
         <div><label>seed</label><input id="vd-seed" placeholder="random"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
-      <div class="hint">~14 s/step at 832×480×49f on this GPU. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
+      <div class="btns"><button class="primary" onclick="runJob('video',Object.assign({prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')},vsize('vd-size')))">Generate video</button></div>
+      <div class="hint">~14 s/step at 832×480×49f on this GPU. <b>auto</b> takes the output size from the start image (aspect kept, sides snapped to 16), so the clip frames exactly like the picture you fed it. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
     </div>
     <div id="jobs-video" class="card" style="margin-top:12px"></div>
   </div>
@@ -419,6 +419,8 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.data
   onTab(current);});
 function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='services'){refreshServices();} if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
 
+function vsize(id){ const s=$(id).value; if(!s||s==='auto') return {}; const [w,h]=s.split('x').map(Number); return {w,h}; }
+
 // progress — the bar comes from the websocket, the list of named jobs from /api/comfy/jobs
 async function refreshProgress(){
   try{
@@ -439,10 +441,18 @@ async function refreshProgress(){
       const tone=p.status==='error'?'bad':'on';
       head=`<div class="row"><div><span class="dot ${tone}"></span><b>ComfyUI ${p.status==='idle'?'idle':p.status}</b> <span class="desc">${c.pending?c.pending+' queued':'queue empty'}</span></div></div><div class="bar g"><i style="width:${p.status==='done'?100:0}%"></i></div>`;
     }
-    const rows=[...(q.running||[]).map(r=>`<div class="job"><span class="chip run">running</span><span style="flex:1">${esc(r.name)}</span><span class="desc">${r.elapsed}s · ${r.nodes} nodes</span></div>`),
-                ...(q.pending||[]).map(r=>`<div class="job"><span class="chip">queue ${r.position}</span><span style="flex:1">${esc(r.name)}</span><span class="desc">waiting ${r.waiting}s</span></div>`)];
+    const rows=[...(q.running||[]).map(r=>`<div class="job"><span class="chip run">running</span><span style="flex:1">${esc(r.name)}</span><span class="desc">${r.elapsed}s · ${r.nodes} nodes</span><button onclick="cancelComfyJob(${r.id},'running')" title="interrupt this job">cancel</button></div>`),
+                ...(q.pending||[]).map(r=>`<div class="job"><span class="chip">queue ${r.position}</span><span style="flex:1">${esc(r.name)}</span><span class="desc">waiting ${r.waiting}s</span><button onclick="cancelComfyJob(${r.id},'pending')" title="delete this queued job">cancel</button></div>`)];
     el.innerHTML=head+(rows.length?`<div style="margin-top:8px">${rows.join('')}</div>`:'');
   }catch(e){}
+}
+
+async function cancelComfyJob(id, kind){
+  const what = kind==='pending' ? 'the queued job' : 'the RUNNING job (its progress is lost)';
+  if(!confirm(`Cancel ${what}?`)) return;
+  const j=await (await fetch('/api/comfy/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,kind})})).json();
+  flash(j.message||'cancel sent'); setTimeout(refreshProgress, 900);
 }
 
 // jobs
@@ -734,8 +744,17 @@ async function refreshResources(){
 async function unloadAll(hard){ $('unload-result').textContent='working…'; const j=await (await fetch('/api/studio/unload-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hard})})).json(); $('unload-result').textContent=j.message||JSON.stringify(j); flash(`freed ~${j.freed_gb} GB`); setTimeout(refreshResources,1500); }
 async function loadVoices(){ try{const j=await (await fetch('/api/studio/voices')).json(); if(j.voices&&j.voices.length) $('vo-voice').innerHTML=j.voices.map(x=>`<option${x==='af_heart'?' selected':''}>${x}</option>`).join('');}catch(e){} }
 
+// an i2v start image should decide the framing unless the user overrides it
+document.getElementById('vd-img').addEventListener('input', ev=>{
+  const sel=document.getElementById('vd-size');
+  if(ev.target.value.trim()) sel.value='auto';
+});
 refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
-setInterval(refreshProgress,1500); setInterval(refreshJobs,3000);
-setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); },2500);
-setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); },8000);
+// Refreshes are deliberately slow: the galleries and job lists were re-fetching every 3-8 s
+// and the page felt like it was reloading itself. The status bar keeps a 5 s beat because it
+// is the only thing that has to feel live (progress + cancel).
+setInterval(refreshProgress, 5000);
+setInterval(refreshJobs, 60000);
+setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); }, 15000);
+setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); }, 60000);
 </script></body></html>

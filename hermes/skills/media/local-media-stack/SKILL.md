@@ -659,6 +659,46 @@ for any experiment; never overwrite it.
 
 ## TRELLIS 2: use the shipped template, do not hand-build it
 
+### Driving it through `/prompt` instead of the browser (verified)
+
+The UI route below works but is fragile; there is a cleaner one. The template's own
+`MeshToFile3D` emits `FILE_3D_GLB`, and **`SaveGLB` accepts that type** (`output_node:
+true`). So: convert the shipped template to API format, add one `SaveGLB` fed by the node
+that feeds `Save3DAdvanced.model_3d`, and delete the viewer nodes
+(`Save3DAdvanced`, `Preview3DAdvanced`, both `Preview3DAdvanced` copies) plus the dead
+Pixal3D/MoGe branch (`319, 55, 56, 242, 298`). The authored CFG structure stays intact, so
+the noise-atlas failure mode does not appear. Working script: `scratch/run_trellis2_hq.py`.
+
+- **A `COMFY_DYNAMICCOMBO_V3` input is the option KEY plus namespaced sub-inputs.**
+  `RemeshMesh.sign_mode` = `"solid"` with `"sign_mode.fill": 20.0, "sign_mode.qef": false`
+  (not a nested dict — that fails at *execution* with `execute() missing 1 required
+  positional argument: 'sign_mode'`; not bare sibling `fill`/`qef` — that fails
+  validation). Same rule for `DecimateMesh.placement_mode` (`"qem"` +
+  `"placement_mode.line_quadric_weight"`, `…feature_edge_quadric_weight`,
+  `…feature_edge_min_dihedral_deg`, `…clamp_v_to_edge`). Read the namespace from
+  `/object_info/<Node>`, walk `input.required[k][1].options[].inputs.required`.
+  **Validate before submitting**: a DynamicCombo left unset is not caught by the converter
+  and only explodes after 20+ minutes of sampling.
+- **`gen --out` creates a DIRECTORY.** `gen upscale`/`gen video --out out.png` writes
+  `out.png/<prefix>_0000N_.png`, it does not name the file. Move the inner file out and
+  `rmdir` the wrapper.
+
+### Unwrap: weld first or the atlas is mush
+The default `weld_distance 0.0002` left TRELLIS output unwelded and produced **per-triangle
+charts**: 4096² atlas measured laplacian **168** against **892** on the approved asset, and
+visually ~80% fragmented colour blobs. `weld_distance 0.001` on the same mesh gave
+`1,194,140 faces -> 3,581 charts, atlas 4190x4194` and a coherent atlas. If an atlas looks
+like smeared confetti, check chart count in the log line
+`[uv_unwrap] N faces -> M charts` before touching bake resolution.
+
+### Cost: unload first, then trust the step timer
+A head-only recon ran **867 s/step** while the box had 10 GB swap in use (vision VLM +
+image models resident). After `POST :8787/api/studio/unload-all` (47 GB freed) the same
+profile ran at 8.5 s/step for the structure stage. Sampling cost also tracks the
+`Trellis2UpsampleStage.target_resolution` far more than the bake size — dropping 1536→1024
+took a head texture stage from 220 s/step to a finishable run.
+
+
 ComfyUI installs the official graph at
 `ComfyUI/.venv/lib/python3.12/site-packages/comfyui_workflow_templates_json/templates/3d_pixal3d_trellis2_image_to_model.json`.
 Hand-assembling the same nodes from `/object_info` looks right and produces
@@ -819,6 +859,22 @@ for 2.6× the wall time.
 - **Predict an unwrap OOM from UV *chart count*, not face count.** 1.2M faces unwrapped
   at 4096 inside ~41 GB, while 380k charts from a coarser volume killed the process on
   the same 64 GB box.
+- **Unwrap must weld coincident vertices first, or the atlas is mush regardless of profile.**
+  `UnwrapMesh`'s `weld_distance` defaulted to **0.0002**, which charts the TRELLIS mesh
+  per-triangle: the 4096 albedo then bakes into dark noise on black (measured laplacian **168**
+  against **892** on the approved asset) while the run still reports success. Set
+  `weld_distance: 0.001` and `padding: 2` on the unwrap node (`196` in the shipped template) in
+  the prompt you submit, and verify it in the **submitted** dict — a fix present in the script but
+  absent from the queued prompt costs a full 52-minute run.
+- **Judge a bake on the model, not on the atlas image.** A flat 4096 atlas reads as "noise" or
+  "mush" in both directions, because coherent charts are still an abstract collage. Render the GLB
+  with its materials (EEVEE, world light + sun, ortho front/side) and ask per region: the real
+  verdict looks like "dark back, tan belly, brown hooves, pink snout, mane ridge — all in place,
+  detail soft", not "is this noise".
+- **TRELLIS `SaveGLB` writes `metallicFactor 1.0 / roughnessFactor 1.0`.** Metallic 1 on a hide
+  renders as dull metal in every glTF viewer, which reads as a broken texture. When staging a bake
+  for review, rewrite the material to `metallic 0.0 / roughness 0.85` (python: `pygltflib` load →
+  edit `pbrMetallicRoughness` → save) and say that you changed it.
 - **State the ceiling rather than hunting more settings.** Past HQ, fingers, toes, hair
   strands and skin pores need retopo or manual sculpt: the head is ~40 px in the
   reference, so no sampler recovers detail that was never photographed. More resolution
@@ -910,8 +966,17 @@ shippable GLBs). Ignore `ComfyUI/` (a clone with its own `.git`), `audio/.venv/`
     **Judge the margin at two framings.** A 10% enclosure margin reads as an oversized
     head in a full-body render while looking correct in a head close-up — head *size*
     is a whole-figure question, face *detail* is a crop question, and one frame cannot
-    answer both. `scripts/merge_head_overlay.py` does the measured fit and the enclosure
+    answer both.    `scripts/merge_head_overlay.py` does the measured fit and the enclosure
     merge — use it instead of re-deriving the alignment, which burns several attempts.
+    **Prove the bust asset standalone before merging it into anything.** Render the head recon
+    on its own first; if the hair is torn, the eyes are metallic, or the surface is fragmented
+    at that framing, the merge amplifies it — measured on a full-body human: a 250k-tri bust
+    recon from a 2108² neck-up crop merged at 1.03× read as an oversized head on the figure and
+    fragmented across the skull, and the user rejected it in favour of the unmerged body asset.
+    The merge is a *format* fix (detail head over coarse head), not a quality fix: on humans the
+    face stays source-limited, so say that instead of promising the merge solves it. A bust
+    recon is also the slowest TRELLIS job in this stack (90 min at upsample 1024 / remesh 320),
+    so decide from a standalone render of a cheap pass, not from hope.
 12. **TRELLIS texture-stage cost explodes on small subjects — check BOTH the upsample
     target and resident memory before blaming remesh.** A head-only job at remesh 1024
     ran 400-440 s/step (2h35m); at remesh 384 it ran 3.4 s/step. The full body is fine

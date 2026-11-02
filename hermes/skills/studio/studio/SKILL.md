@@ -95,6 +95,20 @@ footer link to vybesforge.com.
 `clientId` submitted the prompt. A passive listener sees queue counts only. Submit with a
 fixed `client_id` and listen under the same id (`control/studio.py`).
 
+**Pitfall:** `exec_info.queue_remaining` counts the *running* job, so rendering it as "N queued"
+overstates the queue by one whenever something is executing (measured: ComfyUI says
+`queue_remaining: 1` with one job running and nothing waiting). Report running and pending separately
+from `GET /api/comfy/jobs`, and name each prompt from its graph (`TRELLIS.2 image→3D → <prefix>`,
+`Wan 2.2 video → <prompt text>`, `Qwen image edit → …`) — "node 47" tells Dylan nothing about which
+model is hogging the box.
+
+**Pitfall:** a `studio.html` edit can kill the entire page silently. All its JS is one inline block,
+so one duplicate top-level `const` (`esc` is already defined) throws `Identifier … has already been
+declared` at parse time and *every* function in the page becomes undefined — the HTML still renders,
+so it reads as "the card is empty". Gate every HTML patch: extract the block and
+`node --check /tmp/studio_script.js`, then confirm with `js("typeof refreshProgress")` in the browser
+before judging the feature.
+
 ## `gen` — one CLI for every ComfyUI pipeline
 
 `~/media-stack/tools/comfy/gen` (also on PATH as `gen`). Prints exactly one JSON line:
@@ -122,6 +136,18 @@ gen music "indie folk, acoustic guitar, female vocal" --lyrics-file song.txt --s
 Lyrics use ACE-Step section tags: `[Verse]`, `[Chorus]`, `[Bridge]`, `[inst]` for instrumental.
 `--key` must be one of the 34 listed by `gen music -h` (e.g. `A minor`); `--timesig` is 2/3/4/6.
 
+**`--out` names a DIRECTORY, not a file.** `gen upscale in.png --out output/image/hero.png`
+creates the directory `hero.png/` and writes `upscale_seedvr2_0000N_.png` inside it; `gen video …
+--out output/video/clip.mp4` writes `wan_0000N_.mp4` inside `clip.mp4/`. Take the real path from the
+JSON `files` array, or move the inner file out and `rmdir` the stub, before reporting or attaching a
+deliverable — a directory sitting where you expect a file is how a finished render silently goes missing.
+
+**Match the video canvas to the source framing.** Wan keeps the requested aspect and re-crops the
+reference to it, so a full-body portrait source at `--w 832 --h 480` comes back cropped at the waist —
+use `--w 480 --h 832` for a standing figure and `--w 832 --h 480` only for a medium or landscape shot.
+Measured at 480×832, 121 frames (5 s @ 24 fps), 20 steps: **~23 min**, and the first 2 jobs wait
+behind whatever the other session has queued.
+
 **Measured on this machine, idle box, model load included (Nov 2026):** see the table in
 `references/benchmarks.md`. Re-measure before claiming a regression — a download writing to
 disk inflates every timing 2-3×. **Benchmark alone:** another session or subagent running `gen`
@@ -145,6 +171,7 @@ between your runs. When delegating, give at most ONE subagent GPU-heavy work at 
 - **Qwen3.x local models think by default.** Disable it per request (`chat_template_kwargs.enable_thinking=false`) for prose/vision answers, or the reasoning consumes the whole `max_tokens` and the reply is empty.
 - **fp8 weights are a trap on Apple Silicon.** MPS has no fp8 kernel, so ComfyUI upcasts `*_fp8_e4m3fn.safetensors` to bf16 in memory (a 20 GB file becomes 39 GB resident and swaps). For any model over ~10 GB prefer a Q4/Q5 **GGUF** via the ComfyUI-GGUF node pack (`UnetLoaderGGUF`, files in `models/unet/`) — same quality class, ~⅓ the memory. Check `logs/comfy.log` "loaded completely; N MB" against the file size to catch it.
 - **Rewriting git history resets the working tree.** `git filter-repo` (and `filter-branch`) check out the rewritten HEAD, deleting every file that was tracked before and is now purged — including local assets you meant to keep. Copy `gold-standard/`, `rig/`, any tracked GLBs aside first, and keep local assets gitignored from day one so they are never tracked at all.
+- **`bin/stack` runs under `set -u`.** A new subcommand that loops over `"$@"` must initialise its flag holders first (`prev=""`) — otherwise the whole command dies with `prev: unbound variable` before doing any work, and the exit code still reads 0 through a pipe. Gate every edit with `bash -n bin/stack`.
 - **Use absolute paths / `workdir` when subagents share the box.** They create and delete scratch dirs; a terminal whose cwd was deleted fails every relative command with a misleading `cd` error.
 
 ## Adding a capability (do all of these, in this order — a half-wired tool is what gets reported as "broken")
@@ -182,6 +209,18 @@ file on his Desktop; read it, pass it through a one-shot `git -c credential.help
 in `.git/config` or shell history, and never echo it. A fine-grained PAT must have **Contents: Read
 and write** on the repo — `git push` and `POST /git/blobs` both 403 without it even though
 `/repos/...` reports `push: true` (that field describes the user, not the token).
+
+**A push is not done until `git ls-remote origin refs/heads/main` returns your local `git rev-parse
+HEAD`** — `push exit 0` alone can mean nothing moved. Do not force-push unless history was actually
+rewritten; a normal fast-forward is what `main` expects. When a command that reads the token needs
+interactive approval and the approval times out, the run did not happen: commit locally, tell the user
+the commit sha, and hold the push for their go-ahead rather than re-firing the same command — it will
+just block again and the second attempt reads as ignoring the refusal.
+
+Two things to check before committing: `git diff --cached | grep -E 'github_pat_|ghp_'` must be empty,
+and `git restore --staged` any file another session is mid-edit on (this box runs a desktop session and
+the gateway agent on the same tree — see `local-media-stack`) rather than sweeping their work into your
+commit.
 
 ## Image editing — `gen edit` (Qwen-Image-Edit 2509)
 ```bash

@@ -22,6 +22,20 @@ progress card renders that list under the bar. The old "N queued" came from
 queue: ComfyUI reports `queue_remaining: 1` while one job runs and nothing waits; the panel now
 shows `1 running · 0 queued`.
 
+## 2026-11-02 (desktop): calmer refreshes, cancel in the status bar, i2v sizes follow the image
+
+- Auto-refresh was too eager (job lists every 3 s, galleries every 8 s, services 2.5 s). Now:
+  status bar 5 s (it is the only live thing), job lists + galleries 60 s, services/resources 15 s.
+- The status bar's job rows carry **cancel** (`POST /api/comfy/cancel`): a queued job is deleted
+  by id, a running one is interrupted (ComfyUI has no per-job stop). Verified the button renders
+  on the running row.
+- `gen video` took its latent size from `--w/--h` (default 1280x704) even for image-to-video, so a
+  square upload came back re-framed. `--w/--h` now default to None and `video_dims()` derives the
+  size from the start image — aspect kept, area capped at 1280x704, sides snapped to 16 (the VAE
+  needs multiples of 16). The panel's Video tab has an `auto · match the start image` size option,
+  selected automatically once a start image is set. Measured: 927x652 image → 928x656; explicit
+  sizes still win; t2v keeps 1280x704 (Wan) / 832x480 (HunyuanVideo 480p model).
+
 # Project state — read this first
 
 ## 2026-11-02 (desktop): rig joints — local VLM places them, and the pig.glb identity bug

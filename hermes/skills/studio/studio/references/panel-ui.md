@@ -82,6 +82,25 @@ js("Array.from(document.querySelectorAll('#services .card')).map(c=>{const p=c.q
 
 ## Editing loop
 
+- **Syntax-gate every `studio.html` patch before judging it.** The page is one inline `<script>`; a
+duplicate top-level `const` (the page already defines `esc`) aborts the parse and every function
+disappears while the HTML still renders — the symptom is an empty card, not an error banner.
+
+  ```bash
+  tools/.venv/bin/python -c "import re;s=open('control/studio.html').read();open('/tmp/s.js','w').write(re.findall(r'<script>(.*?)</script>',s,re.S)[-1])"
+  node --check /tmp/s.js            # must print nothing
+  ```
+
+  then assert the specific function exists in the live page (`js("typeof refreshProgress")` →
+  `"function"`) before reading any values out of the DOM; `undefined` means the block died, not that
+  your feature is broken.
+- **ComfyUI's queue count is not a queue count.** `exec_info.queue_remaining` includes the running
+  job. Derive running/pending from `/queue` yourself (as `GET /api/comfy/jobs` does), show them apart
+  (`"1 running · 0 queued"`), and name each prompt from its node types plus `filename_prefix` — a node
+  id is unreadable to the user who asked what the box is doing.
+- **Track elapsed time yourself.** ComfyUI's queue items carry no start timestamp; keep a
+  `{prompt_id: first_seen}` dict in the panel and prune ids that leave the queue, or every job shows
+  a blank duration.
 - `panel.py` / `studio.py` changes: `stack restart panel` (uvicorn does not hot-reload). `studio.html`
   alone needs **no** restart — it is read per request — just re-navigate; the browser keeps the old page
   and cached fetches, so reload before judging a fix.
