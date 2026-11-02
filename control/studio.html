@@ -419,18 +419,29 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{current=b.data
   onTab(current);});
 function onTab(t){ if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='services'){refreshServices();} if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
 
-// progress
+// progress — the bar comes from the websocket, the list of named jobs from /api/comfy/jobs
 async function refreshProgress(){
   try{
-    const p=await (await fetch('/api/studio/progress')).json();
+    const [p,q]=await Promise.all([fetch('/api/studio/progress').then(r=>r.json()),
+                                  fetch('/api/comfy/jobs').then(r=>r.json()).catch(()=>({reachable:false}))]);
     const el=$('progress'); let pct=p.max?Math.round(100*p.value/p.max):0;
-    if(!p.connected){ el.innerHTML='<span class="dot off"></span><b>ComfyUI</b> <span class="desc">not reachable — start it in Services</span>'; return; }
-    if(p.status==='running'){
-      el.innerHTML=`<div class="row"><div><span class="dot warn"></span><b>ComfyUI running</b> <span class="desc">node ${p.node??'…'} · ${p.elapsed??0}s · ${p.queue_remaining} queued</span></div><span class="desc">${p.max?pct+'% · step '+p.value+'/'+p.max:'loading model…'}</span></div><div class="bar ${p.max?'':'pulse'}"><i style="width:${p.max?pct:100}%"></i></div>`;
+    if(!p.connected && !q.reachable){ el.innerHTML='<span class="dot off"></span><b>ComfyUI</b> <span class="desc">not reachable — start it in Services</span>'; return; }
+    const c=q.counts||{running:0,pending:0};
+    // ComfyUI's exec_info.queue_remaining counts the running job too, so it is not "queued"
+    const tally=`${c.running} running · ${c.pending} queued`;
+    let head;
+    if(c.running){
+      const r=q.running[0];
+      head=`<div class="row"><div><span class="dot warn"></span><b>${esc(r.name)}</b> <span class="desc">${r.elapsed}s · ${tally}</span></div><span class="desc">${p.max?pct+'% · step '+p.value+'/'+p.max:'working…'}</span></div><div class="bar ${p.max?'':'pulse'}"><i style="width:${p.max?pct:100}%"></i></div>`;
+    } else if(p.status==='running'){
+      head=`<div class="row"><div><span class="dot warn"></span><b>ComfyUI running</b> <span class="desc">${p.elapsed??0}s · ${tally}</span></div><span class="desc">${p.max?pct+'% · step '+p.value+'/'+p.max:'loading model…'}</span></div><div class="bar ${p.max?'':'pulse'}"><i style="width:${p.max?pct:100}%"></i></div>`;
     } else {
-      const tone=p.status==='error'?'bad':p.status==='done'?'on':'on';
-      el.innerHTML=`<div class="row"><div><span class="dot ${tone}"></span><b>ComfyUI ${p.status==='idle'?'idle':p.status}</b> <span class="desc">${p.queue_remaining?p.queue_remaining+' queued':'queue empty'}</span></div></div><div class="bar g"><i style="width:${p.status==='done'?100:0}%"></i></div>`;
+      const tone=p.status==='error'?'bad':'on';
+      head=`<div class="row"><div><span class="dot ${tone}"></span><b>ComfyUI ${p.status==='idle'?'idle':p.status}</b> <span class="desc">${c.pending?c.pending+' queued':'queue empty'}</span></div></div><div class="bar g"><i style="width:${p.status==='done'?100:0}%"></i></div>`;
     }
+    const rows=[...(q.running||[]).map(r=>`<div class="job"><span class="chip run">running</span><span style="flex:1">${esc(r.name)}</span><span class="desc">${r.elapsed}s · ${r.nodes} nodes</span></div>`),
+                ...(q.pending||[]).map(r=>`<div class="job"><span class="chip">queue ${r.position}</span><span style="flex:1">${esc(r.name)}</span><span class="desc">waiting ${r.waiting}s</span></div>`)];
+    el.innerHTML=head+(rows.length?`<div style="margin-top:8px">${rows.join('')}</div>`:'');
   }catch(e){}
 }
 

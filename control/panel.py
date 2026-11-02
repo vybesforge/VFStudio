@@ -847,6 +847,93 @@ def api_assets_use(path: str):
             "message": f"room now uses {dest.name} (asset '{slug}')"}
 
 
+# ── ComfyUI queue: name the jobs instead of showing node ids ─────────────
+_JOB_SEEN: dict = {}
+
+
+def _prompt_text(graph):
+    for node in graph.values():
+        ct = node.get("class_type", "")
+        if "TextEncode" in ct or ct in ("CLIPTextEncode",):
+            t = node.get("inputs", {}).get("text")
+            if isinstance(t, str) and t.strip() and len(t) > 3 and not t.startswith("${"):
+                return t.strip()
+    for node in graph.values():
+        for k, v in (node.get("inputs") or {}).items():
+            if k in ("text", "prompt", "positive") and isinstance(v, str) and len(v) > 3:
+                return v.strip()
+    return ""
+
+
+def _prompt_prefix(graph):
+    for node in graph.values():
+        for k in ("filename_prefix", "prefix"):
+            v = (node.get("inputs") or {}).get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
+def _prompt_name(graph):
+    """A human name for a queued ComfyUI prompt, from the nodes it actually contains."""
+    types = [n.get("class_type", "") for n in graph.values()]
+    joined = " ".join(types)
+    prefix = _prompt_prefix(graph)
+    text = _prompt_text(graph)
+    short = (text[:60] + "…") if len(text) > 60 else text
+
+    if "Trellis2" in joined or "RemeshMesh" in joined:
+        return f"TRELLIS.2 image→3D → {prefix or 'model'}"
+    if "HunyuanVideo" in joined:
+        return f"HunyuanVideo 1.5 → {short or prefix or 'clip'}"
+    if "Wan" in joined and any(k in joined for k in ("Video", "Sampler", "I2V", "T2V")):
+        return f"Wan 2.2 video → {short or prefix or 'clip'}"
+    if "QwenImageEdit" in joined or "QwenImage" in joined:
+        return f"Qwen image edit → {short or prefix or 'image'}"
+    if any(k in joined for k in ("KSampler", "SamplerCustom")):
+        return f"image → {short or prefix or 'image'}"
+    if "ACE" in joined or "StableAudio" in joined:
+        return f"audio → {short or prefix or 'clip'}"
+    if types:
+        return f"{types[0]} → {prefix or short or 'job'}"
+    return "ComfyUI job"
+
+
+@app.get("/api/comfy/jobs")
+def api_comfy_jobs():
+    """Running + queued ComfyUI prompts with names, elapsed and queue position.
+
+    `exec_info.queue_remaining` counts the running job too, which is why the panel used to
+    say "2 queued" when one job was running and one was waiting. This reports them apart.
+    """
+    import urllib.request as _u
+    try:
+        with _u.urlopen("http://127.0.0.1:8188/queue", timeout=3) as r:
+            q = json.loads(r.read() or b"{}")
+    except Exception as exc:
+        return {"reachable": False, "error": str(exc), "running": [], "pending": [],
+                "counts": {"running": 0, "pending": 0}}
+    now = time.time()
+    out = {"reachable": True, "running": [], "pending": []}
+    for pos, item in enumerate(q.get("queue_running") or []):
+        pid, graph = item[1], (item[2] or {})
+        _JOB_SEEN.setdefault(pid, now)
+        out["running"].append({"id": item[0], "prompt_id": pid, "name": _prompt_name(graph),
+                               "nodes": len(graph), "elapsed": round(now - _JOB_SEEN[pid])})
+    for pos, item in enumerate(q.get("queue_pending") or []):
+        pid, graph = item[1], (item[2] or {})
+        _JOB_SEEN.setdefault(pid, now)
+        out["pending"].append({"id": item[0], "prompt_id": pid, "name": _prompt_name(graph),
+                               "nodes": len(graph), "position": pos + 1,
+                               "waiting": round(now - _JOB_SEEN[pid])})
+    live = {it["prompt_id"] for it in out["running"] + out["pending"]}
+    for pid in [k for k in _JOB_SEEN if k not in live]:
+        _JOB_SEEN.pop(pid, None)
+    out["counts"] = {"running": len(out["running"]), "pending": len(out["pending"]),
+                     "total": len(out["running"]) + len(out["pending"])}
+    return out
+
+
 @app.get("/api/comfy/job")
 def api_comfy_job():
     """What ComfyUI is working on right now.

@@ -12,6 +12,16 @@ diagonal pairs swinging fore-aft in the rendered frames; `hog_rig_test.glb` → 
 No local motion model exists, so these are gaits, not authored animation — `--save-blend` in the
 rig builders is the route for hand-keyed work.
 
+## 2026-11-02 (desktop): ComfyUI queue is named, and the count is no longer off by one
+
+`GET /api/comfy/jobs` returns running + pending prompts with a human name derived from the graph
+(`TRELLIS.2 image→3D → 3d/hog_hq`, `Wan 2.2 video → <prompt text>`, `Qwen image edit → …`), elapsed
+time (first-seen, since ComfyUI does not expose a start stamp) and queue position. The panel's
+progress card renders that list under the bar. The old "N queued" came from
+`exec_info.queue_remaining`, which **counts the running job as queued** — verified against the live
+queue: ComfyUI reports `queue_remaining: 1` while one job runs and nothing waits; the panel now
+shows `1 running · 0 queued`.
+
 # Project state — read this first
 
 ## 2026-11-02 (desktop): rig joints — local VLM places them, and the pig.glb identity bug
