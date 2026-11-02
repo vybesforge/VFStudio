@@ -2,12 +2,14 @@
 
 ## 2026-11-02 (desktop): Services tab → Endpoints ("point other programs here")
 
-`control/panel.py` gained an `ENDPOINTS` list + `GET /api/endpoints`; the **Services** tab renders it as
-copy-paste rows: TTS `/v1/audio/speech`, STT `/v1/audio/transcriptions`, voice clone (same speech route
-+ ref_audio/ref_text), ComfyUI `:8188`, writer LLM `:8081/v1`, VLM `:8082/v1`, panel API `:8787`.
-Each row has **Copy URL**, **Details** (method/path/schema table + a working curl) and **Copy all → .env
-/ JSON**; a host switch flips every link between `127.0.0.1` and the LAN IP (`192.168.1.44`), with a
-note that only the panel is LAN-bound unless a service is started with a 0.0.0.0 listen.
+`control/panel.py` gained an `ENDPOINTS` list + `GET /api/endpoints`; the **Services** tab renders one
+card per service with that service's **endpoint tiles inside it** — mlx-audio holds TTS
+`/v1/audio/speech`, STT `/v1/audio/transcriptions` and voice clone; then ComfyUI `:8188`, writer LLM
+`:8081/v1`, VLM `:8082/v1`, panel API `:8787`. Each tile has **Copy** and a **curl** panel
+(method/path/schema + a working snippet); **Copy all → .env / JSON** and the host switch sit above the
+grid and flip every link between `127.0.0.1` and the LAN IP (`192.168.1.44`). The service card's status
+pill is the start/stop toggle. Cards re-render only when the host changes — status updates patch the pill
+and port line in place, so an open log or curl panel is not collapsed by the 2.5 s poll.
 The status pill on each service card is itself the start/stop toggle (running → click stops, stopped →
 click starts; verified both directions on ComfyUI, which came back responding in 6 s).
 Verified live: TTS returned a 24 kHz wav, STT transcribed `output/voice/clone_*.wav`, `/object_info`
