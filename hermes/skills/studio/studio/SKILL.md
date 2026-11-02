@@ -76,9 +76,13 @@ that lists every URL another local program or page can be pointed at (TTS, STT, 
 writer LLM, VLM, this panel's own API) with per-row **Copy URL**, a **Details** panel (routes + a
 working curl), and **Copy all → .env / JSON**; a host switch flips every link between `127.0.0.1` and
 the LAN IP. Source of truth is the `ENDPOINTS` list in `control/panel.py` served at `/api/endpoints` —
-add a service there, not in the HTML, or the page and reality drift. Resources tab has
+add a service there, not in the HTML, or the page and reality drift. Each card's **status pill is the
+start/stop toggle** (running → click stops, stopped → click starts) — a status you cannot act on is a
+bug, and Dylan asks for exactly that. Resources tab has
 **Unload all models** and **Stop everything**. There is one page; never add a second UI or a
-"legacy" copy — Dylan asks for consolidation and removes duplicates.
+"legacy" copy — Dylan asks for consolidation and removes duplicates. Panel UI conventions (which tab
+owns what, the endpoints block, copy-button pattern, card-layout and re-render pitfalls, how to test a
+copy button): `references/panel-ui.md`.
 
 **Branding (standing preference):** anything web-facing in the stack carries the VybesForge look —
 vendored `control/brand/*.png` (VF monogram, never hot-linked), palette navy `#02060f/#0b121d`,
