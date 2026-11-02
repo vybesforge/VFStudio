@@ -105,17 +105,17 @@
   <div class="card" id="progress" style="min-width:360px;flex:1;max-width:720px;padding:10px 14px"></div>
 </header>
 <nav>
-  <button data-tab="image" class="active">Image</button>
-  <button data-tab="video">Video</button>
-  <button data-tab="3d">3D &amp; VR</button>
-  <button data-tab="sound">Sound</button>
-  <button data-tab="voice">Voice</button>
-  <button data-tab="write">Write</button>
-  <button data-tab="vision">Vision</button>
-  <button data-tab="train">Train</button>
-  <button data-tab="models">Models</button>
-  <button data-tab="services">Services</button>
-  <button data-tab="resources">Resources</button>
+  <button data-tab="image" class="active" title="Draw stills, upscale a picture, or edit one.">Image</button>
+  <button data-tab="video" title="Turn a prompt or a still into a short clip.">Video</button>
+  <button data-tab="3d" title="Look at a mesh in the room, or prep a print.">3D &amp; VR</button>
+  <button data-tab="sound" title="Make a sound effect, a song, or split a track.">Sound</button>
+  <button data-tab="voice" title="Speak text, clone a voice, or transcribe audio.">Voice</button>
+  <button data-tab="write" title="Draft prose, an outline, a screenplay, or lore.">Write</button>
+  <button data-tab="vision" title="Ask about a picture, or take a camera snap.">Vision</button>
+  <button data-tab="train" title="Teach a small LoRA from your own photos.">Train</button>
+  <button data-tab="models" title="See which weights are here, and what this machine should fetch.">Models</button>
+  <button data-tab="services" title="Start or stop the local engines. Nothing is generated here.">Services</button>
+  <button data-tab="resources" title="CPU, memory, and disk. Unload frees memory.">Resources</button>
 </nav>
 <main>
 
@@ -131,19 +131,20 @@
         <div><label>seed (blank = random)</label><input id="im-seed" placeholder="random"></div>
         <div><label>count</label><input id="im-n" value="1" type="number" min="1" max="4"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n'),lora:v('im-lora'),lora_strength:v('im-lora-s')})">Generate</button></div>
-      <div class="hint">CLI: <code>gen image "prompt" --model zimage</code></div>
+      <div class="btns"><button class="primary" title="Draw a still from the prompt." onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n'),lora:v('im-lora'),lora_strength:v('im-lora-s')})">Generate</button></div>
+      <div class="hint">Makes one or more pictures with the model you picked, on this machine. CLI: <code>gen image "prompt" --model zimage</code></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Upscale / control</div>
       <label>source image (click a gallery item → "use", or upload)</label>
-      <div class="row" style="gap:6px"><input id="im-src" placeholder="/Users/dcruse/media-stack/output/image/…png" style="flex:1"><button onclick="pickFile('im-src','image')">Upload…</button></div>
+      <div class="row" style="gap:6px"><input id="im-src" placeholder="a local picture" style="flex:1"><button title="Choose a picture already on this machine." onclick="pickFile('im-src','image')">Upload…</button></div>
       <img id="im-src-prev" style="max-height:120px;border-radius:6px;display:none;margin:4px 0">
       <div class="fields">
         <div><label>upscaler</label><select id="im-up"><option value="esrgan">RealESRGAN x4 · fast</option><option value="ultrasharp">4x-UltraSharp · crisper</option><option value="seedvr2">SeedVR2 3B · diffusion, slow</option></select></div>
         <div><label>scale</label><input id="im-scale" value="2"></div>
       </div>
-      <div class="btns"><button onclick="runJob('upscale',{image:v('im-src'),method:v('im-up'),scale:v('im-scale')})">Upscale</button>
-        <button onclick="runJob('control',{prompt:v('im-prompt'),image:v('im-src'),mode:'canny'})">Canny-guided re-render with prompt</button></div>
+      <div class="btns"><button title="Enlarge the source picture." onclick="runJob('upscale',{image:v('im-src'),method:v('im-up'),scale:v('im-scale')})">Upscale</button>
+        <button title="Redraw the prompt, steered by the edges of the source." onclick="runJob('control',{prompt:v('im-prompt'),image:v('im-src'),mode:'canny'})">Canny-guided re-render with prompt</button></div>
+      <div class="hint">Upscale makes a larger version of the source. Canny keeps its outlines and paints a new picture from the prompt above.</div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Edit (Qwen-Image-Edit 2509) — change what you say, keep the rest</div>
       <label>instruction</label><input id="ed-prompt" placeholder="make it a snowy night; keep the hog exactly the same">
@@ -151,13 +152,13 @@
         <div><label>2nd reference (optional, "put the object from image 2 …")</label><input id="ed-ref2" placeholder="/path/b.png"></div>
         <div><label>seed</label><input id="ed-seed" placeholder="random"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('edit',{image:v('im-src'),prompt:v('ed-prompt'),ref2:v('ed-ref2'),seed:v('ed-seed'),fast:true})">Edit source image (fast, 4 steps)</button>
-        <button onclick="runJob('edit',{image:v('im-src'),prompt:v('ed-prompt'),ref2:v('ed-ref2'),seed:v('ed-seed'),fast:false})">Edit (20 steps, slow)</button></div>
-      <div class="hint">Uses the source image path above. Heaviest model in the stack — run it alone (Resources → Unload all first). CLI: <code>gen edit in.png "instruction" --fast</code></div>
+      <div class="btns"><button class="primary" title="Change the source to match the instruction. Four steps, quicker." onclick="runJob('edit',{image:v('im-src'),prompt:v('ed-prompt'),ref2:v('ed-ref2'),seed:v('ed-seed'),fast:true})">Edit source image (fast, 4 steps)</button>
+        <button title="Same edit, twenty steps. Slower and a bit sharper." onclick="runJob('edit',{image:v('im-src'),prompt:v('ed-prompt'),ref2:v('ed-ref2'),seed:v('ed-seed'),fast:false})">Edit (20 steps, slow)</button></div>
+      <div class="hint">Rewrites the source to follow the instruction and leaves the rest alone. Heaviest model in the stack — unload other models first. CLI: <code>gen edit in.png "instruction" --fast</code></div>
     </div>
     <div id="jobs-image" class="card" style="margin-top:12px"></div>
   </div>
-  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('image')">Refresh</button></div><div class="gal" id="gal-image"></div></div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button title="Reload the pictures." onclick="loadGallery('image')">Refresh</button></div><div class="gal" id="gal-image"></div></div>
 </div></section>
 
 <!-- VIDEO -->
@@ -166,7 +167,7 @@
     <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B</span></div>
       <label>prompt</label><textarea id="vd-prompt">a mulefoot hog walks slowly across a sunlit barn floor, dust in the air, cinematic</textarea>
       <label>start image (optional — image-to-video)</label>
-      <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')">Upload…</button></div>
+      <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button title="Optional first frame. Blank stays text-to-video." onclick="pickFile('vd-img','image')">Upload…</button></div>
       <div class="fields">
         <div><label>model</label><select id="vd-model"><option value="wan">Wan 2.2 5B · fast path (measured)</option><option value="hyv15">HunyuanVideo 1.5 8.3B · quality (t2v 480p / i2v 720p, untested)</option></select></div>
         <div><label>size</label><select id="vd-size"><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
@@ -174,29 +175,30 @@
         <div><label>steps</label><input id="vd-steps" value="20"></div>
         <div><label>seed</label><input id="vd-seed" placeholder="random"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
-      <div class="hint">~14 s/step at 832×480×49f on this GPU. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
+      <div class="btns"><button class="primary" title="Make a short clip from the prompt, with the model you picked." onclick="runJob('video',{prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
+      <div class="hint">Wan 2.2 is the fast path. HunyuanVideo 1.5 is the heavier quality path. A start image makes it image-to-video; blank is text-to-video. Trim and captions: <code>vid</code> CLI.</div>
     </div>
     <div id="jobs-video" class="card" style="margin-top:12px"></div>
   </div>
-  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('video')">Refresh</button></div><div class="gal" id="gal-video"></div></div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button title="Reload the clips." onclick="loadGallery('video')">Refresh</button></div><div class="gal" id="gal-video"></div></div>
 </div></section>
 
 <!-- 3D -->
 <section class="tab" id="tab-3d">
   <div class="row" style="margin-bottom:10px"><div><div class="name">Asset room</div><div class="desc" id="vr-asset">checking…</div></div>
-    <div class="btns" style="margin:0"><button class="primary" onclick="window.open('/vr/index.html','_blank')">Open full screen (WebXR)</button>
-      <button onclick="window.open('/vr/index.html?rig=1','_blank')">Joint picker</button><button onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
+    <div class="btns" style="margin:0"><button class="primary" title="Open the room full screen." onclick="window.open('/vr/index.html','_blank')">Open full screen (WebXR)</button>
+      <button title="Mark joints on the mesh so it can be rigged." onclick="window.open('/vr/index.html?rig=1','_blank')">Joint picker</button><button title="Reload the room embedded on this page." onclick="document.getElementById('room').src='/vr/index.html?t='+Date.now()">Reload</button></div></div>
   <iframe id="room" class="room" src="/vr/index.html" allow="xr-spatial-tracking; fullscreen; gyroscope; accelerometer"></iframe>
   <div class="row" style="margin-top:14px"><h2 style="margin:0">Game projects <span class="muted" style="font-weight:400;font-size:12px">~/media-stack/game/ — their models, audio and sprites also appear in the galleries</span></h2><button onclick="loadGames()">Refresh</button></div>
   <div id="games" class="grid"></div>
   <div class="grid" style="margin-top:14px">
     <div class="card"><div class="name">Photo → mesh</div><div class="desc">TRELLIS.2 (gold path) runs through the ComfyUI UI template; it cannot be driven from this page. Recipe: skill <code>local-media-stack</code> → <code>photo-to-3d-gold-standard.md</code>. Progress shows in the bar above while it runs.</div>
-      <div class="btns"><button onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div></div>
-    <div class="card"><div class="name">Print</div><div class="desc">build123d part → <code>meshcheck.py</code> → <code>slice --preset bambu|generic</code> → G-code/3MF. Skill <code>studio-3d-print</code>. STL/G-code previews appear in the gallery.</div></div>
+      <div class="btns"><button title="Open the local ComfyUI page, where photo-to-mesh runs." onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div>
+      <div class="hint">TRELLIS is started there, not from this page. The recipe is in the <code>local-media-stack</code> skill.</div></div>
+    <div class="card"><div class="name">Print</div><div class="desc">Check a mesh, then slice it for a printer (<code>bambu</code> or <code>generic</code>). Skill <code>studio-3d-print</code>. Mesh previews show in the gallery below.</div></div>
     <div class="card"><div class="name">VR build</div><div class="desc">Godot 4.7 OpenXR room at <code>~/media-stack/vr-godot</code>; Windows SteamVR export + <code>optimize_glb.sh</code>. Skill <code>studio-vr</code>.</div></div>
   </div>
-  <div class="row" style="margin-top:14px"><h2 style="margin:0">Meshes &amp; prints</h2><button onclick="loadGallery('3d')">Refresh</button></div>
+  <div class="row" style="margin-top:14px"><h2 style="margin:0">Meshes &amp; prints</h2><button title="Reload meshes and prints." onclick="loadGallery('3d')">Refresh</button></div>
   <div class="gal" id="gal-3d"></div>
 </section>
 
@@ -209,7 +211,8 @@
         <div><label>model</label><select id="sx-model"><option value="sa3sfx">Stable Audio 3 Small-SFX · dedicated SFX, 8 steps (~4 s)</option><option value="sao">Stable Audio Open 1.0 · 50 steps (~12 s)</option><option value="sa3">Stable Audio 3 medium · 8 steps, up to 150 s</option></select></div>
         <div><label>seconds</label><input id="sx-sec" value="8"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('sfx',{prompt:v('sx-prompt'),model:v('sx-model'),seconds:v('sx-sec')})">Generate SFX</button></div>
+      <div class="btns"><button class="primary" title="Synthesize the sound you described." onclick="runJob('sfx',{prompt:v('sx-prompt'),model:v('sx-model'),seconds:v('sx-sec')})">Generate SFX</button></div>
+      <div class="hint">A short effect from the model you picked. CLI: <code>gen sfx "prompt"</code></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Music <span class="tag">ACE-Step 1.5</span></div>
       <label>style tags</label><input id="mu-tags" value="lo-fi hip hop, warm rhodes, vinyl crackle, mellow">
@@ -218,49 +221,52 @@
         <div><label>seconds</label><input id="mu-sec" value="60"></div><div><label>bpm</label><input id="mu-bpm" value="85"></div>
         <div class="full"><label>key</label><input id="mu-key" value="C major"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('music',{prompt:v('mu-tags'),lyrics:v('mu-lyrics'),seconds:v('mu-sec'),bpm:v('mu-bpm'),key:v('mu-key')})">Generate music</button></div>
-      <div class="hint">Also: <code>stack music "caption"</code> (MiniMax-Music via mlx-audio).</div>
+      <div class="btns"><button class="primary" title="Write a song from the style tags and lyrics." onclick="runJob('music',{prompt:v('mu-tags'),lyrics:v('mu-lyrics'),seconds:v('mu-sec'),bpm:v('mu-bpm'),key:v('mu-key')})">Generate music</button></div>
+      <div class="hint">ACE-Step builds the track. On Apple Silicon, <code>stack music "caption"</code> is the other local music path.</div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Stems (Demucs) — split a song into drums / bass / vocals / other</div>
       <label>audio file (gallery item → "stems", or upload)</label>
-      <div class="row" style="gap:6px"><input id="st-file" placeholder="/Users/dcruse/media-stack/output/music/….flac" style="flex:1"><button onclick="pickFile('st-file','voice')">Upload…</button></div>
+      <div class="row" style="gap:6px"><input id="st-file" placeholder="a local song" style="flex:1"><button title="Choose a song already on this machine." onclick="pickFile('st-file','voice')">Upload…</button></div>
       <div class="fields"><div><label>model</label><select id="st-model"><option value="htdemucs">htdemucs · fast (~5 s / 30 s)</option><option value="htdemucs_ft">htdemucs_ft · better, 2× slower</option><option value="htdemucs_6s">htdemucs_6s · + guitar, piano</option></select></div></div>
-      <div class="btns"><button class="primary" onclick="runJob('stems',{file:v('st-file'),model:v('st-model')})">Split into stems</button>
-        <button onclick="runJob('stems',{file:v('st-file'),karaoke:true})">Karaoke (remove vocals)</button></div>
-      <div class="hint">CLI: <code>stems split song.flac</code> · <code>stems karaoke song.mp3</code></div>
+      <div class="btns"><button class="primary" title="Separate drums, bass, vocals, and the rest." onclick="runJob('stems',{file:v('st-file'),model:v('st-model')})">Split into stems</button>
+        <button title="Rebuild the song with the vocals taken out." onclick="runJob('stems',{file:v('st-file'),karaoke:true})">Karaoke (remove vocals)</button></div>
+      <div class="hint">Split makes the four parts. Karaoke is the instrumental. CLI: <code>stems split song.flac</code> · <code>stems karaoke song.mp3</code></div>
     </div>
     <div id="jobs-sound" class="card" style="margin-top:12px"></div>
   </div>
-  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('sound')">Refresh</button></div><div class="gal" id="gal-sound"></div></div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button title="Reload sounds, songs, and stems." onclick="loadGallery('sound')">Refresh</button></div><div class="gal" id="gal-sound"></div></div>
 </div></section>
 
 <!-- VOICE -->
 <section class="tab" id="tab-voice"><div class="two">
   <div>
     <div class="card"><div class="name">Speak <span class="tag">Kokoro</span></div>
-      <label>text</label><textarea id="vo-text">Voice cloning on Apple Silicon works entirely offline.</textarea>
+      <label>text</label><textarea id="vo-text">The forge stays on this machine. Nothing is sent out.</textarea>
       <label>voice</label><select id="vo-voice"><option>af_heart</option></select>
-      <div class="btns"><button class="primary" onclick="runJob('say',{text:v('vo-text'),voice:v('vo-voice')})">Speak</button></div>
+      <div class="btns"><button class="primary" title="Read the text aloud in the chosen voice." onclick="runJob('say',{text:v('vo-text'),voice:v('vo-voice')})">Speak</button></div>
+      <div class="hint">Kokoro speaks it on this machine. CLI: <code>voice say "text"</code></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Clone a voice <span class="tag">Qwen3-TTS</span></div>
       <label>reference voice (5–15 s) — record it, upload it, or paste a path</label>
       <div class="btns">
-        <button id="vo-rec" onclick="toggleRec()">● Record from mic</button>
+        <button id="vo-rec" title="Record a few seconds from the mic as a reference." onclick="toggleRec()">● Record from mic</button>
         <span id="vo-rectime" class="muted"></span>
         <input type="file" id="vo-upload" accept="audio/*,video/*" style="display:none" onchange="uploadRef(this.files[0])">
-        <button onclick="$('vo-upload').click()">Upload file…</button>
+        <button title="Use a clip already on this machine as the reference." onclick="$('vo-upload').click()">Upload file…</button>
       </div>
       <audio id="vo-preview" controls style="width:100%;margin:6px 0;display:none"></audio>
-      <input id="vo-ref" placeholder="/Users/dcruse/…/ref.wav">
+      <input id="vo-ref" placeholder="a short reference clip">
       <label>what the reference says (transcript; blank = auto-transcribe first)</label><input id="vo-reftext">
-      <div class="btns"><button class="primary" onclick="cloneJob()">Clone &amp; speak the text above</button></div>
+      <div class="btns"><button class="primary" title="Speak the text above in the reference voice." onclick="cloneJob()">Clone &amp; speak the text above</button></div>
+      <div class="hint">Needs a short reference clip. On Apple Silicon this is the MLX cloner; other systems use the stand-in in the install notes.</div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Transcribe <span class="tag">Whisper</span></div>
-      <label>audio / video path</label><input id="vo-file"><div class="btns"><button onclick="runJob('transcribe',{file:v('vo-file')})">Transcribe</button><button onclick="runJob('transcribe',{file:v('vo-file'),srt:true})">→ SRT</button></div>
+      <label>audio / video path</label><input id="vo-file" placeholder="a local recording"><div class="btns"><button title="Turn the audio into words." onclick="runJob('transcribe',{file:v('vo-file')})">Transcribe</button><button title="Turn the audio into timed captions." onclick="runJob('transcribe',{file:v('vo-file'),srt:true})">→ SRT</button></div>
+      <div class="hint">Transcribe is plain text. SRT is caption cues. CLI: <code>voice transcribe file.wav</code> · <code>voice transcribe file.wav --srt</code></div>
     </div>
     <div id="jobs-voice" class="card" style="margin-top:12px"></div>
   </div>
-  <div><div class="row"><h2 style="margin:0">Outputs</h2><button onclick="loadGallery('voice')">Refresh</button></div><div class="gal" id="gal-voice"></div></div>
+  <div><div class="row"><h2 style="margin:0">Outputs</h2><button title="Reload speech clips." onclick="loadGallery('voice')">Refresh</button></div><div class="gal" id="gal-voice"></div></div>
 </div></section>
 
 <!-- WRITE -->
@@ -274,7 +280,7 @@
         <option value="lore">lore — world bible entries</option><option value="chat">chat — free prompt</option>
         <option value="continue">continue — extend a draft file</option><option value="revise">revise — edit a draft file</option></select>
       <label id="wr-prompt-l">premise / prompt</label><textarea id="wr-prompt" style="min-height:110px">A lighthouse keeper discovers the fog is listening.</textarea>
-      <div id="wr-file-row" style="display:none"><label>draft file path (.md)</label><input id="wr-file" placeholder="/Users/dcruse/media-stack/output/text/prose_….md"><label>editor's note (revise)</label><input id="wr-note" placeholder="tighten pacing, more sensory detail"></div>
+      <div id="wr-file-row" style="display:none"><label>draft file path (.md)</label><input id="wr-file" placeholder="a markdown draft"><label>editor's note (revise)</label><input id="wr-note" placeholder="tighten pacing, more sensory detail"></div>
       <div class="fields">
         <div><label>genre</label><input id="wr-genre" value="literary horror"></div><div><label>tone</label><input id="wr-tone" placeholder="dry, slow-burn"></div>
         <div><label>POV</label><select id="wr-pov"><option>third</option><option>first</option><option>second</option></select></div>
@@ -283,12 +289,12 @@
         <div><label>chapters (outline)</label><input id="wr-chapters" value="12"></div><div><label>pages (screenplay)</label><input id="wr-pages" value="4"></div>
         <div><label>characters (dialogue)</label><input id="wr-chars" placeholder="Mara, Ivo"></div><div><label>entries (lore)</label><input id="wr-items" value="8"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="writeJob()">Write</button></div>
-      <div class="hint">CLI: <code>scribe prose "premise" --genre noir --words 1200</code> · outputs saved to <code>output/text/</code>. 27B model: ~15 tok/s; a 900-word scene ≈ 1-2 min.</div>
+      <div class="btns"><button class="primary" title="Draft in the mode you picked." onclick="writeJob()">Write</button></div>
+      <div class="hint">Prose, outline, screenplay, dialogue, lore, or a revision of a draft you already have. CLI: <code>scribe prose "premise" --genre noir --words 1200</code></div>
     </div>
     <div id="jobs-write" class="card" style="margin-top:12px"></div>
   </div>
-  <div><div class="row"><h2 style="margin:0">Latest text</h2><button onclick="loadGallery('text')">Refresh</button></div>
+  <div><div class="row"><h2 style="margin:0">Latest text</h2><button title="Reload drafts." onclick="loadGallery('text')">Refresh</button></div>
     <pre id="wr-result" style="max-height:60vh;min-height:200px;font-size:13px;line-height:1.55;color:var(--fg)">(results appear here)</pre>
     <div class="gal" id="gal-text" style="margin-top:12px"></div></div>
 </div></section>
@@ -299,18 +305,19 @@
     <div class="card"><div class="name">Look at an image <span class="tag">local VLM</span></div>
       <div class="desc" id="vlm-state">checking vision VLM…</div>
       <label>image (click a gallery item → "ask", or upload)</label>
-      <div class="row" style="gap:6px"><input id="vi-image" placeholder="/Users/dcruse/media-stack/output/image/….png" style="flex:1"><button onclick="pickFile('vi-image','image')">Upload…</button></div>
+      <div class="row" style="gap:6px"><input id="vi-image" placeholder="a local picture" style="flex:1"><button title="Choose a picture. It is not changed." onclick="pickFile('vi-image','image')">Upload…</button></div>
       <label>question</label><input id="vi-q" value="Describe this image. Any defects or artifacts?">
-      <div class="btns"><button class="primary" onclick="runJob('see',{op:'ask',image:v('vi-image'),question:v('vi-q')})">Ask</button>
-        <button onclick="runJob('see',{op:'describe',image:v('vi-image')})">Describe</button><button onclick="runJob('see',{op:'ocr',image:v('vi-image')})">OCR</button></div>
+      <div class="btns"><button class="primary" title="Answer the question about this picture." onclick="runJob('see',{op:'ask',image:v('vi-image'),question:v('vi-q')})">Ask</button>
+        <button title="Say what is in the picture." onclick="runJob('see',{op:'describe',image:v('vi-image')})">Describe</button><button title="Read any text in the picture." onclick="runJob('see',{op:'ocr',image:v('vi-image')})">OCR</button></div>
+      <div class="hint">The reply shows under Answer. The picture itself is not changed. CLI: <code>see ask photo.png "question"</code></div>
     </div>
-    <div class="card" style="margin-top:12px"><div class="name">Camera</div><div class="desc">FaceTime HD camera via imagesnap → <code>output/camera/</code>. macOS will ask for camera permission the first time.</div>
-      <div class="btns"><button class="primary" onclick="runJob('see',{op:'snap'})">Snap</button><button onclick="runJob('see',{op:'snap',question:v('vi-q')})">Snap &amp; ask</button></div>
+    <div class="card" style="margin-top:12px"><div class="name">Camera</div><div class="desc">One frame from the local camera. The OS may ask for camera permission the first time.</div>
+      <div class="btns"><button class="primary" title="Take one still from the camera." onclick="runJob('see',{op:'snap'})">Snap</button><button title="Take a still, then answer the question about it." onclick="runJob('see',{op:'snap',question:v('vi-q')})">Snap &amp; ask</button></div>
       <div class="hint">CLI: <code>see snap --ask "what am I holding?"</code> · <code>see describe photo.jpg</code></div>
     </div>
     <div id="jobs-vision" class="card" style="margin-top:12px"></div>
   </div>
-  <div><div class="row"><h2 style="margin:0">Answer</h2><button onclick="loadGallery('camera')">Refresh</button></div>
+  <div><div class="row"><h2 style="margin:0">Answer</h2><button title="Reload camera shots and recent pictures." onclick="loadGallery('camera')">Refresh</button></div>
     <pre id="vi-result" style="max-height:40vh;min-height:120px;font-size:13px;line-height:1.55;color:var(--fg)">(answers appear here)</pre>
     <h2>Camera shots &amp; recent images</h2><div class="gal" id="gal-camera"></div></div>
 </div></section>
@@ -324,8 +331,8 @@
         <div><label>caption for the uploaded images (keep <code>[trigger]</code>)</label><input id="tr-ds-cap" value="[trigger], photo, natural light"></div>
       </div>
       <input type="file" id="tr-ds-files" accept="image/*" multiple style="display:none" onchange="uploadDataset(this.files)">
-      <div class="btns"><button class="primary" onclick="$('tr-ds-files').click()">Add images…</button><span id="tr-ds-status" class="muted"></span></div>
-      <div class="hint">Varied angles and backgrounds, nothing else in frame. You can add more images later with the same name. Captions can be edited in <code>~/media-stack/train/datasets/&lt;name&gt;/NNN.txt</code>.</div>
+      <div class="btns"><button class="primary" title="Add photos of one subject. Nothing is trained yet." onclick="$('tr-ds-files').click()">Add images…</button><span id="tr-ds-status" class="muted"></span></div>
+      <div class="hint">Varied angles and backgrounds, nothing else in frame. You can add more later under the same name. Each photo gets a small caption file beside it.</div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">2 · Train</div>
       <div class="fields">
@@ -338,8 +345,8 @@
         <div><label>resolution</label><select id="tr-res"><option>512</option><option>768</option></select></div>
         <div><label>save every</label><input id="tr-save" value="250"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="trainJob()">Start training</button></div>
-      <div class="hint">Measured here: ~12 s/step at 512 px → 1000 steps ≈ 3.5 h. Everything else gets unloaded first; don't generate while it runs. CLI: <code>lora train --dataset DIR --name NAME --trigger WORD</code></div>
+      <div class="btns"><button class="primary" title="Train a LoRA on this dataset. Other models unload first." onclick="trainJob()">Start training</button></div>
+      <div class="hint">A small adapter you can pick on the Image tab. Don't generate while it runs. CLI: <code>lora train --dataset DIR --name NAME --trigger WORD</code></div>
     </div>
     <div id="jobs-train" class="card" style="margin-top:12px"></div>
   </div>
@@ -385,7 +392,7 @@ skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-p
 <!-- RESOURCES -->
 <section class="tab" id="tab-resources">
   <div class="card" style="margin-bottom:14px"><div class="row"><div><div class="name">Memory control</div><div class="desc">Unload = ComfyUI models out of memory, writer LLM + vision VLM stopped, mlx-audio recycled — services stay up. Stop everything = all four services down.</div></div>
-    <div class="btns" style="margin:0"><button class="primary" onclick="unloadAll(false)">Unload all models / free memory</button><button class="danger" onclick="unloadAll(true)">Stop everything</button></div></div>
+    <div class="btns" style="margin:0"><button class="primary" title="Unload models so memory is free. The programs stay running." onclick="unloadAll(false)">Unload all models / free memory</button><button class="danger" title="Stop ComfyUI, audio, the writer, and vision." onclick="unloadAll(true)">Stop everything</button></div></div>
     <div class="meta" id="unload-result"></div></div>
   <div class="stats" id="stats"></div>
   <h2>Top processes by memory</h2>
@@ -442,8 +449,8 @@ async function writeJob(){ const m=v('wr-mode'); const a={mode:m,prompt:v('wr-pr
   if(m!=='outline') delete a.chapters; if(m!=='screenplay') delete a.pages; if(m!=='dialogue') delete a.chars; if(m!=='lore') delete a.items; if(!['outline','prose'].includes(m)) delete a.genre;
   $('wr-result').textContent='writing…'; runJob('write',a); }
 async function svcState(){ try{ const s=await (await fetch('/api/status')).json(); const l=s.services.llm, vv=s.services.vision;
-  $('llm-state').innerHTML=`<span class="dot ${l.responding?'on':'off'}"></span>${l.label} :${l.port} — ${l.responding?'running':'stopped'} ${l.responding?'':'<button onclick="act(\'start/llm\');setTimeout(svcState,3000)">Start (loads ~16 GB, 1-2 min)</button>'}`;
-  $('vlm-state').innerHTML=`<span class="dot ${vv.responding?'on':'off'}"></span>${vv.label} :${vv.port} — ${vv.responding?'running':'stopped'} ${vv.responding?'':'<button onclick="act(\'start/vision\');setTimeout(svcState,3000)">Start (~5 GB, ~30 s)</button>'}`; }catch(e){} }
+  $('llm-state').innerHTML=`<span class="dot ${l.responding?'on':'off'}"></span>${l.label} :${l.port} — ${l.responding?'running':'stopped'} ${l.responding?'':'<button title="Start the local writer so this tab can draft." onclick="act(\'start/llm\');setTimeout(svcState,3000)">Start writer</button>'}`;
+  $('vlm-state').innerHTML=`<span class="dot ${vv.responding?'on':'off'}"></span>${vv.label} :${vv.port} — ${vv.responding?'running':'stopped'} ${vv.responding?'':'<button title="Start the local vision model so Ask and Snap can run." onclick="act(\'start/vision\');setTimeout(svcState,3000)">Start vision</button>'}`; }catch(e){} }
 async function cloneJob(){ if(!v('vo-ref')){flash('record or upload a reference first');return;} runJob('clone',{ref:v('vo-ref'),ref_text:v('vo-reftext'),text:v('vo-text')}); }
 // ── mic recording → /api/studio/upload → sets the reference path (localhost counts as a secure context for getUserMedia)
 let _rec=null,_chunks=[],_t0=0,_tick=null;
@@ -464,9 +471,9 @@ async function toggleRec(){
 loadLoras();   // the Image tab is open at start and never fires onTab
 async function loadTrain(){
   const d=await (await fetch('/api/studio/train')).json();
-  $('tr-datasets').innerHTML = d.datasets.length ? d.datasets.map(x=>`<div class="row" style="justify-content:space-between;padding:4px 0">${x.sample?`<img src="${x.sample}" style="height:40px;border-radius:4px">`:''}<b style="flex:1;margin-left:8px">${x.name}</b><span class="muted">${x.images} images · ${x.captioned} captions</span><button onclick="$('tr-ds').value='${x.name}';$('tr-name').value='${x.name}';flash('selected')">use</button></div>`).join('') : '<span class="muted">none yet — add images on the left</span>';
+  $('tr-datasets').innerHTML = d.datasets.length ? d.datasets.map(x=>`<div class="row" style="justify-content:space-between;padding:4px 0">${x.sample?`<img src="${x.sample}" style="height:40px;border-radius:4px">`:''}<b style="flex:1;margin-left:8px">${x.name}</b><span class="muted">${x.images} images · ${x.captioned} captions</span><button title="Use this dataset in the form. Does not start training." onclick="$('tr-ds').value='${x.name}';$('tr-name').value='${x.name}';flash('selected')">use</button></div>`).join('') : '<span class="muted">none yet — add images on the left</span>';
   $('tr-ds').innerHTML = d.datasets.map(x=>`<option>${x.name}</option>`).join('');
-  $('tr-loras').innerHTML = d.loras.length ? d.loras.map(l=>`<div class="row" style="justify-content:space-between;padding:4px 0"><b>${l.name}</b><span class="muted">${l.mb} MB · ${l.mtime}</span><button onclick="$('im-lora').value='${l.name}';document.querySelector('nav button[data-tab=image]').click();flash('LoRA selected on the Image tab')">use in Image</button></div>`).join('') : '<span class="muted">none yet</span>';
+  $('tr-loras').innerHTML = d.loras.length ? d.loras.map(l=>`<div class="row" style="justify-content:space-between;padding:4px 0"><b>${l.name}</b><span class="muted">${l.mb} MB · ${l.mtime}</span><button title="Open Image with this LoRA selected, ready to draw." onclick="$('im-lora').value='${l.name}';document.querySelector('nav button[data-tab=image]').click();flash('LoRA selected on the Image tab')">use in Image</button></div>`).join('') : '<span class="muted">none yet</span>';
   $('tr-runs').innerHTML = d.runs.length ? d.runs.map(r=>`<div style="padding:4px 0"><b>${r.name}</b> ${r.done?'<span style="color:var(--cyan)">done</span>':''}<div class="muted" style="font:11px ui-monospace,monospace">${r.last||''}</div></div>`).join('') : '<span class="muted">none yet</span>';
   loadLoras(d.loras);
 }
@@ -563,15 +570,15 @@ function renderItem(it,i,kind,cache){
     const where=it.path.replace(/^\/Users\/[^/]+\/media-stack\//,'').replace(/\/[^/]*$/,'');
     return `<div class="it"><div class="th" onclick="openItem(${cache}[${i}])">${thumb(it,kind)}<span class="pill">${it.ext}</span></div>
       <div class="bd"><div class="fn">${it.name}</div><div class="kv">${fmtB(it.bytes)} · ${it.when} · <span title="${it.path}">${where}</span></div>${audio}
-      <div class="acts"><button onclick="openItem(galCache['${kind}'][${i}])">preview</button>
-        ${kind==='image'?`<button onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
-        ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
-        ${kind==='sound'?`<button onclick="$('st-file').value='${it.path}';flash('stems source set')">stems</button>`:''}
-        ${kind==='video'||kind==='image'?`<button onclick="$('vd-img').value='${it.path}';flash('start image set')">→ video</button>`:''}
-        ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}','_blank')">room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}&rig=1','_blank')">rig</button>`:''}
-        ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}
-        ${kind==='text'?`<button onclick="$('wr-file').value='${it.path}';flash('draft set')">as draft</button>`:''}
-        <button onclick="window.open('${it.url}','_blank')">open</button><button onclick="navigator.clipboard.writeText('${it.path}');flash('path copied')">path</button></div></div></div>`;
+      <div class="acts"><button title="Look at this item." onclick="openItem(galCache['${kind}'][${i}])">preview</button>
+        ${kind==='image'?`<button title="Use this picture as the source for upscale or edit." onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
+        ${kind==='voice'?`<button title="Use this clip as the voice to clone." onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button title="Transcribe this clip." onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
+        ${kind==='sound'?`<button title="Split this track into stems." onclick="$('st-file').value='${it.path}';flash('stems source set')">stems</button>`:''}
+        ${kind==='video'||kind==='image'?`<button title="Use this still as the video's first frame." onclick="$('vd-img').value='${it.path}';flash('start image set')">→ video</button>`:''}
+        ${is3d?`<button class="primary" title="Show this mesh in the room." onclick="useAsset('${it.path}')">set in room</button><button title="Open the room with this mesh." onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}','_blank')">room</button><button title="Open the joint picker on this mesh." onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}&rig=1','_blank')">rig</button>`:''}
+        ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button title="Ask Vision about this picture." onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}
+        ${kind==='text'?`<button title="Continue or revise this draft." onclick="$('wr-file').value='${it.path}';flash('draft set')">as draft</button>`:''}
+        <button title="Open this item." onclick="window.open('${it.url}','_blank')">open</button><button title="Copy this item's path." onclick="navigator.clipboard.writeText('${it.path}');flash('path copied')">path</button></div></div></div>`;
 }
 async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }
 async function loadGames(){
@@ -579,9 +586,9 @@ async function loadGames(){
   $('games').innerHTML = d.projects.length ? d.projects.map(g=>`<div class="card"><div class="name">${g.name} <span class="muted" style="font-weight:400">· ${g.kind==='godot'?'Godot 4':'web (Three.js)'} · ${g.when}</span></div>
     <div class="desc" style="white-space:pre-wrap;max-height:90px;overflow:hidden">${(g.readme||'').replace(/[#*`]/g,'').trim().slice(0,320)}</div>
     <div class="muted" style="margin:6px 0">${Object.entries(g.assets).map(([k,v])=>`${v} ${k}`).join(' · ')||'no media assets'}</div>
-    <div class="btns">${g.play?`<button class="primary" onclick="window.open('${g.play}','_blank')">▶ Play in browser</button>`:''}
-      <button onclick="navigator.clipboard.writeText('${g.path}');flash('path copied')">copy path</button>
-      ${g.kind==='godot'?`<button onclick="navigator.clipboard.writeText('/Applications/Godot.app/Contents/MacOS/Godot --path ${g.path}');flash('run command copied')">copy run cmd</button>`:`<button onclick="navigator.clipboard.writeText('cd ${g.path} && npm run dev');flash('dev command copied')">copy dev cmd</button>`}
+    <div class="btns">${g.play?`<button class="primary" title="Play this project in the browser." onclick="window.open('${g.play}','_blank')">▶ Play in browser</button>`:''}
+      <button title="Copy the project path." onclick="navigator.clipboard.writeText('${g.path}');flash('path copied')">copy path</button>
+      ${g.kind==='godot'?`<button title="Copy a command that opens this project locally." onclick="navigator.clipboard.writeText('godot --path ${g.path}');flash('run command copied')">copy run cmd</button>`:`<button title="Copy the dev command for this project." onclick="navigator.clipboard.writeText('cd ${g.path} && npm run dev');flash('dev command copied')">copy dev cmd</button>`}
     </div></div>`).join('') : '<div class="card muted">no projects yet — <code>game/new_project.sh 2d|3d Name ~/media-stack/game/Name</code></div>';
 }
 async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads pig.glb · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'no pig.glb in ~/media-stack/vr/'; }
@@ -604,7 +611,7 @@ function paintForge(r){
   const gpus=(m.gpus||[]).map(g=>`${esc(g.name)} ${g.vram_gb?esc(g.vram_gb)+' GB':'unified'}${g.driver?' · '+esc(g.driver):''}`).join(' · ')||'no GPU';
   const notes=(r.notes||[]).slice(0,3).map(n=>`<div class="desc">${esc(n)}</div>`).join('');
   const smoke=(s.smoke||[]).map(c=>`<code>${esc(c)}</code>`).join(' · ');
-  el.innerHTML=`<div class="row"><div><div class="name">${esc(s.headline||'This machine')}</div><div class="desc">${esc(m.os_pretty||m.os||'')} · ${esc(m.cpu||'')} · ${esc(m.ram_gb)} GB RAM · ${esc(m.disk_free_gb)} GB free under ${esc(m.disk_path||'')}</div><div class="desc">${gpus}</div></div><button onclick="navigator.clipboard.writeText('fetch-models --profile auto');flash('command copied')">copy fetch command</button></div>
+  el.innerHTML=`<div class="row"><div><div class="name">${esc(s.headline||'This machine')}</div><div class="desc">${esc(m.os_pretty||m.os||'')} · ${esc(m.cpu||'')} · ${esc(m.ram_gb)} GB RAM · ${esc(m.disk_free_gb)} GB free under ${esc(m.disk_path||'')}</div><div class="desc">${gpus}</div></div><button title="Copy the command that fetches the models recommended for this machine." onclick="navigator.clipboard.writeText('fetch-models --profile auto');flash('command copied')">copy fetch command</button></div>
     <div class="meta">essentials ${esc(s.essentials_gb)} GB · quality ${esc(s.quality_gb)} GB · optional ${esc(s.optional_gb)} GB · ${esc(s.skip_n)} skipped · <code>fetch-models --profile auto</code>${smoke?' · smoke '+smoke:''}</div>${notes}`;
 }
 async function loadForge(){
@@ -623,7 +630,6 @@ async function loadInventory(){
 let SVCSTATUS={}, svcRendered=false;
 let EP={hosts:['127.0.0.1'],lan_ip:null,items:[]}, epHost='127.0.0.1', epLoaded=false, epOpen=new Set(), logOpen=new Set();
 const logText={};
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const epOrigin=it=>`http://${epHost}:${it.port}`;
 const epBase=it=>epOrigin(it)+it.path;
 const epSnip=it=>(it.snippet||'').replaceAll('{{base_origin}}',epOrigin(it)).replaceAll('{{base}}',epBase(it));
@@ -663,7 +669,7 @@ function svcCard(k,x){
       <button id="svct-${k}" class="svctog ${cls}" onclick="toggleSvc('${k}',${x.running})" title="${x.running?'click to stop':'click to start'}"><span class="dot ${cls}"></span>${st}</button>
     </div>
     <div class="meta" id="svcm-${k}">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div>
-    <div class="btns"><button class="primary" onclick="act('start/${k}')">Start</button><button onclick="act('restart/${k}')">Restart</button><button class="danger" onclick="act('stop/${k}')">Stop</button>${k==='comfy'?`<button onclick="act('comfy/free')">Free VRAM</button>`:''}<button onclick="svcLog('${k}')">Log</button></div>
+    <div class="btns"><button class="primary" title="Start this local service." onclick="act('start/${k}')">Start</button><button title="Restart it. A job in progress will stop." onclick="act('restart/${k}')">Restart</button><button class="danger" title="Stop it. Work you already made is kept." onclick="act('stop/${k}')">Stop</button>${k==='comfy'?`<button title="Unload ComfyUI weights. The server stays up." onclick="act('comfy/free')">Free VRAM</button>`:''}<button title="Show the recent log on this card." onclick="svcLog('${k}')">Log</button></div>
     ${eps.length?`<div class="ephead">endpoints · copy &amp; paste</div>`+eps.map(epTile).join(''):''}
     <pre id="slog-${k}" style="display:${logOpen.has(k)?'block':'none'}">${esc(logText[k]||'')}</pre>
   </div>`;
@@ -677,7 +683,7 @@ function panelCard(){
 }
 function renderServices(){
   $('ep-note').innerHTML = epHost==='127.0.0.1'
-    ? `Each card below carries its own copy-paste endpoints — links use <code>127.0.0.1</code>, the address every CLI on this Mac already uses.`
+    ? `Each card below carries its own copy-paste endpoints — links use <code>127.0.0.1</code>, the address the local CLIs already use.`
     : `Each card below carries its own copy-paste endpoints — links use <code>${esc(epHost)}</code>. Only the panel is LAN-bound (<code>PANEL_HOST=0.0.0.0</code>); the others answer only after a 0.0.0.0 listen.`;
   $('ep-h-local').className = epHost==='127.0.0.1'?'primary':'';
   $('ep-h-lan').className = epHost!=='127.0.0.1'?'primary':'';
