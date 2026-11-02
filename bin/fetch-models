@@ -9,13 +9,11 @@
 #   fetch-models --profile essentials    # smallest useful set
 #   fetch-models --profile full          # auto, plus optional models that fit
 #   fetch-models --dry-run --profile auto
-#   fetch-models --dry-run --profile auto --fixture billie
 #   fetch-models id [id...]              # only these ids
 #
-# Profiles come from bin/forge-recommend (hardware probe + manifest fit blocks).
-# A calibration fixture is refused unless --dry-run is set, so a laptop does not
-# silently download the V100 set. To do that on purpose:
-#   fetch-models $(bin/forge-recommend --fixture billie --ids)
+# Profiles come from bin/forge-recommend (this machine's OS and hardware + manifest fit blocks).
+# --fixture is a synthetic profile for a dry-run test. It is refused without --dry-run so a
+# machine never downloads a made-up hardware set by accident.
 #
 # Gated URLs: huggingface-cli login, or export HF_TOKEN / HUGGING_FACE_HUB_TOKEN.
 # The token is sent as a bearer header and is never written into the repo.

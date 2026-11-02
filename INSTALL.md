@@ -74,11 +74,13 @@ fetch-models --profile full             # auto, plus optional heavy files that s
 fetch-models --dry-run --profile auto   # print the plan, download nothing
 ```
 
-On a 64 GB Mac the essentials profile is Z-Image-Turbo (+Qwen3-4B encoder, VAE), RealESRGAN,
-4x-UltraSharp, Stable Audio Open 1.0 (+t5-base), and TRELLIS.2 (+DINOv3, BiRefNet). Quality
+The profile follows this machine, not a fixed shopping list. At 64 GB unified memory the
+essentials profile is Z-Image-Turbo (+Qwen3-4B encoder, VAE), RealESRGAN, 4x-UltraSharp,
+Stable Audio Open 1.0 (+t5-base), and TRELLIS.2 (+DINOv3, BiRefNet). Quality on that machine
 adds FLUX.2 klein, Flux dev fp8 (slow; fp8 upcasts), the Qwen-Image-Edit **Q4 GGUF** (not the
-fp8 file), Wan 2.2 5B, HunyuanVideo 1.5, ACE-Step, SeedVR2, and the small SFX model. A 32 GB
-Mac skips Flux dev, HunyuanVideo, and the 27B writer.
+fp8 file), Wan 2.2 5B, HunyuanVideo 1.5, ACE-Step, SeedVR2, and the small SFX model. Under
+48 GB unified, Flux dev, HunyuanVideo, and the 27B writer drop out. A discrete GPU is judged
+on its largest card the same way; see [INSTALL-UBUNTU.md](INSTALL-UBUNTU.md).
 
 MLX repos (Kokoro, Parakeet, Qwen3-TTS, Qwen3-VL, the 27B writer) are `hf_models` in the same
 manifest. The installer downloads them with `HF_HUB_DISABLE_XET=1`; the 27B writer only with
@@ -99,10 +101,10 @@ Before committing changes made to skills/plugin on a machine: `bin/sync-hermes e
 
 ## 6. Known hardware notes
 
-- Timings in `hermes/skills/studio/studio/references/benchmarks.md` are from an M3 Max 40-core
-  GPU. An M1/M2 Pro will be ~2–3× slower; 32 GB machines should skip Flux dev and run
-  Qwen-Image-Edit alone. `bin/forge-recommend` applies that split (GGUF edit path, no fp8,
-  no 27B writer under 48 GB unified).
+- Timings in `hermes/skills/studio/studio/references/benchmarks.md` are from one Apple Silicon
+  machine and will not match a discrete GPU. `bin/forge-recommend` applies the memory split
+  for whatever it detects (GGUF edit path on Apple Silicon, no fp8 there, no 27B writer under
+  48 GB unified).
 - Never benchmark while `fetch-models` is writing — disk contention inflates timings 2–3×.
 - WebXR in the panel's room only works on `localhost`/HTTPS; Godot's Windows export is for
   a SteamVR PC (copy `scratch/vr-test/export/win/VRGodotRoom.exe` over).

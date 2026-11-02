@@ -8,27 +8,27 @@ repos the installer already documents). Never downloads and never calls a cloud 
   bin/forge-recommend --json                  # machine + tiers
   bin/forge-recommend --ids                   # ids for the recommended set
   bin/forge-recommend --ids --tier essentials
-  bin/forge-recommend --fixture billie        # calibration profile, no probe
   fetch-models --profile auto                 # fetch essentials + quality
   fetch-models $(bin/forge-recommend --ids)
 
+The live probe is the product. --fixture substitutes a synthetic capability
+profile (nvidia-16gb, apple-24gb, amd-8gb, …) and is for tests, not a catalog
+of computers.
+
 Tiers
-  essentials   smallest useful set. On a 64 GB Mac this matches install.sh.
+  essentials   smallest useful set. At 64 GB unified this matches install.sh.
   quality      daily models that fit. `fetch-models --profile auto` includes these.
   optional     heavy or alternate. `fetch-models --profile full` adds them.
 
 Fitting
-  Discrete NVIDIA/AMD: the largest card's VRAM, never the sum of cards. A 0.75 GB
-  slack covers nvidia-smi reporting ~16376 MiB on a "16 GB" RTX 4080, so
-  min_vram_gb 16 still matches that card and min_vram_gb 20 does not.
-  Apple Silicon: unified RAM. fp8 is not the edit path (it upcasts to bf16).
-  MLX / hf_models are recommended only for gpu_class apple. Linux and Windows
-  keep the CUDA stand-ins in INSTALL-UBUNTU.md; those repos are not fetched.
+  Discrete NVIDIA (CUDA) and AMD (ROCm): the largest card's VRAM, never the sum.
+  A 0.75 GB slack covers nvidia-smi reporting ~16376 MiB on a card sold as 16 GB,
+  so min_vram_gb 16 still matches and min_vram_gb 20 does not.
+  Apple Silicon: unified RAM, MLX for voice / vision / writer. fp8 is not the
+  edit path (it upcasts to bf16). MLX repos are not fetched for CUDA or ROCm.
+  CPU: classical upscalers only.
   Disk: keep 10 GB free under the stack root. Essentials are placed first, then
   the smallest quality pipelines that still fit, then optional.
-
-Calibration fixtures (examples, not the only machines that work): billie, 4080,
-mac64, mac32, mid, weak, tight, cpu. See --help.
 """
 from __future__ import annotations
 
@@ -57,74 +57,89 @@ TIER_SETS = {
     "all": {"essentials", "quality", "optional"},
 }
 
-# Named boxes Dylan already runs, plus a few edges the rules have to get right.
-# RAM figures for billie / 4080 are stand-ins ("lots" / a strong desktop), not a
-# dump of those machines. GPU sizes are the nominal cards.
+# Synthetic capability profiles for tests. Not a list of supported computers.
+# A normal run probes the machine in front of it.
 FIXTURES: dict[str, dict] = {
-    "billie": {
-        "label": "billie — Linux Precision Tower 5810, V100 32 GB + RTX 2060",
-        "os": "linux", "arch": "x86_64", "os_pretty": "Linux (Precision Tower 5810)",
-        "cpu": "Intel Xeon E5 (Precision Tower 5810)", "cpu_cores": 16,
+    "nvidia-32gb": {
+        "label": "32 GB NVIDIA plus a 6 GB second card",
+        "os": "linux", "arch": "x86_64", "os_pretty": "Linux",
+        "cpu": "x86_64 CPU", "cpu_cores": 16,
         "ram_gb": 128, "disk_free_gb": 2000, "disk_path": "~/media-stack",
         "apple_silicon": False, "gpu_class": "nvidia",
         "gpus": [
-            {"index": 0, "name": "Tesla V100-SXM2-32GB", "vram_gb": 32, "vendor": "nvidia", "driver": "550"},
-            {"index": 1, "name": "NVIDIA GeForce RTX 2060", "vram_gb": 6, "vendor": "nvidia", "driver": "550"},
+            {"index": 0, "name": "NVIDIA 32 GB", "vram_gb": 32, "vendor": "nvidia", "driver": "550"},
+            {"index": 1, "name": "NVIDIA 6 GB", "vram_gb": 6, "vendor": "nvidia", "driver": "550"},
         ],
     },
-    "4080": {
-        "label": "dspc — Windows, RTX 4080 16 GB (nvidia-smi reports 16376 MiB)",
+    "nvidia-16gb": {
+        "label": "16 GB NVIDIA (driver reports 16376 MiB) on Windows",
         "os": "windows", "arch": "x86_64", "os_pretty": "Windows",
-        "cpu": "desktop CPU (calibration stand-in)", "cpu_cores": 16,
+        "cpu": "x86_64 CPU", "cpu_cores": 16,
         "ram_gb": 64, "disk_free_gb": 800, "disk_path": "C:/media-stack",
         "apple_silicon": False, "gpu_class": "nvidia",
         "gpus": [
-            {"index": 0, "name": "NVIDIA GeForce RTX 4080", "vram_gb": round(16376 / 1024, 3),
+            {"index": 0, "name": "NVIDIA 16 GB", "vram_gb": round(16376 / 1024, 3),
              "vendor": "nvidia", "driver": "560"},
         ],
     },
-    "mac64": {
-        "label": "Apple Silicon M3 Max, 64 GB unified — the machine this stack was measured on",
-        "os": "darwin", "arch": "arm64", "os_pretty": "macOS",
-        "cpu": "Apple M3 Max", "cpu_cores": 16,
-        "ram_gb": 64, "disk_free_gb": 400, "disk_path": "~/media-stack",
-        "apple_silicon": True, "gpu_class": "apple",
-        "gpus": [{"index": 0, "name": "Apple M3 Max", "vram_gb": None, "vendor": "apple", "driver": "Metal"}],
-    },
-    "mac32": {
-        "label": "Apple Silicon, 32 GB unified — minimum the install docs support",
-        "os": "darwin", "arch": "arm64", "os_pretty": "macOS",
-        "cpu": "Apple M1 Pro", "cpu_cores": 10,
-        "ram_gb": 32, "disk_free_gb": 200, "disk_path": "~/media-stack",
-        "apple_silicon": True, "gpu_class": "apple",
-        "gpus": [{"index": 0, "name": "Apple M1 Pro", "vram_gb": None, "vendor": "apple", "driver": "Metal"}],
-    },
-    "mid": {
-        "label": "NVIDIA 10 GB — klein fits, Z-Image / Wan / Flux do not",
+    "nvidia-10gb": {
+        "label": "10 GB NVIDIA",
         "os": "linux", "arch": "x86_64", "os_pretty": "Linux",
-        "cpu": "desktop CPU (calibration stand-in)", "cpu_cores": 8,
+        "cpu": "x86_64 CPU", "cpu_cores": 8,
         "ram_gb": 32, "disk_free_gb": 500, "disk_path": "~/media-stack",
         "apple_silicon": False, "gpu_class": "nvidia",
-        "gpus": [{"index": 0, "name": "NVIDIA GeForce RTX 3080 10GB", "vram_gb": 10, "vendor": "nvidia", "driver": "550"}],
+        "gpus": [{"index": 0, "name": "NVIDIA 10 GB", "vram_gb": 10, "vendor": "nvidia", "driver": "550"}],
     },
-    "weak": {
-        "label": "NVIDIA 4 GB — upscalers only",
+    "nvidia-4gb": {
+        "label": "4 GB NVIDIA",
         "os": "linux", "arch": "x86_64", "os_pretty": "Linux",
-        "cpu": "desktop CPU (calibration stand-in)", "cpu_cores": 4,
+        "cpu": "x86_64 CPU", "cpu_cores": 4,
         "ram_gb": 16, "disk_free_gb": 80, "disk_path": "~/media-stack",
         "apple_silicon": False, "gpu_class": "nvidia",
-        "gpus": [{"index": 0, "name": "NVIDIA GeForce GTX 1650", "vram_gb": 4, "vendor": "nvidia", "driver": "550"}],
+        "gpus": [{"index": 0, "name": "NVIDIA 4 GB", "vram_gb": 4, "vendor": "nvidia", "driver": "550"}],
     },
-    "tight": {
-        "label": "M3 Max 64 GB with only 22 GB free under the stack root",
+    "amd-8gb": {
+        "label": "8 GB AMD",
+        "os": "linux", "arch": "x86_64", "os_pretty": "Linux",
+        "cpu": "x86_64 CPU", "cpu_cores": 8,
+        "ram_gb": 32, "disk_free_gb": 400, "disk_path": "~/media-stack",
+        "apple_silicon": False, "gpu_class": "amd",
+        "gpus": [{"index": 0, "name": "AMD 8 GB", "vram_gb": 8, "vendor": "amd", "driver": "amdgpu"}],
+    },
+    "apple-64gb": {
+        "label": "64 GB Apple unified memory",
         "os": "darwin", "arch": "arm64", "os_pretty": "macOS",
-        "cpu": "Apple M3 Max", "cpu_cores": 16,
+        "cpu": "Apple Silicon", "cpu_cores": 16,
+        "ram_gb": 64, "disk_free_gb": 400, "disk_path": "~/media-stack",
+        "apple_silicon": True, "gpu_class": "apple",
+        "gpus": [{"index": 0, "name": "Apple Silicon", "vram_gb": None, "vendor": "apple", "driver": "Metal"}],
+    },
+    "apple-32gb": {
+        "label": "32 GB Apple unified memory",
+        "os": "darwin", "arch": "arm64", "os_pretty": "macOS",
+        "cpu": "Apple Silicon", "cpu_cores": 10,
+        "ram_gb": 32, "disk_free_gb": 200, "disk_path": "~/media-stack",
+        "apple_silicon": True, "gpu_class": "apple",
+        "gpus": [{"index": 0, "name": "Apple Silicon", "vram_gb": None, "vendor": "apple", "driver": "Metal"}],
+    },
+    "apple-24gb": {
+        "label": "24 GB Apple unified memory",
+        "os": "darwin", "arch": "arm64", "os_pretty": "macOS",
+        "cpu": "Apple Silicon", "cpu_cores": 8,
+        "ram_gb": 24, "disk_free_gb": 200, "disk_path": "~/media-stack",
+        "apple_silicon": True, "gpu_class": "apple",
+        "gpus": [{"index": 0, "name": "Apple Silicon", "vram_gb": None, "vendor": "apple", "driver": "Metal"}],
+    },
+    "apple-disk-22gb": {
+        "label": "64 GB Apple unified memory with 22 GB free disk",
+        "os": "darwin", "arch": "arm64", "os_pretty": "macOS",
+        "cpu": "Apple Silicon", "cpu_cores": 16,
         "ram_gb": 64, "disk_free_gb": 22, "disk_path": "~/media-stack",
         "apple_silicon": True, "gpu_class": "apple",
-        "gpus": [{"index": 0, "name": "Apple M3 Max", "vram_gb": None, "vendor": "apple", "driver": "Metal"}],
+        "gpus": [{"index": 0, "name": "Apple Silicon", "vram_gb": None, "vendor": "apple", "driver": "Metal"}],
     },
     "cpu": {
-        "label": "no GPU — classical upscalers only",
+        "label": "no GPU",
         "os": "linux", "arch": "x86_64", "os_pretty": "Linux",
         "cpu": "virtual CPU", "cpu_cores": 2,
         "ram_gb": 16, "disk_free_gb": 100, "disk_path": "~/media-stack",
@@ -488,7 +503,7 @@ def _head_fits(model: dict, machine: dict) -> tuple[bool, str]:
         need = float(fit.get("min_unified_gb") or 0)
         have = float(machine["ram_gb"])
         if not _fits_number(have, need, slack=0):
-            return False, f"needs {need:g} GB unified memory (this Mac has {have:.0f} GB)"
+            return False, f"needs {need:g} GB unified memory (detected {have:.0f} GB)"
     elif cls in ("nvidia", "amd"):
         need = float(fit.get("min_vram_gb") or 0)
         have = float(machine["best_vram_gb"])
@@ -763,7 +778,7 @@ def _recommend_hf(rows: list[dict], machine: dict, used_gb: float, budget: float
             if not _fits_number(float(machine["ram_gb"]), need, slack=0):
                 out["skip"].append({
                     **_hf_public(row), "bucket": "skip",
-                    "reason": f"needs {need:g} GB unified memory (this Mac has {float(machine['ram_gb']):.0f} GB)",
+                    "reason": f"needs {need:g} GB unified memory (detected {float(machine['ram_gb']):.0f} GB)",
                 })
                 continue
         tier = row.get("tier") or "optional"
@@ -995,13 +1010,17 @@ def main(argv: list[str] | None = None) -> int:
         prog="forge-recommend",
         description="Probe this machine and print the VF Studio models that fit it. Never downloads.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="fixtures: " + ", ".join(f"{k} — {v['label']}" for k, v in FIXTURES.items()),
+        epilog=(
+            "A normal run probes this machine. --fixture is a synthetic capability profile for tests "
+            "(nvidia-16gb, apple-24gb, amd-8gb, …), not a list of supported computers."
+        ),
     )
     parser.add_argument("--json", action="store_true", help="print the machine and tiers as JSON")
     parser.add_argument("--ids", action="store_true", help="print model ids, space-separated, for fetch-models")
     parser.add_argument("--tier", default="recommended", choices=sorted(TIER_SETS),
                         help="which buckets --ids includes (default: recommended = essentials + quality)")
-    parser.add_argument("--fixture", choices=sorted(FIXTURES), help="use a calibration profile instead of probing")
+    parser.add_argument("--fixture", choices=sorted(FIXTURES),
+                        help="synthetic hardware profile for tests; skips the live probe")
     parser.add_argument("--stack", help="stack root (manifest + disk). Default: this repo, or MEDIA_STACK, or ~/media-stack")
     parser.add_argument("--dry-run", action="store_true", help="accepted for symmetry; this command never downloads")
     args = parser.parse_args(argv)

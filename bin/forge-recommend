@@ -5,7 +5,6 @@
 #   bin/forge-recommend
 #   bin/forge-recommend --json
 #   bin/forge-recommend --ids
-#   bin/forge-recommend --fixture billie
 #   fetch-models --profile auto
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
