@@ -33,6 +33,9 @@ FILES = {
     "ultrasharp": ["upscale_models/4x-UltraSharp.pth"],
     "seedvr2": ["diffusion_models/seedvr2_3b_int8_convrot.safetensors", "vae/seedvr2_ema_vae_fp16.safetensors"],
     "video": ["diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan2.2_vae.safetensors"],
+    "hyv15_common": ["text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors", "text_encoders/byt5_small_glyphxl_fp16.safetensors", "vae/hunyuanvideo15_vae_fp16.safetensors"],
+    "hyv15_t2v": ["diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors"],
+    "hyv15_i2v": ["diffusion_models/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors", "clip_vision/sigclip_vision_patch14_384.safetensors"],
     "sao": ["checkpoints/stable-audio-open-1.0.safetensors", "text_encoders/t5-base.safetensors"],
     "sa3": ["checkpoints/stable_audio_3_medium.safetensors", "text_encoders/t5gemma_b_b_ul2.safetensors"],
     "sa3sfx": ["checkpoints/stable_audio_3_small_sfx.safetensors", "text_encoders/t5gemma_b_b_ul2.safetensors"],
@@ -333,7 +336,49 @@ NEG_WAN = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风�
            "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
 
 
+def g_video_hyv15(a):
+    """HunyuanVideo 1.5 (8.3B) — the quality path. cfg-distilled checkpoints: cfg 1, no negative needed.
+    t2v uses the 480p model (832x480), i2v the 720p model (1280x704). Graph mirrors the official templates
+    (DualCLIPLoader hunyuan_video_15, ModelSamplingSD3 shift 7, SamplerCustomAdvanced euler/simple), minus the
+    optional 1080p super-resolution stage. UNTESTED on this Mac as of 2026-11-02 — measure and record."""
+    need("hyv15_common")
+    i2v = bool(a.image)
+    need("hyv15_i2v" if i2v else "hyv15_t2v")
+    unet = "hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors" if i2v else "hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors"
+    w, h = (a.w, a.h) if (a.w, a.h) != (1280, 704) or i2v else (832, 480)   # t2v model is 480p-native
+    steps = a.steps or 20
+    g = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
+        "2": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "clip_name2": "byt5_small_glyphxl_fp16.safetensors", "type": "hunyuan_video_15", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "hunyuanvideo15_vae_fp16.safetensors"}},
+        "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 7.0}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": a.negative or "", "clip": ["2", 0]}},
+        "20": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed_of(a)}},
+        "21": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "22": {"class_type": "BasicScheduler", "inputs": {"model": ["4", 0], "scheduler": "simple", "steps": steps, "denoise": 1.0}},
+        "23": {"class_type": "CFGGuider", "inputs": {"model": ["4", 0], "positive": ["5", 0], "negative": ["6", 0], "cfg": 1.0}},
+        "24": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["20", 0], "guider": ["23", 0], "sampler": ["21", 0], "sigmas": ["22", 0], "latent_image": ["7", 0]}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["24", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": a.fps}},
+        "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": "gen/hyv15", "format": "auto", "codec": "auto"}},
+    }
+    if i2v:
+        g["12"] = {"class_type": "LoadImage", "inputs": {"image": upload_image(a.image)}}
+        g["13"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "sigclip_vision_patch14_384.safetensors"}}
+        g["14"] = {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["13", 0], "image": ["12", 0], "crop": "center"}}
+        g["7"] = {"class_type": "HunyuanVideo15ImageToVideo", "inputs": {"positive": ["5", 0], "negative": ["6", 0], "vae": ["3", 0], "start_image": ["12", 0],
+                                                                 "clip_vision_output": ["14", 0], "width": w, "height": h, "length": a.frames, "batch_size": 1}}
+        g["23"]["inputs"]["positive"] = ["7", 0]; g["23"]["inputs"]["negative"] = ["7", 1]
+        g["24"]["inputs"]["latent_image"] = ["7", 2]
+    else:
+        g["7"] = {"class_type": "EmptyHunyuanVideo15Latent", "inputs": {"width": w, "height": h, "length": a.frames, "batch_size": 1}}
+    return g
+
+
 def g_video(a):
+    if getattr(a, "model", "wan") == "hyv15":
+        return g_video_hyv15(a)
     need("video")
     g = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan2.2_ti2v_5B_fp16.safetensors", "weight_dtype": "default"}},
@@ -443,6 +488,7 @@ def main():
     s.add_argument("--cfg", type=float, default=None); s.add_argument("--negative"); s.add_argument("--fp8", action="store_true", help="force the fp8 safetensors instead of the Q4 GGUF (slow on MPS)"); common(s, "edit")
 
     s = sub.add_parser("video"); s.add_argument("prompt"); s.add_argument("--image"); s.add_argument("--negative")
+    s.add_argument("--model", choices=["wan", "hyv15"], default="wan", help="wan = Wan 2.2 TI2V 5B (fast path, measured); hyv15 = HunyuanVideo 1.5 8.3B (quality path, untested here)")
     s.add_argument("--w", type=int, default=1280); s.add_argument("--h", type=int, default=704); s.add_argument("--frames", type=int, default=121)
     s.add_argument("--fps", type=int, default=24); common(s, "video"); s.set_defaults(steps=20)
 

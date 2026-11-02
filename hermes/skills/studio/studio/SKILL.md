@@ -71,17 +71,18 @@ and the Voice tab records from the mic — Dylan uses the page himself, so a pat
 the first thing he asks is "how do I get my own image/voice in". Code edits need `stack restart panel`
 (uvicorn does not hot-reload); never `pkill python` — it takes the gateway down with it. Header = live ComfyUI progress bar
 (step N/M) for anything submitted as client `gen-cli` — `gen` and the Hermes plugin do; ComfyUI-UI
-jobs show an indeterminate bar. Models tab = manifest + HF inventory. **Services tab = live start/stop cards + an Endpoints block**
-that lists every URL another local program or page can be pointed at (TTS, STT, voice clone, ComfyUI,
-writer LLM, VLM, this panel's own API) with per-row **Copy URL**, a **Details** panel (routes + a
-working curl), and **Copy all → .env / JSON**; a host switch flips every link between `127.0.0.1` and
-the LAN IP. Source of truth is the `ENDPOINTS` list in `control/panel.py` served at `/api/endpoints` —
+jobs show an indeterminate bar. Models tab = manifest + HF inventory. **Services tab = one card per service, and each card carries its
+own copy-paste endpoint tiles** — mlx-audio holds TTS / STT / voice clone, ComfyUI / writer LLM / VLM /
+the panel's own API hold one each — with per-tile **Copy** and a **curl** panel (routes + a working
+snippet), plus **Copy all → .env / JSON** and a `127.0.0.1`↔LAN host switch in a bar above the grid.
+Fold reference data into the card it describes; a parallel list of the same URLs is the duplication
+Dylan removes. Source of truth is the `ENDPOINTS` list in `control/panel.py` served at `/api/endpoints` —
 add a service there, not in the HTML, or the page and reality drift. Each card's **status pill is the
 start/stop toggle** (running → click stops, stopped → click starts) — a status you cannot act on is a
 bug, and Dylan asks for exactly that. Resources tab has
 **Unload all models** and **Stop everything**. There is one page; never add a second UI or a
 "legacy" copy — Dylan asks for consolidation and removes duplicates. Panel UI conventions (which tab
-owns what, the endpoints block, copy-button pattern, card-layout and re-render pitfalls, how to test a
+owns what, endpoint tiles, copy-button pattern, card-layout and re-render pitfalls, how to test a
 copy button): `references/panel-ui.md`.
 
 **Branding (standing preference):** anything web-facing in the stack carries the VybesForge look —

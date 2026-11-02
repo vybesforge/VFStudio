@@ -350,7 +350,7 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
             cmd.append("--fast")
         return cmd
     if kind == "video":
-        return [str(GEN), "video", a["prompt"], *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
+        return [str(GEN), "video", a["prompt"], "--model", a.get("model", "wan"), *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
                 *flag("--frames", cast=int), *flag("--fps", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int)]
     if kind == "sfx":
         return [str(GEN), "sfx", a["prompt"], "--model", a.get("model", "sa3sfx"), *flag("--seconds", cast=float),

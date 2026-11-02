@@ -168,12 +168,13 @@
       <label>start image (optional — image-to-video)</label>
       <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')">Upload…</button></div>
       <div class="fields">
+        <div><label>model</label><select id="vd-model"><option value="wan">Wan 2.2 5B · fast path (measured)</option><option value="hyv15">HunyuanVideo 1.5 8.3B · quality (t2v 480p / i2v 720p, untested)</option></select></div>
         <div><label>size</label><select id="vd-size"><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
         <div><label>frames (24 fps)</label><select id="vd-frames"><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
         <div><label>steps</label><input id="vd-steps" value="20"></div>
         <div><label>seed</label><input id="vd-seed" placeholder="random"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
+      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
       <div class="hint">~14 s/step at 832×480×49f on this GPU. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
     </div>
     <div id="jobs-video" class="card" style="margin-top:12px"></div>

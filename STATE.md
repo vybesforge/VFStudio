@@ -40,7 +40,7 @@ Last updated: 2026-11-01 late (desktop session) — **studio build-out, round 2*
 - **Ubuntu port**: `INSTALL-UBUNTU.md` written from the code (speaches + llama-server replace MLX; CUDA ComfyUI). **Not executed anywhere yet.**
 - **Deferred — lip-sync / talking head**: Wan 2.2 S2V 14B is ~30 GB fp8 → ~60 GB bf16 on MPS; not viable on this Mac alongside anything. Run it (or LatentSync) on the RTX 4080 / V100 box instead; template `video_wan2_2_14B_s2v` exists in ComfyUI.
 
-Open items: GGUF edit timing; finish + verify first LoRA; headset test (Godot .exe, WebXR controller picking); run `install.sh` on a clean Mac; run `INSTALL-UBUNTU.md` once on the Precision box.
+Open items: first `gen video --model hyv15` run (graph untested) and GGUF edit timing; finish + verify first LoRA; headset test (Godot .exe, WebXR controller picking); run `install.sh` on a clean Mac; run `INSTALL-UBUNTU.md` once on the Precision box.
 
 ## 2026-11-01: one-stop studio (image · video · 3D · VR · print · sound · music · voice)
 
