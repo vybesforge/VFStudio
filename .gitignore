@@ -60,6 +60,53 @@ vr/current.json
 scratch/rig-views/
 stems/.venv/
 
+# ── never upload generated media or model assets, whatever the folder ──────────
+# Belt and braces on top of the directory rules above: a stray render, stem, clip or mesh
+# written somewhere new still cannot be committed.
+*.glb
+*.gltf
+*.obj
+*.fbx
+*.usd
+*.usdz
+*.stl
+*.3mf
+*.blend
+*.blend1
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.tif
+*.tiff
+*.exr
+*.hdr
+*.psd
+*.kra
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.opus
+*.aif
+*.aiff
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.avi
+*.gif
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.gguf
+# the panel's own UI icons and the 2D game template's placeholder sprites are source, not assets
+!control/brand/*.png
+!game/templates/godot-2d/player/*.png
+!game/templates/godot-2d/tiles/*.png
+
 # training / stems / node packs are re-created by install.sh
 ComfyUI/custom_nodes/ComfyUI-GGUF/
 
