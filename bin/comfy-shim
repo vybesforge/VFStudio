@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""comfy-shim — TCP forwarder 127.0.0.1:8188 -> 127.0.0.1:8189.
+
+Why: VFStudio (gen, panel, studio.py, skills) hardcodes ComfyUI on :8188.
+billie runs ComfyUI on the V100 at :8189 (comfyui-v100.service, --fp32-vae).
+Raw TCP passthrough, so HTTP, /history polling and the /ws websocket all work
+with no change to the repo.
+
+  bin/comfy-shim              # runs on :8188 -> :8189
+  LISTEN_PORT=8188 TARGET_PORT=8189 bin/comfy-shim
+"""
+import asyncio
+import os
+import sys
+
+LISTEN = int(os.environ.get("LISTEN_PORT", "8188"))
+TARGET = int(os.environ.get("TARGET_PORT", "8189"))
+HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
+
+
+async def pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter):
+    try:
+        while True:
+            data = await src.read(65536)
+            if not data:
+                break
+            dst.write(data)
+            await dst.drain()
+    except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
+        pass
+    finally:
+        try:
+            dst.close()
+        except Exception:
+            pass
+
+
+async def handle(client_r: asyncio.StreamReader, client_w: asyncio.StreamWriter):
+    try:
+        up_r, up_w = await asyncio.open_connection("127.0.0.1", TARGET)
+    except OSError as e:
+        print(f"target {TARGET} unreachable: {e}", file=sys.stderr, flush=True)
+        client_w.close()
+        return
+    await asyncio.gather(pipe(client_r, up_w), pipe(up_r, client_w))
+
+
+async def main():
+    server = await asyncio.start_server(handle, HOST, LISTEN, backlog=128)
+    print(f"comfy-shim: {HOST}:{LISTEN} -> 127.0.0.1:{TARGET}", flush=True)
+    async with server:
+        await server.serve_forever()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

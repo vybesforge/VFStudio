@@ -68,6 +68,21 @@ Lightning LoRA, 4 steps → ~4 min, which is what makes iteration affordable.
 > and clothing exactly. Full body from head to feet, plain flat neutral grey background,
 > even studio lighting.
 
+**Palms out, fingers spread — that is what this user means by an A-pose reference.** He
+corrected "palms facing her thighs" to palms turned outward toward the viewer with all
+fingers spread and separated, and he was right for the pipeline: a closed or inward-facing
+hand reconstructs as a mitten, and the finger silhouette is the only thing TRELLIS has to
+build a hand from. Put it in the prompt verbatim — "both palms facing away from her body
+and turned outward toward the viewer, all fingers spread wide apart and clearly separated,
+thumbs pointing outward".
+
+**Expect ~55-60°, not the 45° you asked for.** Three seeds with "forty five degrees" in the
+prompt measured 55.2°, 57.6° and 63.7° off vertical with `scripts/pose_measure.py`, and the
+Multiple-angles LoRA pushes rear views to a full T-pose regardless. This is the same class of
+strong prior as the arms-at-sides behaviour above — cap the re-rolls, verify the *gaps* (empty
+background between each arm and the waist) and the margins, and accept the wider angle, which
+reconstructs better than a fused one anyway.
+
 ## Verify the result by asking about the arms specifically
 
 Whole-image judgement says "looks fine". Ask whether there is **clear space between
