@@ -103,7 +103,7 @@
   .eptile td{padding:3px 0}
 </style></head><body>
 <header>
-  <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub" id="machine-sub">VybesForge local asset forge · probing this machine · nothing leaves the machine</div></div></div>
+  <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge · <span id="hw" title="">this machine</span> · nothing leaves the machine</div></div></div>
   <div class="card" id="progress" style="min-width:360px;flex:1;max-width:720px;padding:10px 14px"></div>
 </header>
 <nav>
@@ -259,7 +259,7 @@
 <section class="tab" id="tab-voice"><div class="two">
   <div>
     <div class="card"><div class="name">Speak <span class="tag">Kokoro</span></div>
-      <label>text</label><textarea id="vo-text">The forge stays on this machine. Nothing is sent out.</textarea>
+      <label>text</label><textarea id="vo-text">Voice cloning on Apple Silicon works entirely offline.</textarea>
       <label>voice</label><select id="vo-voice"><option>af_heart</option></select>
       <div class="btns"><button class="primary" onclick="runJob('say',{text:v('vo-text'),voice:v('vo-voice')})" title="Synthesise the text with the selected Kokoro voice">Speak</button></div>
     </div>
@@ -272,7 +272,7 @@
         <button onclick="$('vo-upload').click()" title="Choose an existing file instead of recording">Upload file…</button>
       </div>
       <audio id="vo-preview" controls style="width:100%;margin:6px 0;display:none"></audio>
-      <input id="vo-ref" placeholder="a short reference clip">
+      <input id="vo-ref" placeholder="/Users/dcruse/…/ref.wav">
       <label>what the reference says (transcript; blank = auto-transcribe first)</label><input id="vo-reftext">
       <div class="btns"><button class="primary" onclick="cloneJob()" title="Clone the reference voice and speak the text with it">Clone &amp; speak the text above</button></div>
     </div>
@@ -295,7 +295,7 @@
         <option value="lore">lore — world bible entries</option><option value="chat">chat — free prompt</option>
         <option value="continue">continue — extend a draft file</option><option value="revise">revise — edit a draft file</option></select>
       <label id="wr-prompt-l">premise / prompt</label><textarea id="wr-prompt" style="min-height:110px">A lighthouse keeper discovers the fog is listening.</textarea>
-      <div id="wr-file-row" style="display:none"><label>draft file path (.md)</label><input id="wr-file" placeholder="a markdown draft"><label>editor's note (revise)</label><input id="wr-note" placeholder="tighten pacing, more sensory detail"></div>
+      <div id="wr-file-row" style="display:none"><label>draft file path (.md)</label><input id="wr-file" placeholder="/Users/dcruse/media-stack/output/text/prose_….md"><label>editor's note (revise)</label><input id="wr-note" placeholder="tighten pacing, more sensory detail"></div>
       <div class="fields">
         <div><label>genre</label><input id="wr-genre" value="literary horror"></div><div><label>tone</label><input id="wr-tone" placeholder="dry, slow-burn"></div>
         <div><label>POV</label><select id="wr-pov"><option>third</option><option>first</option><option>second</option></select></div>
@@ -373,8 +373,7 @@
 
 <!-- MODELS -->
 <section class="tab" id="tab-models">
-  <div class="card" id="forge-rec"><div class="desc">probing this machine…</div></div>
-  <div class="card" id="inv-summary" style="margin-top:14px"></div>
+  <div class="card" id="inv-summary"></div>
   <div id="inv-groups"></div>
   <h2>Audio models (mlx-audio, HF cache)</h2><div class="card" id="inv-audio"></div>
   <h2>Tools</h2><div class="card" id="inv-tools"></div>
@@ -399,7 +398,6 @@
 gen status | gen image "…" | gen video "…" | gen sfx "…" | gen music "…" | gen upscale f.png
 voice say "…" | voice clone --ref r.wav "…" | voice transcribe f.wav
 vid trim in.mp4 out.mp4 --start 1 --end 3      fetch-models --list
-forge-recommend          fetch-models --profile auto
 skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-print · studio-vr · local-media-stack</pre></div>
 </section>
 
@@ -673,8 +671,7 @@ function renderItem(it,i,kind,cache){
 async function useAsset(path){ const j=await (await fetch('/api/assets/use?path='+encodeURIComponent(path),{method:'POST'})).json(); flash(j.message||'done'); $('room').src='/vr/index.html?t='+Date.now(); refreshVr(); }
 async function loadGames(){
   const d=await (await fetch('/api/studio/games')).json();
-  const engineLabel=k=>k==='godot'?'Godot 4':k==='three'?'Three.js':'web';
-  $('games').innerHTML = d.projects.length ? d.projects.map(g=>`<div class="card"><div class="name">${g.name} <span class="muted" style="font-weight:400">· ${engineLabel(g.kind)} · ${g.when}</span></div>
+  $('games').innerHTML = d.projects.length ? d.projects.map(g=>`<div class="card"><div class="name">${g.name} <span class="muted" style="font-weight:400">· ${g.kind==='godot'?'Godot 4':'web (Three.js)'} · ${g.when}</span></div>
     <div class="desc" style="white-space:pre-wrap;max-height:90px;overflow:hidden">${(g.readme||'').replace(/[#*`]/g,'').trim().slice(0,320)}</div>
     <div class="muted" style="margin:6px 0">${Object.entries(g.assets).map(([k,v])=>`${v} ${k}`).join(' · ')||'no media assets'}</div>
     <div class="btns">${g.play?`<button class="primary" onclick="window.open('${g.play}','_blank')" title="Open the project's web build in a new tab">▶ Play in browser</button>`:''}
@@ -704,56 +701,20 @@ async function runAnim(){
 
 async function refreshVr(){ loadGames(); const a=await (await fetch('/api/vr/asset')).json(); $('vr-asset').textContent=a.present?`room loads ${a.name} (asset “${a.asset}” → ${a.joints_file}) · ${(a.bytes/MB).toFixed(1)} MB · ${a.mtime}`:'nothing in ~/media-stack/vr/ — use “set in room” on a GLB'; }
 
-// inventory + hardware recommendation (same probe the forge-recommend CLI uses)
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function bucketTag(b){
-  if(!b) return '';
-  const cls=b==='optional'?'dl':(b==='skip'?'':'ok');
-  return `<span class="tag ${cls}">${esc(b)}</span>`;
-}
-function paintForge(r){
-  const s=r.summary||{};
-  const sub=$('machine-sub');
-  if(sub&&s.headline) sub.textContent=`VybesForge local asset forge · ${s.headline} · nothing leaves the machine`;
-  const el=$('forge-rec');
-  if(!el) return;
-  if(r.error){ el.innerHTML=`<div class="name">This machine</div><div class="desc">${esc(r.error)}</div>`; return; }
-  const m=r.machine||{};
-  const gpus=(m.gpus||[]).map(g=>`${esc(g.name)} ${g.vram_gb?esc(g.vram_gb)+' GB':'unified'}${g.driver?' · '+esc(g.driver):''}`).join(' · ')||'no GPU';
-  const notes=(r.notes||[]).slice(0,3).map(n=>`<div class="desc">${esc(n)}</div>`).join('');
-  const smoke=(s.smoke||[]).map(c=>`<code>${esc(c)}</code>`).join(' · ');
-  const eng=(r.engines&&r.engines.backend)||'';
-  el.innerHTML=`<div class="row"><div><div class="name">${esc(s.headline||'This machine')}</div><div class="desc">${esc(m.os_pretty||m.os||'')} · ${esc(m.cpu||'')} · ${esc(m.ram_gb)} GB RAM · ${esc(m.disk_free_gb)} GB free · engine ${esc(eng)}</div><div class="desc">${gpus}</div></div>
-    <div class="btns" style="margin:0"><button class="primary" title="Download the essentials and quality models this machine can run." onclick="fetchProfile('auto')">Fetch what fits</button>
-    <button title="Also download the optional heavy models that still fit." onclick="fetchProfile('full')">Fetch full</button>
-    <button title="Copy the command that fetches the models recommended for this machine." onclick="navigator.clipboard.writeText('fetch-models --profile auto');flash('command copied')">copy command</button></div></div>
-    <div class="meta">essentials ${esc(s.essentials_gb)} GB · quality ${esc(s.quality_gb)} GB · optional ${esc(s.optional_gb)} GB · ${esc(s.skip_n)} skipped${smoke?' · smoke '+smoke:''}</div>
-    <div class="hint" id="fetch-note"></div>${notes}`;
-}
-async function loadForge(){
-  try{ const r=await (await fetch('/api/studio/recommend')).json(); paintForge(r); }catch(e){}
-}
-async function fetchProfile(profile){
-  const note=$('fetch-note'); if(note) note.textContent='checking licenses…';
-  const res=await fetch('/api/studio/fetch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile})});
-  let j={}; try{ j=await res.json(); }catch(e){}
-  const msg=j.message||j.detail||(res.ok?'started':'could not start');
-  if(note) note.textContent=msg;
-  flash(msg);
-}
+// inventory
 async function loadInventory(){
   const inv=await (await fetch('/api/studio/inventory')).json();
-  const pct=inv.total_gb?100*inv.present_gb/inv.total_gb:0;
-  $('inv-summary').innerHTML=`<div class="row"><div><div class="name">ComfyUI models</div><div class="desc">${inv.present_gb} of ${inv.total_gb} GB present · manifest <code>models/manifest.json</code> · <code>fetch-models --profile auto</code></div></div></div><div class="bar g"><i style="width:${pct}%"></i></div>`;
-  $('inv-groups').innerHTML=inv.groups.map(g=>`<h2>${g.label}</h2><div class="card"><table><thead><tr><th>model</th><th>role</th><th class="r">size</th><th class="r">fit</th><th class="r">state</th></tr></thead><tbody>${g.models.map(m=>`<tr><td><code>${esc(m.id)}</code><div class="desc" style="font-size:10px">${esc(m.path)}</div></td><td class="desc">${esc(m.role)}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${esc(m.gb)} GB</td><td class="r">${bucketTag(m.bucket)}${m.gate&&m.gate!=='open'?` <span class="tag${m.gate==='hf-login'?' dl':''}" title="${esc(m.license||m.gate)}">${esc(m.gate)}</span>`:''}</td><td class="r">${m.present?'<span class="tag ok">present</span>':m.downloading?`<span class="tag dl">downloading ${esc(m.part_gb)}/${esc(m.gb)}</span>`:'<span class="tag">missing</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
-  $('inv-audio').innerHTML=`<table><tbody>${inv.audio.map(m=>`<tr><td><code>${esc(m.id)}</code></td><td class="desc">${esc(m.role)}${m.uncensored?' · <span class="tag dl">uncensored</span>':''}${m.reason?`<div class="desc" style="font-size:10px">${esc(m.reason)}</div>`:''}</td><td class="r">${bucketTag(m.bucket)}</td><td class="r">${m.present?'<span class="tag ok">cached</span>':'<span class="tag">on demand</span>'}</td></tr>`).join('')}</tbody></table>`;
-  $('inv-tools').innerHTML=`<table><tbody>${inv.tools.map(t=>`<tr><td><span class="dot ${t.present?'on':'off'}"></span><code>${esc(t.name)}</code></td><td class="desc">${esc(t.desc)}</td><td class="desc" style="font-size:10px">${esc(t.path)}</td></tr>`).join('')}</tbody></table>`;
+  $('inv-summary').innerHTML=`<div class="row"><div><div class="name">ComfyUI models</div><div class="desc">${inv.present_gb} of ${inv.total_gb} GB present · manifest <code>~/media-stack/models/manifest.json</code> · missing → <code>fetch-models</code></div></div></div><div class="bar g"><i style="width:${100*inv.present_gb/inv.total_gb}%"></i></div>`;
+  $('inv-groups').innerHTML=inv.groups.map(g=>`<h2>${g.label}</h2><div class="card"><table><thead><tr><th>model</th><th>role</th><th class="r">size</th><th class="r">state</th></tr></thead><tbody>${g.models.map(m=>`<tr><td><code>${m.id}</code><div class="desc" style="font-size:10px">${m.path}</div></td><td class="desc">${m.role}</td><td class="r">${m.gb} GB</td><td class="r">${m.present?'<span class="tag ok">present</span>':m.downloading?`<span class="tag dl">downloading ${m.part_gb}/${m.gb}</span>`:'<span class="tag">missing</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
+  $('inv-audio').innerHTML=`<table><tbody>${inv.audio.map(m=>`<tr><td><code>${m.id}</code></td><td class="desc">${m.role}</td><td class="r">${m.present?'<span class="tag ok">cached</span>':'<span class="tag">on demand</span>'}</td></tr>`).join('')}</tbody></table>`;
+  $('inv-tools').innerHTML=`<table><tbody>${inv.tools.map(t=>`<tr><td><span class="dot ${t.present?'on':'off'}"></span><code>${t.name}</code></td><td class="desc">${t.desc}</td><td class="desc" style="font-size:10px">${t.path}</td></tr>`).join('')}</tbody></table>`;
 }
 
 // services + endpoints — one card per service, its endpoints as tiles inside it
 let SVCSTATUS={}, svcRendered=false;
 let EP={hosts:['127.0.0.1'],lan_ip:null,items:[]}, epHost='127.0.0.1', epLoaded=false, epOpen=new Set(), logOpen=new Set();
 const logText={};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const epOrigin=it=>`http://${epHost}:${it.port}`;
 const epBase=it=>epOrigin(it)+it.path;
 const epSnip=it=>(it.snippet||'').replaceAll('{{base_origin}}',epOrigin(it)).replaceAll('{{base}}',epBase(it));
@@ -807,7 +768,7 @@ function panelCard(){
 }
 function renderServices(){
   $('ep-note').innerHTML = epHost==='127.0.0.1'
-    ? `Each card below carries its own copy-paste endpoints — links use <code>127.0.0.1</code>, the address the local CLIs already use.`
+    ? `Each card below carries its own copy-paste endpoints — links use <code>127.0.0.1</code>, the address every CLI on this Mac already uses.`
     : `Each card below carries its own copy-paste endpoints — links use <code>${esc(epHost)}</code>. Only the panel is LAN-bound (<code>PANEL_HOST=0.0.0.0</code>); the others answer only after a 0.0.0.0 listen.`;
   $('ep-h-local').className = epHost==='127.0.0.1'?'primary':'';
   $('ep-h-lan').className = epHost!=='127.0.0.1'?'primary':'';
@@ -837,6 +798,17 @@ async function act(path){ const j=await (await fetch('/api/'+path,{method:'POST'
 async function toggleSvc(k,on){ flash((on?'stopping ':'starting ')+k+'…'); await act((on?'stop/':'start/')+k); setTimeout(refreshServices,900); }
 async function svcLog(n){const p=$('slog-'+n);const j=await (await fetch('/api/logs/'+n+'?lines=60')).json();logText[n]=j.text||'(empty)';p.textContent=logText[n];const open=p.style.display==='none';p.style.display=open?'block':'none';open?logOpen.add(n):logOpen.delete(n);}
 function bar(pct,tone){const x=Math.max(0,Math.min(100,pct));const t=tone||(x>88?'r':x>70?'a':x>40?'':'g');return `<div class="bar ${t}"><i style="width:${x}%"></i></div>`;}
+async function hwLine(){
+  // Header hardware line — derived from the box, never hard-coded. Replaces the
+  // old "M3 Max 64 GB" label that travelled with the mac-era build.
+  try{
+    const r=await (await fetch('/api/resources')).json();
+    const g=(r.gpu&&r.gpu.gpus)||[], m=r.mem||{}, el=$('hw');
+    if(!el) return;
+    el.textContent = `${g.length?g.length+'× GPU':'no GPU'} · ${((m.total||0)/GB).toFixed(0)} GB RAM`;
+    el.title = g.map(x=>x.name).join(' + ');
+  }catch(e){}
+}
 async function refreshResources(){
   const r=await (await fetch('/api/resources')).json(); const c=r.cpu||{},m=r.mem||{},g=r.gpu||{},d=r.disk||{};
   const memPct=m.total?m.used/m.total*100:0, swapPct=m.swap_total?m.swap_used/m.swap_total*100:0;
@@ -878,5 +850,6 @@ refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
 setInterval(refreshProgress, 5000);
 setInterval(refreshJobs, 60000);
 setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); }, 15000);
+hwLine(); setInterval(hwLine, 60000);   // header hardware line, refreshed once a minute
 setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); }, 60000);
 </script></body></html>
