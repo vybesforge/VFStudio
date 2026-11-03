@@ -33,7 +33,7 @@ are copy-pasteable as written.
 | Image guided by a sketch/photo edges | `gen control "prompt" --image ref.png` | this file |
 | Edit an existing image (change X, keep the rest) / turnaround views | `gen edit in.png "instruction" --fast` (Qwen-Image-Edit 2509, Q4 GGUF; `--ref2 b.png` for multi-image) | this file; apose recipe in `local-media-stack` |
 | Upscale image | `gen upscale in.png --method esrgan` (fast) / `--method seedvr2` (diffusion) | this file |
-| Video clip from text or image | `gen video "prompt" [--image start.png]` (Wan 2.2 5B, slow) | this file |
+| Video clip from text or image | `gen video "prompt" [--image start.png] [--seconds N]` (Wan 2.2 5B, slow; over 121 frames it renders in chained passes and stitches) | this file |
 | Edit/cut/caption/concat video | `vid …`, Blender VSE edit list | `studio-video-edit` |
 | Sound effect | `gen sfx "prompt" --seconds 8` | this file |
 | Music / full song with lyrics | `gen music "tags" --lyrics "..."` (ACE-Step 1.5) | this file |
@@ -47,6 +47,8 @@ are copy-pasteable as written.
 | Fix / rig / render a mesh | Blender via `~/media-stack/bin/blender -b -P script.py` | `local-media-stack`, `blender` |
 | Parametric part → STL → G-code | `cad_examples/*.py`, `meshcheck.py`, `slice --preset bambu|generic` | `studio-3d-print` |
 | View asset in VR / build SteamVR app | Godot room, `optimize_glb.sh`, WebXR room | `studio-vr` |
+| Place / centre / check rig joints on a GLB | room's **AI auto-place**, `stack rig auto <glb>`, `tools/rig/center_joints.py`, `tools/rig/inspect_joints.py` | `studio-vr`; deep notes in the `local-media-stack` skill (joint-picker reference) |
+| Make a rigged GLB move (walk / trot / gallop / idle) | `stack anim <rigged.glb> --clip trot`, or the 3D tab's **Animate the built rig** card | `studio-animation` |
 | 2D/3D game prototype, run/export Godot headless | `~/media-stack/game/new_project.sh 2d\|3d Name dest` | `studio-game` |
 | Playable 3D game in the browser (Three.js + TS + Vite) | hand-written `package.json` + `npm install`, procedural textures / WebAudio | `browser-3d-game` |
 | Auto-rig + test cycle → GLB, Grease Pencil 2D, sprite sheets, Krita/Tahoma2D path | `tools/anim/rigify_auto.py`, `gp_anim.py`, `spritesheet.py` | `studio-animation` |
@@ -132,6 +134,8 @@ gen upscale out.png --method esrgan --scale 2                                 # 
 gen upscale out.png --method ultrasharp                                       # 4x-UltraSharp (crisper, more hallucination)
 gen upscale out.png --method seedvr2 --scale 2                                # SeedVR2 3B diffusion upscaler (slow, best)
 gen video "a hog trots through a barn, handheld, golden hour" --w 1280 --h 704 --frames 121 --fps 24
+gen video "..." --seconds 30                                                 # long clip: chained passes, stitched
+gen video "..." --seconds 30 --plan                                          # show the pass split, submit nothing
 gen video "..." --image start.png                                             # image-to-video, same model
 gen sfx "heavy wooden door creaks open, stone hall reverb" --seconds 6        # Stable Audio Open 1.0
 gen sfx "..." --model sa3 --seconds 30                                        # Stable Audio 3 medium (music/ambience too, up to 150 s)
@@ -213,11 +217,33 @@ between your runs. When delegating, give at most ONE subagent GPU-heavy work at 
 ## Publishing
 
 Repo: `~/media-stack` → `github.com/vybesforge/VFStudio` (`main`). **Code, docs and skills only —
-local assets never go to GitHub** (standing rule): `*.glb`, `gold-standard/`, `rig/joints_*.json`,
-`output/`, `train/{datasets,runs,models,.venv}`, model weights, venvs are gitignored. Before every
-push run `git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' | awk '$1=="blob" && $2>1000000'`
-— anything over ~1 MB that is not vendored JS is a mistake; `*.glb` in the room counts even when
-"small". GitHub warns at 50 MB and refuses at 100 MB, but the rule is about the repo's purpose, not the limit. Dylan keeps the GitHub token in a
+local assets never go to GitHub** (standing rule). Two layers of defence, and the second is the one that
+actually holds: directory rules (`output/`, `gold-standard/`, `rig/joints_*.json`, `train/{datasets,runs,models,.venv}`,
+`ComfyUI/output/`, venvs) **plus extension-level rules anywhere in the tree** — `*.glb/gltf/obj/fbx/stl/3mf/blend`,
+`*.png/jpg/webp/tif/exr/hdr/psd/kra`, `*.wav/mp3/flac/ogg/opus/aif`, `*.mp4/mov/webm/mkv/avi/gif`,
+`*.safetensors/ckpt/pt/pth/onnx/gguf` — with only the panel's UI icons (`!control/brand/*.png`) and the
+Godot-2D template's placeholder sprites whitelisted. Folder rules always leak: a stem split written to
+`stems/<song>/` instead of `output/stems/` was committable.
+
+Audit before a push, all three, because they answer different questions:
+
+```bash
+# 1. what is tracked, by size — anything large that is not vendored JS is a mistake
+git ls-files -z | xargs -0 stat -f '%z %N' | sort -nr | head -20
+git count-objects -vH | grep size-pack                 # whole repo; ~1 MB is healthy here
+# 2. what is in HISTORY, not just HEAD (a purged asset still ships until rewritten)
+git rev-list --objects --all \
+  | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
+  | awk '$1=="blob" && $3>1000000 {printf "%8.2f MB  %s\n", $3/1048576, substr($0, index($0,$4))}'
+# 3. does a NEW file anywhere still slip through the ignores?
+for p in stems/x.wav media/render.png docs/shot.jpg some/place/model.glb tmp/clip.mp4; do
+  git check-ignore -v "$p" || echo "!! TRACKABLE $p"; done
+git ls-files -ci --exclude-standard        # tracked files the rules would now ignore — should be only whitelisted UI
+```
+
+Note `%(objectsize)` is field **3** in that `batch-check` format, not 2 — filtering on `$2` compares an
+object hash and silently reports nothing. GitHub warns at 50 MB and refuses at 100 MB, but the rule is
+about the repo's purpose, not the limit. Dylan keeps the GitHub token in a
 file on his Desktop; read it, pass it through a one-shot `git -c credential.helper=…` so it never lands
 in `.git/config` or shell history, and never echo it. A fine-grained PAT must have **Contents: Read
 and write** on the repo — `git push` and `POST /git/blobs` both 403 without it even though
@@ -300,7 +326,8 @@ stopping the server. Swap in use (panel → Resources) is the honest warning.
 ├── tools/vr/               gltf, optimize_glb.sh
 ├── tools/llm/scribe        prose/outline/chapter/screenplay/dialogue/lore/revise (mlx-lm :8081)
 ├── tools/vision/see        describe/ask/ocr/compare/snap (mlx-vlm :8082 + imagesnap)
-├── tools/anim/             rigify_auto.py, gp_anim.py, spritesheet.py, pngseq_to_vse.py
+├── tools/anim/             rigify_auto.py, animate_clip.py, gp_anim.py, spritesheet.py, pngseq_to_vse.py
+├── tools/rig/              auto_joints.py + render_views.py (VLM pre-place), center_joints.py, inspect_joints.py
 ├── game/                   Godot 2D/3D templates, new_project.sh
 ├── control/                panel.py, studio.py, studio.html, brand/
 ├── hermes/                 image_gen plugin + all studio skills (bin/sync-hermes export|install)

@@ -36,6 +36,20 @@ shows `1 running · 0 queued`.
   selected automatically once a start image is set. Measured: 927x652 image → 928x656; explicit
   sizes still win; t2v keeps 1280x704 (Wan) / 832x480 (HunyuanVideo 480p model).
 
+## 2026-11-02 (desktop): video clips up to 30 s (chained passes, stitched)
+
+Wan 2.2 TI2V 5B is trained at **121 frames**, so "longer" cannot be a bigger number in the graph.
+`gen video --seconds N` now plans the clip in passes of at most 121 frames (`snap_wan_len` keeps
+length = 4k+1), renders each pass as **image-to-video seeded with the previous pass's last frame**
+(ffmpeg `-sseof` grab), and concatenates them with ffmpeg (`-c copy`, re-encode fallback) into one
+mp4. `--plan` prints the split without submitting; `--fps` trades passes for clip length
+(12 fps = 10 s in a single pass). Panel Video tab: length 2/5/10/15/30 s + fps, and a note that
+over 5 s it renders in passes.
+
+Measured: 30 s @ 24 fps → 6 passes × 121 f (726 f); a 2-pass / 130-frame smoke run at 320×192×2
+steps rendered, chained and stitched in 61 s to a single 16.25 s mp4. At 832×480×20 steps a pass
+costs ~15 min, so 30 s ≈ 1.5 h — the panel says so.
+
 # Project state — read this first
 
 ## 2026-11-02 (desktop): rig joints — local VLM places them, and the pig.glb identity bug

@@ -15,7 +15,7 @@ polls /history, copies outputs into --out (default ~/media-stack/output/<kind>/)
 prints one JSON line: {"ok": true, "files": [...], "seconds": 12.3, "prompt_id": "..."}.
 Nothing here calls a cloud API; all inference is the local ComfyUI on :8188.
 """
-import argparse, json, os, random, shutil, sys, time, urllib.request, urllib.parse, uuid
+import argparse, json, math, os, random, shutil, subprocess, sys, time, urllib.request, urllib.parse, uuid
 
 HOST = os.environ.get("COMFY_HOST", "http://127.0.0.1:8188")
 STACK = os.path.expanduser("~/media-stack")
@@ -146,7 +146,60 @@ def run(prompt, kind, out_dir, timeout, now=False):
                     files.append(dst)
     if not files:
         die(f"prompt {pid} finished with status '{st.get('status_str')}' but wrote no output files — treat as failed")
-    print(json.dumps({"ok": True, "kind": kind, "files": files, "seconds": round(time.time() - t0, 1), "prompt_id": pid}))
+    return files, pid, round(time.time() - t0, 1)
+
+
+def ffmpeg_bin():
+    import glob
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    hits = sorted(glob.glob(os.path.expanduser("~/.hermes/tools/ffmpeg-*/ffmpeg")))
+    return hits[-1] if hits else None
+
+
+VIDEO_CHUNK_MAX = 121        # Wan 2.2 TI2V 5B is trained at 121 frames
+CHUNK_OVERLAP = 1            # each chunk restarts on the previous chunk's last frame
+
+
+def snap_wan_len(n):
+    """Wan latents want length = 4k+1 (49, 81, 121…); keep chunks on that grid."""
+    n = max(9, int(n))
+    return 4 * round((n - 1) / 4.0) + 1
+
+
+def plan_chunks(frames, chunk_max=VIDEO_CHUNK_MAX):
+    n = max(1, math.ceil(frames / float(chunk_max)))
+    sizes = [snap_wan_len(round(frames / float(n))) for _ in range(n)]
+    return sizes
+
+
+def extract_last_frame(video, out_png):
+    ff = ffmpeg_bin() or die("ffmpeg not found (needed to chain chunks)")
+    # -vsync is gone in ffmpeg 9 and -q:v is a JPEG-only option; sseof + a single frame is
+    # the portable way to pull the last picture out of an mp4.
+    subprocess.run([ff, "-y", "-loglevel", "error", "-sseof", "-0.5", "-i", video,
+                    "-frames:v", "1", "-update", "1", out_png],
+                   check=True, capture_output=True)
+    if not os.path.exists(out_png):
+        die(f"could not grab the last frame of {video}")
+    return out_png
+
+
+def concat_videos(parts, out_path):
+    ff = ffmpeg_bin() or die("ffmpeg not found (needed to stitch chunks)")
+    listfile = out_path + ".txt"
+    with open(listfile, "w") as fh:
+        for p in parts:
+            fh.write(f"file '{os.path.abspath(p)}'\n")
+    r = subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                        "-i", listfile, "-c", "copy", out_path], capture_output=True, text=True)
+    if r.returncode != 0:      # codec mismatch between parts: re-encode
+        subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                        "-i", listfile, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", out_path],
+                       check=True, capture_output=True)
+    os.unlink(listfile)
+    return out_path
 
 
 def seed_of(a):
@@ -404,6 +457,35 @@ def g_video_hyv15(a):
     return g
 
 
+def video_chunked(a, sizes):
+    """Long clips: Wan is trained at 121 frames, so a 30 s request is several chunks, each
+    i2v-conditioned on the previous chunk's last frame, stitched with ffmpeg at the end."""
+    os.makedirs(a.out, exist_ok=True)
+    tmp = os.path.join(a.out, ".chunks")
+    os.makedirs(tmp, exist_ok=True)
+    base = a.seed if a.seed is not None and a.seed >= 0 else seed_of(a)
+    start = a.image
+    parts, t_start = [], time.time()
+    for i, n in enumerate(sizes):
+        chunk = argparse.Namespace(**vars(a))
+        chunk.frames, chunk.image = n, start
+        chunk.seed = (base + i * 7919) % (2 ** 53)
+        graph = g_video(chunk)
+        files, pid, secs = run(graph, "video", tmp, a.timeout or 3600, now=(i > 0 or a.now))
+        part = files[0]
+        parts.append(part)
+        print(f"[video] chunk {i + 1}/{len(sizes)} · {n}f · {secs}s -> {os.path.basename(part)}", flush=True)
+        if i < len(sizes) - 1:
+            start = extract_last_frame(part, os.path.join(tmp, f"last_{i:02d}.png"))
+    total_f = sum(sizes)
+    final = os.path.join(a.out, f"{a.model}_{len(parts)}chunks_{total_f}f_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
+    concat_videos(parts, final)
+    print(json.dumps({"ok": True, "kind": "video", "files": [final], "chunks": parts,
+                      "frames": total_f, "fps": a.fps,
+                      "seconds_rendered": round(total_f / float(a.fps), 1),
+                      "seconds": round(time.time() - t_start, 1)}))
+
+
 def g_video(a):
     if getattr(a, "model", "wan") == "hyv15":
         return g_video_hyv15(a)
@@ -521,6 +603,9 @@ def main():
     # --w/--h default to None so an i2v start image can set the framing (see video_dims)
     s.add_argument("--w", type=int, default=None); s.add_argument("--h", type=int, default=None); s.add_argument("--frames", type=int, default=121)
     s.add_argument("--fps", type=int, default=24); common(s, "video"); s.set_defaults(steps=20)
+    s.add_argument("--seconds", type=float, default=None,
+                   help="clip length in seconds (frames = seconds x fps); over 121 frames it renders in chained chunks and stitches them")
+    s.add_argument("--plan", action="store_true", help="print the chunk plan and exit without submitting")
 
     s = sub.add_parser("sfx"); s.add_argument("prompt"); s.add_argument("--model", choices=["sao", "sa3", "sa3sfx"], default="sa3sfx", help="sao = Stable Audio Open 1.0 (CC, 47 s max); sa3sfx = Stable Audio 3 Small-SFX (dedicated SFX); sa3 = SA3 medium")
     s.add_argument("--seconds", type=float, default=10); s.add_argument("--negative"); common(s, "sfx")
@@ -538,8 +623,22 @@ def main():
     default_timeout = {"image": 900, "control": 900, "upscale": 1800, "video": 7200, "sfx": 900, "music": 1800, "edit": 1800}[a.cmd]
     if a.cmd == "video" and a.steps is None:
         a.steps = 20
+    if a.cmd == "video":
+        if getattr(a, "seconds", None):
+            a.frames = int(round(a.seconds * a.fps))
+        sizes = plan_chunks(a.frames)
+        if a.plan:
+            total = sum(sizes)
+            print(json.dumps({"ok": True, "plan": sizes, "chunks": len(sizes), "frames": total,
+                              "fps": a.fps, "seconds_rendered": round(total / float(a.fps), 2),
+                              "note": "each chunk is image-to-video conditioned on the previous chunk's last frame"}))
+            return
+        if len(sizes) > 1:
+            return video_chunked(a, sizes)
+        a.frames = sizes[0]
     prompt = builders[a.cmd](a)
-    run(prompt, a.cmd, a.out, a.timeout or default_timeout, now=a.now)
+    files, pid, secs = run(prompt, a.cmd, a.out, a.timeout or default_timeout, now=a.now)
+    print(json.dumps({"ok": True, "kind": a.cmd, "files": files, "seconds": secs, "prompt_id": pid}))
 
 
 if __name__ == "__main__":

@@ -126,7 +126,7 @@
 <section class="tab active" id="tab-image"><div class="two">
   <div>
     <div class="card"><div class="name">Text → image</div>
-      <label>prompt</label><textarea id="im-prompt">a brass compass on an old map, soft window light, macro</textarea>
+      <label>prompt</label><textarea id="im-prompt" placeholder="describe the image you want… (this box starts empty; nothing runs until you press Generate)"></textarea>
       <div class="fields">
         <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option></select></div>
         <div><label>LoRA (trained in the Train tab)</label><div class="row" style="gap:6px"><select id="im-lora" style="flex:1"><option value="">none</option></select><input id="im-lora-s" value="0.9" size="3" title="strength"></div></div>
@@ -173,12 +173,13 @@
       <div class="fields">
         <div><label>model</label><select id="vd-model"><option value="wan">Wan 2.2 5B · fast path (measured)</option><option value="hyv15">HunyuanVideo 1.5 8.3B · quality (t2v 480p / i2v 720p, untested)</option></select></div>
         <div><label>size</label><select id="vd-size" onchange="void 0"><option value="auto">auto · match the start image</option><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
-        <div><label>frames (24 fps)</label><select id="vd-frames"><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
+        <div><label>length</label><select id="vd-secs"><option value="2">2 s · one pass</option><option value="5" selected>5 s · one pass (model's native 121 f)</option><option value="10">10 s · 3 passes</option><option value="15">15 s · 3 passes</option><option value="30">30 s · 6 passes, ~1.5 h</option></select></div>
+        <div><label>fps</label><select id="vd-fps"><option value="24">24</option><option value="16">16 · more clip per pass</option><option value="12">12 · 10 s in one pass</option></select></div>
         <div><label>steps</label><input id="vd-steps" value="20"></div>
         <div><label>seed</label><input id="vd-seed" placeholder="random"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('video',Object.assign({prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')},vsize('vd-size')))" title="Render a clip with the chosen model; an image makes it image-to-video">Generate video</button></div>
-      <div class="hint">~14 s/step at 832×480×49f on this GPU. <b>auto</b> takes the output size from the start image (aspect kept, sides snapped to 16), so the clip frames exactly like the picture you fed it. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
+      <div class="btns"><button class="primary" onclick="runJob('video',Object.assign({prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),seconds:v('vd-secs'),fps:v('vd-fps'),steps:v('vd-steps'),seed:v('vd-seed')},vsize('vd-size')))" title="Render a clip with the chosen model; an image makes it image-to-video, and over 5 s it renders in chained passes">Generate video</button></div>
+      <div class="hint">~14 s/step at 832×480×49f on this GPU. <b>auto</b> takes the output size from the start image (aspect kept, sides snapped to 16), so the clip frames exactly like the picture you fed it. Wan's native pass is 121 frames, so anything over 5 s renders as chained passes — each one seeded with the previous pass's last frame — and gets stitched into one mp4 (<code>gen video --seconds 30 --plan</code> shows the split). Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
     </div>
     <div id="jobs-video" class="card" style="margin-top:12px"></div>
   </div>
@@ -510,7 +511,7 @@ async function loadTrain(){
   const d=await (await fetch('/api/studio/train')).json();
   $('tr-datasets').innerHTML = d.datasets.length ? d.datasets.map(x=>`<div class="row" style="justify-content:space-between;padding:4px 0">${x.sample?`<img src="${x.sample}" style="height:40px;border-radius:4px">`:''}<b style="flex:1;margin-left:8px">${x.name}</b><span class="muted">${x.images} images · ${x.captioned} captions</span><button onclick="$('tr-ds').value='${x.name}';$('tr-name').value='${x.name}';flash('selected')" title="Use this entry here">use</button></div>`).join('') : '<span class="muted">none yet — add images on the left</span>';
   $('tr-ds').innerHTML = d.datasets.map(x=>`<option>${x.name}</option>`).join('');
-  $('tr-loras').innerHTML = d.loras.length ? d.loras.map(l=>`<div class="row" style="justify-content:space-between;padding:4px 0"><b>${l.name}</b><span class="muted">${l.mb} MB · ${l.mtime}</span><button onclick="$('im-lora').value='${l.name}';document.querySelector('nav button[data-tab=image]').click();flash('LoRA selected on the Image tab')" title="Select this LoRA for the Image tab">use in Image</button></div>`).join('') : '<span class="muted">none yet</span>';
+  $('tr-loras').innerHTML = d.loras.length ? d.loras.map(l=>`<div class="row" style="justify-content:space-between;padding:4px 0"><b>${l.name}</b><span class="muted">${l.mb} MB · ${l.mtime}</span><button onclick="$('im-lora').value='${l.name}';document.querySelector('nav button[data-tab=image]').click();const p=$('im-prompt');if(p){p.focus();}flash('LoRA selected — now type your prompt, then Generate')" title="Select this LoRA for the Image tab">use in Image</button></div>`).join('') : '<span class="muted">none yet</span>';
   $('tr-runs').innerHTML = d.runs.length ? d.runs.map(r=>`<div style="padding:4px 0"><b>${r.name}</b> ${r.done?'<span style="color:var(--cyan)">done</span>':''}<div class="muted" style="font:11px ui-monospace,monospace">${r.last||''}</div></div>`).join('') : '<span class="muted">none yet</span>';
   loadLoras(d.loras);
 }
