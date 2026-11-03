@@ -16,8 +16,8 @@
 #      --train: train venv (ostris ai-toolkit, torch/MPS) for `lora train` — LoRA training on this Mac
 #   5. GUI apps: Blender, Godot (+ export templates), OrcaSlicer, Krita, Audacity, Inkscape,
 #      OpenSCAD, MeshLab, Tahoma2D (2D animation)       (skip with --no-apps)
-#   6. gltf-transform (npm), symlinks for stack/gen/voice/vid/stems/fetch-models/blender into ~/.local/bin
-#   7. Models: essentials by default (~25 GB); --all-models fetches the full manifest (~136 GB)
+#   6. gltf-transform (npm), symlinks for stack/gen/voice/vid/stems/fetch-models/forge-recommend/blender into ~/.local/bin
+#   7. Models: essentials profile for this Mac (~35 GB on 64 GB); --all-models fetches the full manifest
 #   8. --hermes: install the image_gen plugin + studio skills into ~/.hermes and point
 #      Hermes' image/tts/stt at the local services
 #   9. Starts the panel and runs a smoke test
@@ -31,7 +31,10 @@ for a in "$@"; do case "$a" in
 STACK="$HOME/media-stack"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 [ "$HERE" = "$STACK" ] || { echo "This repo must live at $STACK (found $HERE). mv it there and re-run." >&2; exit 1; }
-[ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ] || { echo "Apple Silicon macOS only." >&2; exit 1; }
+# Apple Silicon keeps the Homebrew path below. Every other OS uses the probe-driven installer.
+if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+  exec python3 "$HERE/tools/forge/install.py" "$@"
+fi
 
 say()  { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
@@ -175,7 +178,7 @@ fi
 # ─── 6. node tools + symlinks ───────────────────────────────────────────────────
 say "gltf-transform + command symlinks"
 have gltf-transform || npm install -g @gltf-transform/cli >/dev/null
-for c in stack fetch-models sync-hermes restore-known-good blender; do ln -sf "$STACK/bin/$c" "$HOME/.local/bin/$c"; done
+for c in stack fetch-models forge-recommend sync-hermes restore-known-good blender; do ln -sf "$STACK/bin/$c" "$HOME/.local/bin/$c"; done
 ln -sf "$STACK/tools/comfy/gen" "$HOME/.local/bin/gen"
 ln -sf "$STACK/tools/voice/voice" "$HOME/.local/bin/voice"
 ln -sf "$STACK/tools/video/vid" "$HOME/.local/bin/vid"
@@ -183,23 +186,36 @@ ln -sf "$STACK/tools/llm/scribe" "$HOME/.local/bin/scribe"
 ln -sf "$STACK/tools/vision/see" "$HOME/.local/bin/see"
 ln -sf "$STACK/tools/audio/stems" "$HOME/.local/bin/stems"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile" ;; esac
-ok "gen voice vid scribe see stems stack fetch-models blender -> ~/.local/bin"
+ok "gen voice vid scribe see stems stack fetch-models forge-recommend blender -> ~/.local/bin"
 
 # ─── 7. models ──────────────────────────────────────────────────────────────────
 say "models"
+python3 "$STACK/tools/forge/install.py" --write-engines || echo "   (engine map not written — bin/forge-recommend still works)"
 if [ "$ALL_MODELS" = 1 ]; then
   "$STACK/bin/fetch-models"
 else
-  # Essentials: fast image + upscalers + SFX + 3D (TRELLIS.2). Voice models download on first use.
-  "$STACK/bin/fetch-models" z-image-turbo z-image-te z-image-vae realesrgan-x4plus 4x-ultrasharp \
-      stable-audio-open-1.0 t5-base trellis2-int8 trellis2-shape-vae trellis2-texture-vae dinov3-L birefnet
-  echo "   essentials done. Everything else: fetch-models            (full list: fetch-models --list)"
+  # Essentials for THIS Mac (forge-recommend). On 64 GB that is Z-Image, upscalers,
+  # Stable Audio Open, and TRELLIS.2 — the same set the installer used to hard-code.
+  "$STACK/bin/fetch-models" --profile essentials
+  echo "   essentials done. Quality set: fetch-models --profile auto     (full list: fetch-models --list)"
 fi
-# Hugging Face models (LLM, VLM, voice). XET transfer is disabled: with it enabled, weights
+# Hugging Face models (LLM, VLM, voice) live in manifest hf_models. models/hf-models.txt
+# still wins if you drop one in. XET transfer is disabled: with it enabled, weights
 # silently failed to land on this network (metadata only) — plain HTTP downloads at full speed.
-say "Hugging Face models (models/hf-models.txt)"
+say "Hugging Face models (manifest hf_models)"
 export HF_HUB_DISABLE_XET=1
-grep -vE '^\s*(#|$)' "$STACK/models/hf-models.txt" | awk '{print $1}' | while read -r repo; do
+if [ -f "$STACK/models/hf-models.txt" ]; then
+  HF_REPOS="$(grep -vE '^\s*(#|$)' "$STACK/models/hf-models.txt" | awk '{print $1}')"
+else
+  HF_REPOS="$(python3 - "$STACK/models/manifest.json" <<'PY'
+import json, sys
+print("\n".join(m["repo"] for m in json.load(open(sys.argv[1])).get("hf_models", []) if m.get("repo")))
+PY
+)"
+fi
+printf '%s\n' "$HF_REPOS" | while read -r repo; do
+  [ -z "$repo" ] && continue
+  if [ "${VF_UNCENSORED:-}" != "1" ] && [[ "$repo" == *Uncensored* ]]; then echo "   skip $repo (labeled uncensored — opt in with VF_UNCENSORED=1)"; continue; fi
   if [ "$ALL_MODELS" = 0 ] && [[ "$repo" == *27B* ]]; then echo "   skip $repo (27B writer — fetch with --all-models or: hf download $repo)"; continue; fi
   "$STACK/llm/.venv/bin/hf" download "$repo" >/dev/null 2>&1 && ok "$repo" || echo "   ✗ $repo (re-run install.sh to resume)"
 done

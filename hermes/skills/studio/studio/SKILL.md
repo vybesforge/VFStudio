@@ -47,6 +47,8 @@ are copy-pasteable as written.
 | Fix / rig / render a mesh | Blender via `~/media-stack/bin/blender -b -P script.py` | `local-media-stack`, `blender` |
 | Parametric part → STL → G-code | `cad_examples/*.py`, `meshcheck.py`, `slice --preset bambu|generic` | `studio-3d-print` |
 | View asset in VR / build SteamVR app | Godot room, `optimize_glb.sh`, WebXR room | `studio-vr` |
+| 2D/3D Godot prototype, or a Three.js page | `game/new_project.sh 2d\|3d\|web Name dest` — Godot for desktop physics and export, `web` for the browser | `studio-game` |
+| Gravity, rigid bodies, triggers, raycasts, a baked drop | Godot bodies in the game templates; `tools/physics/rigid_drop.py` for a Blender shot | `studio-physics` |
 | Place / centre / check rig joints on a GLB | room's **AI auto-place**, `stack rig auto <glb>`, `tools/rig/center_joints.py`, `tools/rig/inspect_joints.py` | `studio-vr`; deep notes in the `local-media-stack` skill (joint-picker reference) |
 | Make a rigged GLB move (walk / trot / gallop / idle) | `stack anim <rigged.glb> --clip trot`, or the 3D tab's **Animate the built rig** card | `studio-animation` |
 | 2D/3D game prototype, run/export Godot headless | `~/media-stack/game/new_project.sh 2d\|3d Name dest` | `studio-game` |
@@ -63,6 +65,8 @@ stack start audio            # TTS / STT / voice clone
 stack start llm              # uncensored 27B writer (16 GB) · stack start vision = Qwen3-VL 8B (5 GB)
 gen status                   # which ComfyUI model sets are installed + queue depth
 fetch-models --list          # ✓/✗ every model in models/manifest.json; `fetch-models` downloads the ✗
+forge-recommend              # probe OS/CPU/RAM/GPUs/disk and print essentials + quality ids
+fetch-models --profile auto  # fetch that set; `--dry-run` prints it first. Never invent a cloud model.
 ```
 
 Panel: http://127.0.0.1:8787 — **VF Studio** page (`control/studio.html` + `studio.py`). Tabs
@@ -74,7 +78,7 @@ and the Voice tab records from the mic — Dylan uses the page himself, so a pat
 the first thing he asks is "how do I get my own image/voice in". Code edits need `stack restart panel`
 (uvicorn does not hot-reload); never `pkill python` — it takes the gateway down with it. Header = live ComfyUI progress bar
 (step N/M) for anything submitted as client `gen-cli` — `gen` and the Hermes plugin do; ComfyUI-UI
-jobs show an indeterminate bar. Models tab = manifest + HF inventory. **Services tab = one card per service, and each card carries its
+jobs show an indeterminate bar. Models tab = this machine's forge recommendation (`forge-recommend`) plus the manifest and HF inventory. **Services tab = one card per service, and each card carries its
 own copy-paste endpoint tiles** — mlx-audio holds TTS / STT / voice clone, ComfyUI / writer LLM / VLM /
 the panel's own API hold one each — with per-tile **Copy** and a **curl** panel (routes + a working
 snippet), plus **Copy all → .env / JSON** and a `127.0.0.1`↔LAN host switch in a bar above the grid.

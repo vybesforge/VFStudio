@@ -103,7 +103,7 @@
   .eptile td{padding:3px 0}
 </style></head><body>
 <header>
-  <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge · M3 Max 64 GB · nothing leaves the machine</div></div></div>
+  <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge · <span id="hw" title="">this machine</span> · nothing leaves the machine</div></div></div>
   <div class="card" id="progress" style="min-width:360px;flex:1;max-width:720px;padding:10px 14px"></div>
 </header>
 <nav>
@@ -798,6 +798,17 @@ async function act(path){ const j=await (await fetch('/api/'+path,{method:'POST'
 async function toggleSvc(k,on){ flash((on?'stopping ':'starting ')+k+'…'); await act((on?'stop/':'start/')+k); setTimeout(refreshServices,900); }
 async function svcLog(n){const p=$('slog-'+n);const j=await (await fetch('/api/logs/'+n+'?lines=60')).json();logText[n]=j.text||'(empty)';p.textContent=logText[n];const open=p.style.display==='none';p.style.display=open?'block':'none';open?logOpen.add(n):logOpen.delete(n);}
 function bar(pct,tone){const x=Math.max(0,Math.min(100,pct));const t=tone||(x>88?'r':x>70?'a':x>40?'':'g');return `<div class="bar ${t}"><i style="width:${x}%"></i></div>`;}
+async function hwLine(){
+  // Header hardware line — derived from the box, never hard-coded. Replaces the
+  // old "M3 Max 64 GB" label that travelled with the mac-era build.
+  try{
+    const r=await (await fetch('/api/resources')).json();
+    const g=(r.gpu&&r.gpu.gpus)||[], m=r.mem||{}, el=$('hw');
+    if(!el) return;
+    el.textContent = `${g.length?g.length+'× GPU':'no GPU'} · ${((m.total||0)/GB).toFixed(0)} GB RAM`;
+    el.title = g.map(x=>x.name).join(' + ');
+  }catch(e){}
+}
 async function refreshResources(){
   const r=await (await fetch('/api/resources')).json(); const c=r.cpu||{},m=r.mem||{},g=r.gpu||{},d=r.disk||{};
   const memPct=m.total?m.used/m.total*100:0, swapPct=m.swap_total?m.swap_used/m.swap_total*100:0;
@@ -839,5 +850,6 @@ refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
 setInterval(refreshProgress, 5000);
 setInterval(refreshJobs, 60000);
 setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); }, 15000);
+hwLine(); setInterval(hwLine, 60000);   // header hardware line, refreshed once a minute
 setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); }, 60000);
 </script></body></html>
