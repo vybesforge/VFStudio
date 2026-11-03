@@ -53,6 +53,22 @@ Stop mlx-audio to exercise the toggle when the queue is not empty.
   the body its CLI already sends (`tools/llm/scribe`, `tools/vision/see`) rather than guessing, and say
   in the report which rows were proven live and which were only read.
 
+## Status bar: name it, count it, let it be cancelled
+
+A status you cannot act on is a bug — that applies to jobs, not just service pills. Each row in the
+status bar (`#progress`) carries **cancel**:
+
+- `POST /api/comfy/cancel {id, kind}` — `kind: "pending"` deletes that job id from the queue
+  (`POST :8188/queue {"delete": [id]}`); anything else **interrupts** the running job
+  (`POST :8188/interrupt`), because ComfyUI has **no per-job stop**. Confirm in the UI before firing and
+  say which one it is (a running job loses its progress, a queued one only its slot).
+- Names come from the graph (`TRELLIS.2 image→3D → <prefix>`, `Wan 2.2 video → <prompt text>`) plus
+  `first_seen` elapsed, because ComfyUI's queue items carry no start timestamp.
+- Cadence, per Dylan's standing preference: status bar 5 s, job lists and galleries 60 s,
+  services/resources 15 s. Fast polling reads as the page reloading itself.
+- Never click a cancel button while testing the render of the bar — on this box the running job is
+  usually someone else's render. Assert the button exists (`#progress button` count) and leave it.
+
 ## Copy buttons
 
 `navigator.clipboard.writeText` is unavailable on plain-HTTP LAN origins, so every copy goes through one
@@ -116,3 +132,13 @@ disappears while the HTML still renders — the symptom is an empty card, not an
 - State the page shows must come from one fetch per refresh: reading `/api/status` twice in a row
   (once for cards, once for the endpoint block) leaves the second caller with stale tags when the
   first render wins the race.
+
+## Every control explains itself on hover
+
+Every button carries a `title` (native tooltip, no JS) that says what it will actually do —
+"Interrupt the running ComfyUI job — its progress is lost" beats "cancel". Tabs carry a one-line
+`title` **and** feed the `#tabdesc` strip under the nav (`TAB_DESC` map + `onTabDesc()` in
+`onTab()`), so the current tab's purpose is on screen without hovering. When adding a control,
+give it a title in the same edit: 94 static buttons plus every generated row (gallery actions,
+job cancel/log, endpoint tiles) is the current bar, and `document.querySelectorAll('button:not([title])')`
+returning anything is a miss.

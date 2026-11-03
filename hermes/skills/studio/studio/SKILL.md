@@ -86,6 +86,12 @@ bug, and Dylan asks for exactly that. Resources tab has
 owns what, endpoint tiles, copy-button pattern, card-layout and re-render pitfalls, how to test a
 copy button): `references/panel-ui.md`.
 
+**Auto-refresh is deliberately slow (standing preference).** Polling fast reads to Dylan as the page
+reloading itself — "the webpage is loading too fast, let them auto refresh every min" — so keep the
+cadence: **status bar 5 s** (the only thing that must feel live: progress + cancel), **job lists and
+galleries 60 s**, **services/resources 15 s**. Anything that re-renders a card list on a short timer also
+throws away open logs and scroll position; slow it down instead of optimising the render.
+
 **Branding (standing preference):** anything web-facing in the stack carries the VybesForge look —
 vendored `control/brand/*.png` (VF monogram, never hot-linked), palette navy `#02060f/#0b121d`,
 forge orange `#fd6c0f`, amber `#ffb000`, cyan `#29d5e9`, magenta `#bf338a`, title "VF Studio",
@@ -142,9 +148,16 @@ creates the directory `hero.png/` and writes `upscale_seedvr2_0000N_.png` inside
 JSON `files` array, or move the inner file out and `rmdir` the stub, before reporting or attaching a
 deliverable — a directory sitting where you expect a file is how a finished render silently goes missing.
 
-**Match the video canvas to the source framing.** Wan keeps the requested aspect and re-crops the
-reference to it, so a full-body portrait source at `--w 832 --h 480` comes back cropped at the waist —
-use `--w 480 --h 832` for a standing figure and `--w 832 --h 480` only for a medium or landscape shot.
+**The video canvas follows the start image by default.** Wan keeps the requested aspect and re-crops the
+reference to it, so a fixed latent re-frames an upload (a full-body portrait at `--w 832 --h 480` comes
+back cropped at the waist). `gen video` therefore takes `--w/--h` as **optional**: leave them off with
+`--image` and `video_dims()` reads the image — aspect preserved, area capped at 1280×704 (never upscaled
+past the source), sides snapped to 16 because the Wan/Hunyuan VAE needs multiples of 16 — and prints
+`[gen] video size WxH from <file>`. Measured: a 927×652 start image → 928×656. Explicit `--w/--h` still
+win, and t2v keeps 1280×704 (Wan) / 832×480 (HunyuanVideo's 480p model). Panel Video tab's size select
+has **`auto · match the start image`** first and flips to it as soon as a start image is set — keep that,
+Dylan asks for the clip to match the picture he fed it. Manual override is for choosing a shot, not for
+dodging the aspect: `--w 480 --h 832` standing figure, `--w 832 --h 480` medium/landscape.
 Measured at 480×832, 121 frames (5 s @ 24 fps), 20 steps: **~23 min**, and the first 2 jobs wait
 behind whatever the other session has queued.
 
