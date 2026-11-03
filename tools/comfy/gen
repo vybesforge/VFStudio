@@ -1,7 +1,7 @@
-#!/Users/dcruse/media-stack/tools/.venv/bin/python
+#!/home/billie/media-stack/tools/.venv/bin/python
 """gen — one CLI for every ComfyUI generation pipeline on this Mac.
 
-  gen image  "prompt" [--model zimage|klein|flux] [--w 1024 --h 1024] [--steps N] [--seed N] [--n 1]
+  gen image  "prompt" [--model zimage|klein|flux|animagine] [--w 1024 --h 1024] [--steps N] [--seed N] [--n 1]
   gen control "prompt" --image ref.png [--mode canny|raw] [--strength 1.0]      (Z-Image + ControlNet Union)
   gen upscale in.png [--method esrgan|ultrasharp|seedvr2] [--scale 4]
   gen edit   in.png "instruction" [--ref2 b.png --ref3 c.png] [--fast] [--steps N] [--cfg N]   (Qwen-Image-Edit 2509)
@@ -28,6 +28,7 @@ FILES = {
     "zimage": ["diffusion_models/z_image_turbo_bf16.safetensors", "text_encoders/qwen_3_4b.safetensors", "vae/ae.safetensors"],
     "klein": ["diffusion_models/flux-2-klein-4b.safetensors", "text_encoders/qwen_3_4b.safetensors", "vae/flux2-vae.safetensors"],
     "flux": ["checkpoints/flux1-dev-fp8.safetensors"],
+    "animagine": ["checkpoints/animagine-xl-4.0-opt.safetensors"],
     "control": ["model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors"],  # ModelPatchLoader reads model_patches/, NOT controlnet/
     "esrgan": ["upscale_models/RealESRGAN_x4plus.pth"],
     "ultrasharp": ["upscale_models/4x-UltraSharp.pth"],
@@ -45,6 +46,13 @@ FILES = {
     "edit_fp8": ["diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors"],
     "edit_lightning": ["loras/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors"],
 }
+
+
+ANIME_NEG = (
+    "lowres, bad anatomy, bad hands, bad proportions, extra limbs, missing limbs, "
+    "fused fingers, extra digits, text, signature, watermark, username, artist name, "
+    "cropped, out of frame, worst quality, low quality, jpeg artifacts, blurry, deformed"
+)
 
 
 def have(key):
@@ -273,6 +281,24 @@ def g_image(a):
                                                      "seed": s, "steps": steps, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
             "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
             "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "gen/flux"}},
+        }, a, "1", [("5", "model")])
+    if a.model == "animagine":
+        # Anime / illustration lane: Animagine XL 4.0 (SDXL finetune, cagliostrolab,
+        # OpenRAIL++-M). Real negative prompt and real CFG — SDXL is NOT
+        # guidance-distilled, so cfg 1.0 (the flux/zimage habit) produces mush.
+        need("animagine")
+        steps = a.steps or 30
+        cfg = getattr(a, "cfg", None) or 6.5
+        neg = getattr(a, "negative", None) or ANIME_NEG
+        return with_lora({
+            "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "animagine-xl-4.0-opt.safetensors"}},
+            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": ["1", 1]}},
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["1", 1]}},
+            "4": {"class_type": "EmptyLatentImage", "inputs": {"width": a.w, "height": a.h, "batch_size": a.n}},
+            "5": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["3", 0], "negative": ["2", 0], "latent_image": ["4", 0],
+                                                     "seed": s, "steps": steps, "cfg": cfg, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0}},
+            "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+            "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "gen/animagine"}},
         }, a, "1", [("5", "model")])
     die("unknown --model")
 
@@ -584,7 +610,9 @@ def main():
         sp.add_argument("--now", action="store_true", help="do not wait for an idle queue")
         sp.add_argument("--timeout", type=int, default=None)
 
-    s = sub.add_parser("image"); s.add_argument("prompt"); s.add_argument("--model", choices=["zimage", "klein", "flux"], default="zimage")
+    s = sub.add_parser("image"); s.add_argument("prompt"); s.add_argument("--model", choices=["zimage", "klein", "flux", "animagine"], default="zimage")
+    s.add_argument("--negative", default=None, help="negative prompt (animagine lane; real CFG negative)")
+    s.add_argument("--cfg", type=float, default=None, help="guidance (animagine lane, default 6.5)")
     s.add_argument("--w", type=int, default=1024); s.add_argument("--h", type=int, default=1024); s.add_argument("--n", type=int, default=1)
     s.add_argument("--lora", default=None, metavar="NAME[:STRENGTH]", help="LoRA from ComfyUI/models/loras (trained with `lora train`), e.g. vfrobot:0.9"); common(s, "image")
 

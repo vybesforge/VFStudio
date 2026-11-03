@@ -19,6 +19,7 @@ the skills never drift apart.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -30,11 +31,12 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 HOME = Path.home()
 STACK = HOME / "media-stack"
 OUT = STACK / "output"
+THUMBS = OUT / ".thumbs"
 COMFY_OUT = STACK / "ComfyUI" / "output"
 MODELS = STACK / "ComfyUI" / "models"
 MANIFEST = STACK / "models" / "manifest.json"
@@ -48,6 +50,7 @@ STEMS = STACK / "tools" / "audio" / "stems"
 VID = STACK / "tools" / "video" / "vid"
 WRITE = STACK / "tools" / "llm" / "scribe"   # not "write": macOS owns that name
 SEE = STACK / "tools" / "vision" / "see"
+TRELLIS3D = STACK / "tools" / "comfy" / "trellis3d"
 FFMPEG = next((p for p in (HOME / ".hermes" / "tools").glob("ffmpeg-*/ffmpeg")), None)
 
 router = APIRouter(prefix="/api/studio")
@@ -55,6 +58,7 @@ router = APIRouter(prefix="/api/studio")
 # ───────────────────────── inventory ─────────────────────────
 TOOLS = [
     ("gen", GEN, "ComfyUI pipelines: image / control / upscale / video / sfx / music"),
+    ("trellis3d", TRELLIS3D, "TRELLIS.2 image -> textured GLB (headless: SaveGLB on the shipped template)"),
     ("voice", VOICE, "TTS, voice clone, transcribe, enhance (mlx-audio)"),
     ("vid", VID, "ffmpeg wrapper: trim / concat / captions / gif / loudness"),
     ("scribe", WRITE, "uncensored creative writing over the local LLM (prose/outline/screenplay/dialogue/lore)"),
@@ -79,6 +83,7 @@ TOOLS = [
 GROUPS = [
     ("Image", ["flux1-dev-fp8", "z-image-turbo", "z-image-te", "z-image-vae", "z-image-controlnet-union",
                "flux2-klein-4b", "flux2-vae", "qwen-image-edit-2509", "qwen-image-edit-2509-gguf", "qwen-2.5-vl-7b", "qwen-image-vae",
+               "animagine-xl-4.0",
                "4x-ultrasharp", "realesrgan-x4plus", "seedvr2-3b-int8", "seedvr2-vae"]),
     ("Video", ["wan2.2-ti2v-5b", "wan2.2-vae", "umt5-xxl-fp8"]),
     ("3D", ["trellis2-int8", "trellis2-shape-vae", "trellis2-texture-vae", "dinov3-L", "birefnet"]),
@@ -333,9 +338,16 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
     if kind == "image":
         cmd = [str(GEN), "image", a["prompt"], "--model", a.get("model", "zimage"),
                *flag("--w", cast=int), *flag("--h", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int), *flag("--n", cast=int)]
+        # anime lane (animagine): real negative prompt + real CFG
+        if a.get("model") == "animagine":
+            cmd += [*flag("--negative"), *flag("--cfg", cast=float)]
         if a.get("lora"):
             cmd += ["--lora", f"{a['lora']}:{a.get('lora_strength') or 1.0}"]
         return cmd
+    if kind == "mesh3d":
+        # TRELLIS.2 image -> textured GLB, headless (SaveGLB appended to the shipped template)
+        return [str(TRELLIS3D), a["image"], "--prefix", a.get("prefix") or "3d/mesh",
+                *flag("--texres", cast=int)]
     if kind == "lora":
         return [str(LORA), "train", "--dataset", str(DATASETS / a["dataset"]), "--name", a["name"], "--model", a.get("model", "zimage"),
                 *flag("--steps", cast=int), *flag("--rank", cast=int), *flag("--res", cast=int), *flag("--trigger"), *flag("--save-every", cast=int), "-v"]
@@ -544,6 +556,105 @@ def unload_all(payload: dict = Body(default={})):
             "used_gb": round(after.get("used", 0) / 2**30, 1), "message": f"freed ~{freed:.1f} GB · " + "; ".join(steps)}
 
 
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
+VIDEO_EXT = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
+
+
+def _ffprobe(path: Path) -> dict:
+    """Read a real width/height/fps/duration out of any image or video (no PIL in this venv)."""
+    ff = shutil.which("ffprobe") or str(next(Path.home().glob(".hermes/tools/ffmpeg-*/ffprobe"), ""))
+    if not ff:
+        return {}
+    r = subprocess.run([ff, "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height,r_frame_rate,duration", "-of", "json", str(path)],
+                       capture_output=True, text=True)
+    try:
+        st = (json.loads(r.stdout or "{}").get("streams") or [{}])[0]
+    except json.JSONDecodeError:
+        return {}
+    fps = 0.0
+    rate = st.get("r_frame_rate") or "0/1"
+    if "/" in rate:
+        num, _, den = rate.partition("/")
+        fps = float(num) / float(den) if den and float(den) else 0.0
+    elif rate:
+        fps = float(rate)
+    return {"width": int(st.get("width") or 0), "height": int(st.get("height") or 0),
+            "fps": round(fps, 3), "seconds": round(float(st.get("duration") or 0), 3)}
+
+
+def _fit(w: int, h: int) -> tuple[int, int]:
+    """Snap to the 16-px grid Wan's VAE wants and keep the input's aspect, long side ≤ 1280."""
+    if not w or not h:
+        return 0, 0
+    scale = min(1.0, 1280.0 / max(w, h))
+    fw, fh = max(256, int(round(w * scale / 16)) * 16), max(256, int(round(h * scale / 16)) * 16)
+    return fw, fh
+
+
+def _fit_frames(frames: int) -> int:
+    """Wan wants length = 4k+1. Clamp to what one card can finish (9..121)."""
+    k = int(round(max(9, min(121, frames)) / 4))
+    return max(5, min(121, k * 4 + 1))
+
+
+@router.get("/thumb")
+def thumb(path: str, w: int = 320):
+    """A still poster for any gallery item. The page shows these instead of a live <video>
+    per tile — 48 media pipelines on one GPU is what used to kill the tab, not one bad file."""
+    p = Path(path).expanduser()
+    if not p.exists() or not p.is_file():
+        return JSONResponse({"ok": False, "error": f"no such file: {path}"}, status_code=404)
+    if p.suffix.lower() in IMAGE_EXT:
+        return FileResponse(p)
+    THUMBS.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha1(f"{p}|{p.stat().st_mtime_ns}|{w}".encode()).hexdigest()[:16]
+    dst = THUMBS / f"{key}.jpg"
+    if not dst.exists():
+        ff = shutil.which("ffmpeg")
+        if not ff:
+            return JSONResponse({"ok": False, "error": "ffmpeg not found"}, status_code=500)
+        for seek in ("0.5", "0"):
+            subprocess.run([ff, "-y", "-loglevel", "error", *(["-ss", seek] if seek != "0" else []),
+                            "-i", str(p), "-frames:v", "1", "-vf", f"scale={max(64, min(640, w))}:-2",
+                            "-q:v", "5", str(dst)], check=False)
+            if dst.exists():
+                break
+    if not dst.exists():
+        return JSONResponse({"ok": False, "error": "could not read a frame"}, status_code=500)
+    return FileResponse(dst, media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
+
+
+@router.get("/probe")
+def probe(path: str):
+    """What is this input, really? Feeds the Video tab so the output matches the source format."""
+    p = Path(path).expanduser()
+    if not p.exists() or not p.is_file():
+        return JSONResponse({"ok": False, "error": f"no such file: {path}"}, status_code=404)
+    ext = p.suffix.lower()
+    if ext not in IMAGE_EXT | VIDEO_EXT:
+        return JSONResponse({"ok": False, "error": f"not an image or video: {p.name}"}, status_code=400)
+    meta = _ffprobe(p)
+    w, h = _fit(meta.get("width") or 0, meta.get("height") or 0)
+    out = {"ok": True, "path": str(p), "kind": "video" if ext in VIDEO_EXT else "image",
+           "width": meta.get("width"), "height": meta.get("height"), "fit_w": w, "fit_h": h,
+           "fps": meta.get("fps"), "seconds": meta.get("seconds")}
+    if out["kind"] == "video":
+        fdir = OUT / "video" / "frames"
+        fdir.mkdir(parents=True, exist_ok=True)
+        frame = fdir / f"{re.sub(r'[^A-Za-z0-9_-]+', '_', p.stem)[:40]}_f000.png"
+        ff = shutil.which("ffmpeg")
+        if ff:
+            subprocess.run([ff, "-y", "-loglevel", "error", "-ss", "0", "-i", str(p),
+                            "-frames:v", "1", str(frame)], check=False)
+        if frame.exists():
+            out["frame"] = str(frame)
+            out["frame_url"] = f"/files/output/video/frames/{frame.name}"
+        src_frames = int(round((meta.get("seconds") or 0) * (meta.get("fps") or 24))) or 49
+        out["fit_frames"] = _fit_frames(src_frames)
+    return out
+
+
 @router.post("/upload")
 async def upload(request: Request):
     """Receive a browser recording or a picked file (multipart or raw body) for the Voice tab.
@@ -564,8 +675,29 @@ async def upload(request: Request):
         return JSONResponse({"ok": False, "error": "empty upload"}, status_code=400)
     stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(name).stem)[:40] or "upload"
     ext = Path(name).suffix.lower()
-    kind = request.query_params.get("kind") or ("image" if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"} else
+    kind = request.query_params.get("kind") or ("image" if ext in IMAGE_EXT else
+                                                "video" if ext in VIDEO_EXT else
                                                 "model" if ext in {".glb", ".gltf", ".stl", ".obj", ".fbx"} else "voice")
+    if kind == "video":
+        # A video dropped on the Video tab stays a video — its own format is the source of truth
+        # for size, fps and length, and frame 0 becomes the image-to-video start frame.
+        updir = OUT / "video" / "uploads"; updir.mkdir(parents=True, exist_ok=True)
+        dst = updir / f"{stem}_{datetime.now():%Y%m%d_%H%M%S}{ext if ext in VIDEO_EXT else '.mp4'}"
+        dst.write_bytes(raw)
+        meta = _ffprobe(dst)
+        fw, fh = _fit(meta.get("width") or 0, meta.get("height") or 0)
+        src_frames = int(round((meta.get("seconds") or 0) * (meta.get("fps") or 24))) or 49
+        fdir = OUT / "video" / "frames"; fdir.mkdir(parents=True, exist_ok=True)
+        frame = fdir / f"{dst.stem}_f000.png"
+        ff = shutil.which("ffmpeg")
+        if ff:
+            subprocess.run([ff, "-y", "-loglevel", "error", "-ss", "0", "-i", str(dst),
+                            "-frames:v", "1", str(frame)], check=False)
+        return {"ok": True, "kind": "video", "path": str(dst), "url": f"/files/output/video/uploads/{dst.name}",
+                "width": meta.get("width"), "height": meta.get("height"), "fps": meta.get("fps"),
+                "seconds": meta.get("seconds"), "fit_w": fw, "fit_h": fh, "fit_frames": _fit_frames(src_frames),
+                "frame": str(frame) if frame.exists() else None,
+                "frame_url": f"/files/output/video/frames/{frame.name}" if frame.exists() else None}
     if kind == "image":
         # Images are stored as-is (converted to PNG only if the format is exotic) so they can feed gen edit / control / i2v / see.
         updir = OUT / "image" / "uploads"; updir.mkdir(parents=True, exist_ok=True)

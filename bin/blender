@@ -11,8 +11,19 @@ set -euo pipefail
 APP="${BLENDER_APP:-/Applications/Blender.app}"
 BIN="$APP/Contents/MacOS/Blender"
 
+# Linux (billie): $BLENDER_BIN, else the versioned tarball in ~/.local/apps, else
+# PATH — skipping ~/.local/bin/blender when it points back at this wrapper.
 if [ ! -x "$BIN" ]; then
-  echo "blender not found at $BIN" >&2
+  for cand in "${BLENDER_BIN:-}" "$HOME"/.local/apps/blender-*/blender /usr/bin/blender; do
+    [ -n "$cand" ] || continue
+    if [ -x "$cand" ] && [ "$(readlink -f "$cand")" != "$(readlink -f "$0")" ]; then
+      BIN="$cand"; break
+    fi
+  done
+fi
+
+if [ ! -x "$BIN" ]; then
+  echo "blender not found: set BLENDER_BIN (linux) or BLENDER_APP (mac)" >&2
   exit 1
 fi
 

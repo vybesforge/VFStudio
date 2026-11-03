@@ -1,6 +1,8 @@
 {
   "_doc": "Model manifest for ~/media-stack. `fetch-models` downloads anything missing (resumable). Paths are relative to ComfyUI/models/. Keep this in git; it is the reproducible list of what the stack needs.",
   "models": [
+    {"id": "animagine-xl-4.0", "role": "image/anime (Animagine XL 4.0 — SDXL anime finetune, cel-shaded illustration / character sheets; OpenRAIL++-M)", "path": "checkpoints/animagine-xl-4.0-opt.safetensors",
+     "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0-opt.safetensors", "gb": 6.9},
     {"id": "flux1-dev-fp8", "role": "image/quality", "path": "checkpoints/flux1-dev-fp8.safetensors",
      "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors", "gb": 17.2},
 
