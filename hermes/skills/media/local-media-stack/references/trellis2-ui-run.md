@@ -1,7 +1,7 @@
 # Running the TRELLIS.2 template through the UI
 
-The official `3d_pixal3d_trellis2_image_to_model.json` graph cannot be queued via
-`POST /prompt`. Two independent blockers:
+The official `3d_pixal3d_trellis2_image_to_model.json` graph **as shipped** cannot be
+queued via `POST /prompt`. Two independent blockers:
 
 1. `Save3DAdvanced` requires a `viewport_state` of type `LOAD_3D`. It is a socket,
    not a widget — the web frontend injects it at queue time.
@@ -12,7 +12,30 @@ The failure mode is nasty: ComfyUI returns `status_str=success` in 0.02–8 s, t
 `/history` entry contains only `PreviewImage`/`MaskPreview` outputs, and no file
 appears in `output/3d/`. Always check for the written GLB, never the status.
 
-## Working route: drive the real frontend over CDP
+## Preferred route: API prompt with `SaveGLB` instead of the viewers
+
+Both blockers are about the *viewer* nodes, not about the graph. `MeshToFile3D`
+emits `FILE_3D_GLB`, and `SaveGLB`'s `mesh` input accepts `FILE_3D_GLB` — so the
+final mesh can be saved without any frontend-supplied socket:
+
+```python
+p = convert(ui_graph, object_info)         # UI format -> API format
+target = p['322']['inputs']['model_3d']     # Save3DAdvanced's [node, slot]
+for nid in ('322', '323', '246',           # Save3DAdvanced + Preview3DAdvanced x2
+            '319', '55', '56', '242', '298'):   # uninstalled Pixal3D/MoGe branch
+    del p[nid]
+p['900'] = {'class_type': 'SaveGLB',
+            'inputs': {'mesh': target, 'filename_prefix': '3d/<name>'}}
+```
+
+Then unlink any input still pointing at a deleted id, submit, and poll
+`/history/<id>`. Keep every authored CFG node (`CFGOverride`, `RescaleCFG`,
+`ModelSamplingSD3`) and the second upsample `KSampler` — removing them is what makes
+hand-built graphs bake noise atlases. Seed widgets also carry a UI-only
+`fixed`/`randomize` value that must be skipped when mapping `widgets_values`
+positionally. No browser, no CDP, no 66-node assertion.
+
+## Alternate route: drive the real frontend over CDP
 
 The template is served by the ComfyUI server itself:
 

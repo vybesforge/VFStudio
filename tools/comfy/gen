@@ -15,7 +15,7 @@ polls /history, copies outputs into --out (default ~/media-stack/output/<kind>/)
 prints one JSON line: {"ok": true, "files": [...], "seconds": 12.3, "prompt_id": "..."}.
 Nothing here calls a cloud API; all inference is the local ComfyUI on :8188.
 """
-import argparse, json, os, random, shutil, sys, time, urllib.request, urllib.parse, uuid
+import argparse, json, math, os, random, shutil, subprocess, sys, time, urllib.request, urllib.parse, uuid
 
 HOST = os.environ.get("COMFY_HOST", "http://127.0.0.1:8188")
 STACK = os.path.expanduser("~/media-stack")
@@ -154,7 +154,60 @@ def run(prompt, kind, out_dir, timeout, now=False):
                     files.append(dst)
     if not files:
         die(f"prompt {pid} finished with status '{st.get('status_str')}' but wrote no output files — treat as failed")
-    print(json.dumps({"ok": True, "kind": kind, "files": files, "seconds": round(time.time() - t0, 1), "prompt_id": pid}))
+    return files, pid, round(time.time() - t0, 1)
+
+
+def ffmpeg_bin():
+    import glob
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    hits = sorted(glob.glob(os.path.expanduser("~/.hermes/tools/ffmpeg-*/ffmpeg")))
+    return hits[-1] if hits else None
+
+
+VIDEO_CHUNK_MAX = 121        # Wan 2.2 TI2V 5B is trained at 121 frames
+CHUNK_OVERLAP = 1            # each chunk restarts on the previous chunk's last frame
+
+
+def snap_wan_len(n):
+    """Wan latents want length = 4k+1 (49, 81, 121…); keep chunks on that grid."""
+    n = max(9, int(n))
+    return 4 * round((n - 1) / 4.0) + 1
+
+
+def plan_chunks(frames, chunk_max=VIDEO_CHUNK_MAX):
+    n = max(1, math.ceil(frames / float(chunk_max)))
+    sizes = [snap_wan_len(round(frames / float(n))) for _ in range(n)]
+    return sizes
+
+
+def extract_last_frame(video, out_png):
+    ff = ffmpeg_bin() or die("ffmpeg not found (needed to chain chunks)")
+    # -vsync is gone in ffmpeg 9 and -q:v is a JPEG-only option; sseof + a single frame is
+    # the portable way to pull the last picture out of an mp4.
+    subprocess.run([ff, "-y", "-loglevel", "error", "-sseof", "-0.5", "-i", video,
+                    "-frames:v", "1", "-update", "1", out_png],
+                   check=True, capture_output=True)
+    if not os.path.exists(out_png):
+        die(f"could not grab the last frame of {video}")
+    return out_png
+
+
+def concat_videos(parts, out_path):
+    ff = ffmpeg_bin() or die("ffmpeg not found (needed to stitch chunks)")
+    listfile = out_path + ".txt"
+    with open(listfile, "w") as fh:
+        for p in parts:
+            fh.write(f"file '{os.path.abspath(p)}'\n")
+    r = subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                        "-i", listfile, "-c", "copy", out_path], capture_output=True, text=True)
+    if r.returncode != 0:      # codec mismatch between parts: re-encode
+        subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                        "-i", listfile, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", out_path],
+                       check=True, capture_output=True)
+    os.unlink(listfile)
+    return out_path
 
 
 def seed_of(a):
@@ -362,6 +415,34 @@ NEG_WAN = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风�
            "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
 
 
+def _snap16(v):
+    return max(64, int(round(v / 16.0)) * 16)
+
+
+def video_dims(a, default):
+    """Output size for a video job: explicit --w/--h win, else the start image decides.
+
+    An i2v start image is scaled into the latent's width/height, so a fixed 1280x704 latent
+    re-frames a square upload (crop or letterbox) and the clip no longer matches the picture
+    it came from. Taking the aspect from the image (area capped, sides snapped to 16 — the
+    Wan/Hunyuan VAE needs multiples of 16) keeps the framing identical."""
+    if a.w and a.h:
+        return int(a.w), int(a.h)
+    if a.image:
+        try:
+            from PIL import Image
+            with Image.open(a.image) as im:
+                iw, ih = im.size
+            budget = min(1280 * 704, iw * ih)          # never upscale past the source area
+            scale = min(1.0, (budget / float(iw * ih)) ** 0.5, 1280.0 / max(iw, ih))
+            w, h = _snap16(iw * scale), _snap16(ih * scale)
+            print(f"[gen] video size {w}x{h} from {a.image} ({iw}x{ih}), snapped to 16")
+            return w, h
+        except Exception as exc:
+            print(f"[gen] could not read {a.image} for its size ({exc}); using {default}")
+    return default
+
+
 def g_video_hyv15(a):
     """HunyuanVideo 1.5 (8.3B) — the quality path. cfg-distilled checkpoints: cfg 1, no negative needed.
     t2v uses the 480p model (832x480), i2v the 720p model (1280x704). Graph mirrors the official templates
@@ -371,7 +452,7 @@ def g_video_hyv15(a):
     i2v = bool(a.image)
     need("hyv15_i2v" if i2v else "hyv15_t2v")
     unet = "hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors" if i2v else "hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors"
-    w, h = (a.w, a.h) if (a.w, a.h) != (1280, 704) or i2v else (832, 480)   # t2v model is 480p-native
+    w, h = video_dims(a, (1280, 704) if i2v else (832, 480))   # t2v model is 480p-native
     steps = a.steps or 20
     g = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
@@ -402,10 +483,40 @@ def g_video_hyv15(a):
     return g
 
 
+def video_chunked(a, sizes):
+    """Long clips: Wan is trained at 121 frames, so a 30 s request is several chunks, each
+    i2v-conditioned on the previous chunk's last frame, stitched with ffmpeg at the end."""
+    os.makedirs(a.out, exist_ok=True)
+    tmp = os.path.join(a.out, ".chunks")
+    os.makedirs(tmp, exist_ok=True)
+    base = a.seed if a.seed is not None and a.seed >= 0 else seed_of(a)
+    start = a.image
+    parts, t_start = [], time.time()
+    for i, n in enumerate(sizes):
+        chunk = argparse.Namespace(**vars(a))
+        chunk.frames, chunk.image = n, start
+        chunk.seed = (base + i * 7919) % (2 ** 53)
+        graph = g_video(chunk)
+        files, pid, secs = run(graph, "video", tmp, a.timeout or 3600, now=(i > 0 or a.now))
+        part = files[0]
+        parts.append(part)
+        print(f"[video] chunk {i + 1}/{len(sizes)} · {n}f · {secs}s -> {os.path.basename(part)}", flush=True)
+        if i < len(sizes) - 1:
+            start = extract_last_frame(part, os.path.join(tmp, f"last_{i:02d}.png"))
+    total_f = sum(sizes)
+    final = os.path.join(a.out, f"{a.model}_{len(parts)}chunks_{total_f}f_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
+    concat_videos(parts, final)
+    print(json.dumps({"ok": True, "kind": "video", "files": [final], "chunks": parts,
+                      "frames": total_f, "fps": a.fps,
+                      "seconds_rendered": round(total_f / float(a.fps), 1),
+                      "seconds": round(time.time() - t_start, 1)}))
+
+
 def g_video(a):
     if getattr(a, "model", "wan") == "hyv15":
         return g_video_hyv15(a)
     need("video")
+    w, h = video_dims(a, (1280, 704))
     g = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan2.2_ti2v_5B_fp16.safetensors", "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
@@ -413,7 +524,7 @@ def g_video(a):
         "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8.0}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"text": a.prompt, "clip": ["2", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": a.negative or NEG_WAN, "clip": ["2", 0]}},
-        "7": {"class_type": "Wan22ImageToVideoLatent", "inputs": {"vae": ["3", 0], "width": a.w, "height": a.h, "length": a.frames, "batch_size": 1}},
+        "7": {"class_type": "Wan22ImageToVideoLatent", "inputs": {"vae": ["3", 0], "width": w, "height": h, "length": a.frames, "batch_size": 1}},
         "8": {"class_type": "KSampler", "inputs": {"model": ["4", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0],
                                                  "seed": seed_of(a), "steps": a.steps, "cfg": 5.0, "sampler_name": "uni_pc", "scheduler": "simple", "denoise": 1.0}},
         "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
@@ -517,8 +628,12 @@ def main():
 
     s = sub.add_parser("video"); s.add_argument("prompt"); s.add_argument("--image"); s.add_argument("--negative")
     s.add_argument("--model", choices=["wan", "hyv15"], default="wan", help="wan = Wan 2.2 TI2V 5B (fast path, measured); hyv15 = HunyuanVideo 1.5 8.3B (quality path, untested here)")
-    s.add_argument("--w", type=int, default=1280); s.add_argument("--h", type=int, default=704); s.add_argument("--frames", type=int, default=121)
+    # --w/--h default to None so an i2v start image can set the framing (see video_dims)
+    s.add_argument("--w", type=int, default=None); s.add_argument("--h", type=int, default=None); s.add_argument("--frames", type=int, default=121)
     s.add_argument("--fps", type=int, default=24); common(s, "video"); s.set_defaults(steps=20)
+    s.add_argument("--seconds", type=float, default=None,
+                   help="clip length in seconds (frames = seconds x fps); over 121 frames it renders in chained chunks and stitches them")
+    s.add_argument("--plan", action="store_true", help="print the chunk plan and exit without submitting")
 
     s = sub.add_parser("sfx"); s.add_argument("prompt"); s.add_argument("--model", choices=["sao", "sa3", "sa3sfx"], default="sa3sfx", help="sao = Stable Audio Open 1.0 (CC, 47 s max); sa3sfx = Stable Audio 3 Small-SFX (dedicated SFX); sa3 = SA3 medium")
     s.add_argument("--seconds", type=float, default=10); s.add_argument("--negative"); common(s, "sfx")
@@ -536,8 +651,22 @@ def main():
     default_timeout = {"image": 900, "control": 900, "upscale": 1800, "video": 7200, "sfx": 900, "music": 1800, "edit": 1800}[a.cmd]
     if a.cmd == "video" and a.steps is None:
         a.steps = 20
+    if a.cmd == "video":
+        if getattr(a, "seconds", None):
+            a.frames = int(round(a.seconds * a.fps))
+        sizes = plan_chunks(a.frames)
+        if a.plan:
+            total = sum(sizes)
+            print(json.dumps({"ok": True, "plan": sizes, "chunks": len(sizes), "frames": total,
+                              "fps": a.fps, "seconds_rendered": round(total / float(a.fps), 2),
+                              "note": "each chunk is image-to-video conditioned on the previous chunk's last frame"}))
+            return
+        if len(sizes) > 1:
+            return video_chunked(a, sizes)
+        a.frames = sizes[0]
     prompt = builders[a.cmd](a)
-    run(prompt, a.cmd, a.out, a.timeout or default_timeout, now=a.now)
+    files, pid, secs = run(prompt, a.cmd, a.out, a.timeout or default_timeout, now=a.now)
+    print(json.dumps({"ok": True, "kind": a.cmd, "files": files, "seconds": secs, "prompt_id": pid}))
 
 
 if __name__ == "__main__":

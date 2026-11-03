@@ -1,4 +1,99 @@
+## 2026-11-02 (desktop): animation step after the joint picker
+
+The picker's **Build rig** already bakes a 24-frame `AutoCycle`; this adds a way to ask for a
+*specific* clip. `tools/anim/animate_clip.py` keys one procedural sine gait onto a rigged GLB —
+`walk | trot | gallop | idle` — via `stack anim <glb> --clip trot --frames 24` or the panel's
+3D tab → **Animate the built rig** card (`POST /api/rig/animate`, `GET /api/rig/animate/status`),
+writing `vr/<asset>_anim.glb`. The room's **Anim** button (added earlier today) plays it.
+Verified: `hog_quad_rig.glb` (Rigify quadruped, 46 DEF bones) → `Trot`, 24 f, `max_disp 0.395`,
+diagonal pairs swinging fore-aft in the rendered frames; `hog_rig_test.glb` → `Trot`/`Gallop`,
+`moving_frac 1.0`. Bone naming: `FL_upper…` chains from `rig_from_joints.py`, or Rigify
+`DEF-thigh.L`/`DEF-front_thigh.L`/`DEF-upper_arm.L` (strip the prefix, skip the `.001` twins).
+No local motion model exists, so these are gaits, not authored animation — `--save-blend` in the
+rig builders is the route for hand-keyed work.
+
+## 2026-11-02 (desktop): ComfyUI queue is named, and the count is no longer off by one
+
+`GET /api/comfy/jobs` returns running + pending prompts with a human name derived from the graph
+(`TRELLIS.2 image→3D → 3d/hog_hq`, `Wan 2.2 video → <prompt text>`, `Qwen image edit → …`), elapsed
+time (first-seen, since ComfyUI does not expose a start stamp) and queue position. The panel's
+progress card renders that list under the bar. The old "N queued" came from
+`exec_info.queue_remaining`, which **counts the running job as queued** — verified against the live
+queue: ComfyUI reports `queue_remaining: 1` while one job runs and nothing waits; the panel now
+shows `1 running · 0 queued`.
+
+## 2026-11-02 (desktop): calmer refreshes, cancel in the status bar, i2v sizes follow the image
+
+- Auto-refresh was too eager (job lists every 3 s, galleries every 8 s, services 2.5 s). Now:
+  status bar 5 s (it is the only live thing), job lists + galleries 60 s, services/resources 15 s.
+- The status bar's job rows carry **cancel** (`POST /api/comfy/cancel`): a queued job is deleted
+  by id, a running one is interrupted (ComfyUI has no per-job stop). Verified the button renders
+  on the running row.
+- `gen video` took its latent size from `--w/--h` (default 1280x704) even for image-to-video, so a
+  square upload came back re-framed. `--w/--h` now default to None and `video_dims()` derives the
+  size from the start image — aspect kept, area capped at 1280x704, sides snapped to 16 (the VAE
+  needs multiples of 16). The panel's Video tab has an `auto · match the start image` size option,
+  selected automatically once a start image is set. Measured: 927x652 image → 928x656; explicit
+  sizes still win; t2v keeps 1280x704 (Wan) / 832x480 (HunyuanVideo 480p model).
+
+## 2026-11-02 (desktop): video clips up to 30 s (chained passes, stitched)
+
+Wan 2.2 TI2V 5B is trained at **121 frames**, so "longer" cannot be a bigger number in the graph.
+`gen video --seconds N` now plans the clip in passes of at most 121 frames (`snap_wan_len` keeps
+length = 4k+1), renders each pass as **image-to-video seeded with the previous pass's last frame**
+(ffmpeg `-sseof` grab), and concatenates them with ffmpeg (`-c copy`, re-encode fallback) into one
+mp4. `--plan` prints the split without submitting; `--fps` trades passes for clip length
+(12 fps = 10 s in a single pass). Panel Video tab: length 2/5/10/15/30 s + fps, and a note that
+over 5 s it renders in passes.
+
+Measured: 30 s @ 24 fps → 6 passes × 121 f (726 f); a 2-pass / 130-frame smoke run at 320×192×2
+steps rendered, chained and stitched in 61 s to a single 16.25 s mp4. At 832×480×20 steps a pass
+costs ~15 min, so 30 s ≈ 1.5 h — the panel says so.
+
 # Project state — read this first
+
+## 2026-11-02 (desktop): rig joints — local VLM places them, and the pig.glb identity bug
+
+**Bug that made the picker load the wrong joints.** `POST /api/assets/use` ("set in room") copied
+*every* GLB to `vr/pig.glb`. The room names a joint set after the file it loaded, so a human loaded
+that way came back as `pig` and opened `rig/joints_pig.json`. Now each asset is copied under its own
+name (`vr/<slug>.glb`) and remembered in `vr/current.json`; the room asks `GET /api/vr/current` when
+no `?src=` is given. `vr/pig.glb` was overwritten by a pepper render during this bug's life and was
+restored from `ComfyUI/output/3d/ComfyUI_00009.glb` (1,199,738 tris, 77.2 MB, identical to the
+documented pig). Old hand-seeded joint files are in `rig/attic/` — they were written in a Z-up frame,
+so those markers never sat on the model.
+
+**AI auto-place** (`tools/rig/auto_joints.py`, ~90 s, `stack rig auto <glb> [asset]`,
+`POST /api/rig/auto`, "AI auto-place" button in the room's rig panel):
+1. `tools/rig/render_views.py` (Blender workbench) renders ±X/±Y orthographic views at 1024 px plus a
+   manifest whose pixel↔world map is measured with `world_to_camera_view`.
+2. Qwen3-VL-8B (:8082) classifies the asset (biped/quadruped), picks the face-on or profile view, then
+   answers each landmark as a **cell on a 20×20 labelled grid** (A–T / 1–20). Cell names, not
+   coordinates: the same model answers coordinates in percent, in a 0-1000 grid or in pixels, and
+   mixes two of those inside one reply, which is what wrecked the first attempts.
+3. Each guess is snapped to the mesh: a thin slab of vertices around the in-plane point, clustered
+   across the limb axis (left/right) or the depth axis (near/far leg), medianed for depth.
+4. One review round: the labelled overlay goes back to the VLM, which moves what it thinks is wrong.
+5. Writes `rig/joints_<slug>.json` in glTF space with `_template`/`_source`, which the picker loads for
+   nudging. `Build rig` still needs all quadruped joints; biped sets go to `tools/anim/rigify_auto.py`.
+
+Measured on this rig: T-pose human (pig.glb) and Pepper — 17/17 joints, all landmarks on the right
+anatomy, hips ~2-3 cm low; hog — 16/16, `FL_hip`/`FR_hip` land a little forward of the scapula. Good
+enough to skip 17 clicks, not good enough to skip the review.
+
+**Surface picks → inside the joint.** Clicking in the room means clicking skin, so every hand-picked
+joint sits on the surface (0.2–1.1 mm from it) and the bones then run along the front of the body.
+`tools/rig/center_joints.py <glb> [--asset SLUG] [--factor 0..1] [--write]` casts inward from the
+nearest surface point (that triangle's own normal, then the depth axis, then the flipped normal),
+takes the midpoint of the first solid run, refuses to let a joint slide toward the midline, and only
+keeps points the mesh actually contains. Pepper's 17 hand picks went from ≤1.1 mm to 7.6–59.3 mm
+inside, with the left/right pairs still mirrored to a couple of cm. `--factor 0.5` goes half way.
+It writes a timestamped backup to `rig/attic/` before replacing the file.
+
+**Checking a set:** `tools/rig/inspect_joints.py <glb> [--asset SLUG]` prints per-joint distance to
+the surface and height fraction, flags body joints out of order / pairs that are not mirrored /
+points off the mesh, and writes `check_front.png` + `check_side.png` into `scratch/rig-views/<asset>/`.
+Both tools need `rtree` in the tools venv (now in `install.sh`) for trimesh's ray/contains paths.
 
 ## 2026-11-02 (desktop): Services tab → Endpoints ("point other programs here")
 

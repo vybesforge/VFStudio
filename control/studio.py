@@ -362,8 +362,11 @@ def _build_cmd(kind: str, a: dict) -> list[str]:
             cmd.append("--fast")
         return cmd
     if kind == "video":
+        # --seconds drives length (frames = seconds x fps); gen splits anything over the
+        # model's native 121 frames into chained passes and stitches them.
         return [str(GEN), "video", a["prompt"], "--model", a.get("model", "wan"), *flag("--image"), *flag("--w", cast=int), *flag("--h", cast=int),
-                *flag("--frames", cast=int), *flag("--fps", cast=int), *flag("--steps", cast=int), *flag("--seed", cast=int)]
+                *flag("--seconds", cast=float), *flag("--frames", cast=int), *flag("--fps", cast=int),
+                *flag("--steps", cast=int), *flag("--seed", cast=int)]
     if kind == "sfx":
         return [str(GEN), "sfx", a["prompt"], "--model", a.get("model", "sa3sfx"), *flag("--seconds", cast=float),
                 *flag("--steps", cast=int), *flag("--seed", cast=int)]

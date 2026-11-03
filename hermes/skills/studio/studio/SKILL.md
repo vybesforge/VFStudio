@@ -33,7 +33,7 @@ are copy-pasteable as written.
 | Image guided by a sketch/photo edges | `gen control "prompt" --image ref.png` | this file |
 | Edit an existing image (change X, keep the rest) / turnaround views | `gen edit in.png "instruction" --fast` (Qwen-Image-Edit 2509, Q4 GGUF; `--ref2 b.png` for multi-image) | this file; apose recipe in `local-media-stack` |
 | Upscale image | `gen upscale in.png --method esrgan` (fast) / `--method seedvr2` (diffusion) | this file |
-| Video clip from text or image | `gen video "prompt" [--image start.png]` (Wan 2.2 5B, slow) | this file |
+| Video clip from text or image | `gen video "prompt" [--image start.png] [--seconds N]` (Wan 2.2 5B, slow; over 121 frames it renders in chained passes and stitches) | this file |
 | Edit/cut/caption/concat video | `vid …`, Blender VSE edit list | `studio-video-edit` |
 | Sound effect | `gen sfx "prompt" --seconds 8` | this file |
 | Music / full song with lyrics | `gen music "tags" --lyrics "..."` (ACE-Step 1.5) | this file |
@@ -42,10 +42,13 @@ are copy-pasteable as written.
 | Fiction, screenplay, game dialogue, lore (uncensored, local) | `scribe prose|outline|chapter|screenplay|dialogue|lore|revise` | `studio-writing` |
 | Train a LoRA for a recurring subject/style | `lora train --dataset DIR --name NAME` → `gen image … --lora NAME` | `studio-lora` |
 | Look at an image / camera, OCR, compare renders (local) | `see describe|ask|ocr|compare|snap` | `studio-vision` |
-| 3D model from a photo | TRELLIS.2 via ComfyUI UI (`scratch/run_trellis2.py`) | `local-media-stack` (gold-standard recipe) |
+| 3D model from a photo | TRELLIS.2 with the template queued as an API prompt + `SaveGLB` (`scratch/run_trellis2_hq.py`) — no browser needed | `local-media-stack` (gold-standard recipe) |
+| Multi-angle / pose / outfit / expression set of ONE character (for a LoRA or a 3D asset) | Qwen-Image-Edit 2509 + Multiple-angles LoRA batches; masters first | `studio-lora` (its character-dataset reference) |
 | Fix / rig / render a mesh | Blender via `~/media-stack/bin/blender -b -P script.py` | `local-media-stack`, `blender` |
 | Parametric part → STL → G-code | `cad_examples/*.py`, `meshcheck.py`, `slice --preset bambu|generic` | `studio-3d-print` |
 | View asset in VR / build SteamVR app | Godot room, `optimize_glb.sh`, WebXR room | `studio-vr` |
+| Place / centre / check rig joints on a GLB | room's **AI auto-place**, `stack rig auto <glb>`, `tools/rig/center_joints.py`, `tools/rig/inspect_joints.py` | `studio-vr`; deep notes in the `local-media-stack` skill (joint-picker reference) |
+| Make a rigged GLB move (walk / trot / gallop / idle) | `stack anim <rigged.glb> --clip trot`, or the 3D tab's **Animate the built rig** card | `studio-animation` |
 | 2D/3D game prototype, run/export Godot headless | `~/media-stack/game/new_project.sh 2d\|3d Name dest` | `studio-game` |
 | Playable 3D game in the browser (Three.js + TS + Vite) | hand-written `package.json` + `npm install`, procedural textures / WebAudio | `browser-3d-game` |
 | Auto-rig + test cycle → GLB, Grease Pencil 2D, sprite sheets, Krita/Tahoma2D path | `tools/anim/rigify_auto.py`, `gp_anim.py`, `spritesheet.py` | `studio-animation` |
@@ -85,6 +88,12 @@ bug, and Dylan asks for exactly that. Resources tab has
 owns what, endpoint tiles, copy-button pattern, card-layout and re-render pitfalls, how to test a
 copy button): `references/panel-ui.md`.
 
+**Auto-refresh is deliberately slow (standing preference).** Polling fast reads to Dylan as the page
+reloading itself — "the webpage is loading too fast, let them auto refresh every min" — so keep the
+cadence: **status bar 5 s** (the only thing that must feel live: progress + cancel), **job lists and
+galleries 60 s**, **services/resources 15 s**. Anything that re-renders a card list on a short timer also
+throws away open logs and scroll position; slow it down instead of optimising the render.
+
 **Branding (standing preference):** anything web-facing in the stack carries the VybesForge look —
 vendored `control/brand/*.png` (VF monogram, never hot-linked), palette navy `#02060f/#0b121d`,
 forge orange `#fd6c0f`, amber `#ffb000`, cyan `#29d5e9`, magenta `#bf338a`, title "VF Studio",
@@ -93,6 +102,20 @@ footer link to vybesforge.com.
 **Pitfall:** ComfyUI only sends `progress`/`executing` websocket events to the socket whose
 `clientId` submitted the prompt. A passive listener sees queue counts only. Submit with a
 fixed `client_id` and listen under the same id (`control/studio.py`).
+
+**Pitfall:** `exec_info.queue_remaining` counts the *running* job, so rendering it as "N queued"
+overstates the queue by one whenever something is executing (measured: ComfyUI says
+`queue_remaining: 1` with one job running and nothing waiting). Report running and pending separately
+from `GET /api/comfy/jobs`, and name each prompt from its graph (`TRELLIS.2 image→3D → <prefix>`,
+`Wan 2.2 video → <prompt text>`, `Qwen image edit → …`) — "node 47" tells Dylan nothing about which
+model is hogging the box.
+
+**Pitfall:** a `studio.html` edit can kill the entire page silently. All its JS is one inline block,
+so one duplicate top-level `const` (`esc` is already defined) throws `Identifier … has already been
+declared` at parse time and *every* function in the page becomes undefined — the HTML still renders,
+so it reads as "the card is empty". Gate every HTML patch: extract the block and
+`node --check /tmp/studio_script.js`, then confirm with `js("typeof refreshProgress")` in the browser
+before judging the feature.
 
 ## `gen` — one CLI for every ComfyUI pipeline
 
@@ -111,6 +134,8 @@ gen upscale out.png --method esrgan --scale 2                                 # 
 gen upscale out.png --method ultrasharp                                       # 4x-UltraSharp (crisper, more hallucination)
 gen upscale out.png --method seedvr2 --scale 2                                # SeedVR2 3B diffusion upscaler (slow, best)
 gen video "a hog trots through a barn, handheld, golden hour" --w 1280 --h 704 --frames 121 --fps 24
+gen video "..." --seconds 30                                                 # long clip: chained passes, stitched
+gen video "..." --seconds 30 --plan                                          # show the pass split, submit nothing
 gen video "..." --image start.png                                             # image-to-video, same model
 gen sfx "heavy wooden door creaks open, stone hall reverb" --seconds 6        # Stable Audio Open 1.0
 gen sfx "..." --model sa3 --seconds 30                                        # Stable Audio 3 medium (music/ambience too, up to 150 s)
@@ -121,6 +146,25 @@ gen music "indie folk, acoustic guitar, female vocal" --lyrics-file song.txt --s
 Lyrics use ACE-Step section tags: `[Verse]`, `[Chorus]`, `[Bridge]`, `[inst]` for instrumental.
 `--key` must be one of the 34 listed by `gen music -h` (e.g. `A minor`); `--timesig` is 2/3/4/6.
 
+**`--out` names a DIRECTORY, not a file.** `gen upscale in.png --out output/image/hero.png`
+creates the directory `hero.png/` and writes `upscale_seedvr2_0000N_.png` inside it; `gen video …
+--out output/video/clip.mp4` writes `wan_0000N_.mp4` inside `clip.mp4/`. Take the real path from the
+JSON `files` array, or move the inner file out and `rmdir` the stub, before reporting or attaching a
+deliverable — a directory sitting where you expect a file is how a finished render silently goes missing.
+
+**The video canvas follows the start image by default.** Wan keeps the requested aspect and re-crops the
+reference to it, so a fixed latent re-frames an upload (a full-body portrait at `--w 832 --h 480` comes
+back cropped at the waist). `gen video` therefore takes `--w/--h` as **optional**: leave them off with
+`--image` and `video_dims()` reads the image — aspect preserved, area capped at 1280×704 (never upscaled
+past the source), sides snapped to 16 because the Wan/Hunyuan VAE needs multiples of 16 — and prints
+`[gen] video size WxH from <file>`. Measured: a 927×652 start image → 928×656. Explicit `--w/--h` still
+win, and t2v keeps 1280×704 (Wan) / 832×480 (HunyuanVideo's 480p model). Panel Video tab's size select
+has **`auto · match the start image`** first and flips to it as soon as a start image is set — keep that,
+Dylan asks for the clip to match the picture he fed it. Manual override is for choosing a shot, not for
+dodging the aspect: `--w 480 --h 832` standing figure, `--w 832 --h 480` medium/landscape.
+Measured at 480×832, 121 frames (5 s @ 24 fps), 20 steps: **~23 min**, and the first 2 jobs wait
+behind whatever the other session has queued.
+
 **Measured on this machine, idle box, model load included (Nov 2026):** see the table in
 `references/benchmarks.md`. Re-measure before claiming a regression — a download writing to
 disk inflates every timing 2-3×. **Benchmark alone:** another session or subagent running `gen`
@@ -130,6 +174,7 @@ between your runs. When delegating, give at most ONE subagent GPU-heavy work at 
 
 ## Rules that always apply
 
+- **Invent the variety; do not ship the literal minimum.** When Dylan asks for a character/image set, he expects the creative breadth already chosen: different camera angles and elevations, different poses, different outfits and hats, different facial expressions — say what you are adding rather than asking him to enumerate it ("don't make me spell it all out"). Keep it non-explicit and state the plan in one short table.
 - **State which half is local.** Generation is on-device; this conversation's reasoning is a cloud model. Say so when reporting.
 - **One GPU, two sessions.** Desktop and Telegram both drive ComfyUI. `gen` queues; hand-rolled scripts must poll `GET :8188/queue` until empty.
 - **Check the file, not the status.** A ComfyUI run can report success and write nothing. `gen` already fails on that; do the same in any custom script.
@@ -143,6 +188,7 @@ between your runs. When delegating, give at most ONE subagent GPU-heavy work at 
 - **Qwen3.x local models think by default.** Disable it per request (`chat_template_kwargs.enable_thinking=false`) for prose/vision answers, or the reasoning consumes the whole `max_tokens` and the reply is empty.
 - **fp8 weights are a trap on Apple Silicon.** MPS has no fp8 kernel, so ComfyUI upcasts `*_fp8_e4m3fn.safetensors` to bf16 in memory (a 20 GB file becomes 39 GB resident and swaps). For any model over ~10 GB prefer a Q4/Q5 **GGUF** via the ComfyUI-GGUF node pack (`UnetLoaderGGUF`, files in `models/unet/`) — same quality class, ~⅓ the memory. Check `logs/comfy.log` "loaded completely; N MB" against the file size to catch it.
 - **Rewriting git history resets the working tree.** `git filter-repo` (and `filter-branch`) check out the rewritten HEAD, deleting every file that was tracked before and is now purged — including local assets you meant to keep. Copy `gold-standard/`, `rig/`, any tracked GLBs aside first, and keep local assets gitignored from day one so they are never tracked at all.
+- **`bin/stack` runs under `set -u`.** A new subcommand that loops over `"$@"` must initialise its flag holders first (`prev=""`) — otherwise the whole command dies with `prev: unbound variable` before doing any work, and the exit code still reads 0 through a pipe. Gate every edit with `bash -n bin/stack`.
 - **Use absolute paths / `workdir` when subagents share the box.** They create and delete scratch dirs; a terminal whose cwd was deleted fails every relative command with a misleading `cd` error.
 
 ## Adding a capability (do all of these, in this order — a half-wired tool is what gets reported as "broken")
@@ -171,15 +217,49 @@ between your runs. When delegating, give at most ONE subagent GPU-heavy work at 
 ## Publishing
 
 Repo: `~/media-stack` → `github.com/vybesforge/VFStudio` (`main`). **Code, docs and skills only —
-local assets never go to GitHub** (standing rule): `*.glb`, `gold-standard/`, `rig/joints_*.json`,
-`output/`, `train/{datasets,runs,models,.venv}`, model weights, venvs are gitignored. Before every
-push run `git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' | awk '$1=="blob" && $2>1000000'`
-— anything over ~1 MB that is not vendored JS is a mistake; `*.glb` in the room counts even when
-"small". GitHub warns at 50 MB and refuses at 100 MB, but the rule is about the repo's purpose, not the limit. Dylan keeps the GitHub token in a
+local assets never go to GitHub** (standing rule). Two layers of defence, and the second is the one that
+actually holds: directory rules (`output/`, `gold-standard/`, `rig/joints_*.json`, `train/{datasets,runs,models,.venv}`,
+`ComfyUI/output/`, venvs) **plus extension-level rules anywhere in the tree** — `*.glb/gltf/obj/fbx/stl/3mf/blend`,
+`*.png/jpg/webp/tif/exr/hdr/psd/kra`, `*.wav/mp3/flac/ogg/opus/aif`, `*.mp4/mov/webm/mkv/avi/gif`,
+`*.safetensors/ckpt/pt/pth/onnx/gguf` — with only the panel's UI icons (`!control/brand/*.png`) and the
+Godot-2D template's placeholder sprites whitelisted. Folder rules always leak: a stem split written to
+`stems/<song>/` instead of `output/stems/` was committable.
+
+Audit before a push, all three, because they answer different questions:
+
+```bash
+# 1. what is tracked, by size — anything large that is not vendored JS is a mistake
+git ls-files -z | xargs -0 stat -f '%z %N' | sort -nr | head -20
+git count-objects -vH | grep size-pack                 # whole repo; ~1 MB is healthy here
+# 2. what is in HISTORY, not just HEAD (a purged asset still ships until rewritten)
+git rev-list --objects --all \
+  | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
+  | awk '$1=="blob" && $3>1000000 {printf "%8.2f MB  %s\n", $3/1048576, substr($0, index($0,$4))}'
+# 3. does a NEW file anywhere still slip through the ignores?
+for p in stems/x.wav media/render.png docs/shot.jpg some/place/model.glb tmp/clip.mp4; do
+  git check-ignore -v "$p" || echo "!! TRACKABLE $p"; done
+git ls-files -ci --exclude-standard        # tracked files the rules would now ignore — should be only whitelisted UI
+```
+
+Note `%(objectsize)` is field **3** in that `batch-check` format, not 2 — filtering on `$2` compares an
+object hash and silently reports nothing. GitHub warns at 50 MB and refuses at 100 MB, but the rule is
+about the repo's purpose, not the limit. Dylan keeps the GitHub token in a
 file on his Desktop; read it, pass it through a one-shot `git -c credential.helper=…` so it never lands
 in `.git/config` or shell history, and never echo it. A fine-grained PAT must have **Contents: Read
 and write** on the repo — `git push` and `POST /git/blobs` both 403 without it even though
 `/repos/...` reports `push: true` (that field describes the user, not the token).
+
+**A push is not done until `git ls-remote origin refs/heads/main` returns your local `git rev-parse
+HEAD`** — `push exit 0` alone can mean nothing moved. Do not force-push unless history was actually
+rewritten; a normal fast-forward is what `main` expects. When a command that reads the token needs
+interactive approval and the approval times out, the run did not happen: commit locally, tell the user
+the commit sha, and hold the push for their go-ahead rather than re-firing the same command — it will
+just block again and the second attempt reads as ignoring the refusal.
+
+Two things to check before committing: `git diff --cached | grep -E 'github_pat_|ghp_'` must be empty,
+and `git restore --staged` any file another session is mid-edit on (this box runs a desktop session and
+the gateway agent on the same tree — see `local-media-stack`) rather than sweeping their work into your
+commit.
 
 ## Image editing — `gen edit` (Qwen-Image-Edit 2509)
 ```bash
@@ -246,7 +326,8 @@ stopping the server. Swap in use (panel → Resources) is the honest warning.
 ├── tools/vr/               gltf, optimize_glb.sh
 ├── tools/llm/scribe        prose/outline/chapter/screenplay/dialogue/lore/revise (mlx-lm :8081)
 ├── tools/vision/see        describe/ask/ocr/compare/snap (mlx-vlm :8082 + imagesnap)
-├── tools/anim/             rigify_auto.py, gp_anim.py, spritesheet.py, pngseq_to_vse.py
+├── tools/anim/             rigify_auto.py, animate_clip.py, gp_anim.py, spritesheet.py, pngseq_to_vse.py
+├── tools/rig/              auto_joints.py + render_views.py (VLM pre-place), center_joints.py, inspect_joints.py
 ├── game/                   Godot 2D/3D templates, new_project.sh
 ├── control/                panel.py, studio.py, studio.html, brand/
 ├── hermes/                 image_gen plugin + all studio skills (bin/sync-hermes export|install)

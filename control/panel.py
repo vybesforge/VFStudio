@@ -735,11 +735,18 @@ def api_stop_all():
 
 @app.get("/api/vr/asset")
 def api_vr_asset():
-    p = VR / "pig.glb"
+    """The GLB the room will open (current.json), falling back to pig.glb."""
+    cur = api_vr_current()
+    name = cur.get("name") or "pig.glb"
+    p = VR / name
+    if not p.exists():
+        p = VR / "pig.glb"
+        name = "pig.glb"
     if not p.exists():
         return {"present": False}
     st = p.stat()
-    return {"present": True, "bytes": st.st_size,
+    return {"present": True, "bytes": st.st_size, "name": name, "asset": cur.get("asset", "pig"),
+            "src": f"/vr/{name}", "joints_file": f"joints_{_rig_slug(cur.get('asset', 'pig'))}.json",
             "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))}
 
 
@@ -837,17 +844,259 @@ def api_rig_build_status(asset: str = "pig"):
     return {"log": txt, "likely_running": running, "asset": _rig_slug(asset)}
 
 
+@app.get("/api/rig/templates")
+def api_rig_templates():
+    """The joint templates the picker and the auto-placer share (names must agree)."""
+    sys.path.insert(0, str(STACK / "tools" / "rig"))
+    try:
+        import auto_joints as aj
+        return {"templates": {k: [{"name": n, "prompt": d, "side": s} for n, d, s in v]
+                              for k, v in aj.TEMPLATES.items()}}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+
+
+@app.post("/api/rig/auto")
+def api_rig_auto(payload: dict = Body(default={})):
+    """Let the local VLM place the joints: renders views, asks Qwen3-VL, snaps to the mesh.
+
+    Starts the vision server if it is down (first load is ~20 s) and runs the tool in the
+    background; the room polls /api/rig/auto/status for the log."""
+    asset = payload.get("asset") or "asset"
+    src = payload.get("source")
+    if not src:
+        return JSONResponse({"ok": False, "message": "need source (path to the GLB)"}, status_code=400)
+    template = payload.get("template") or "auto"
+    py = STACK / "tools" / ".venv" / "bin" / "python"
+    tool = STACK / "tools" / "rig" / "auto_joints.py"
+    if not tool.is_file():
+        return JSONResponse({"ok": False, "message": f"missing {tool}"}, status_code=500)
+    started = None
+    if not port_open(8082):
+        started = start("vision")
+    RIG.mkdir(parents=True, exist_ok=True)
+    log = RIG / f"auto_{_rig_slug(asset)}.log"
+    cmd = [str(py), str(tool), str(src), "--asset", asset, "--template", template]
+    with open(log, "wb") as fh:
+        proc = subprocess.Popen(cmd, cwd=str(STACK), stdout=fh, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    return {"ok": True, "pid": proc.pid, "log": str(log), "asset": _rig_slug(asset),
+            "vision": (started or {}).get("message", "already running")}
+
+
+@app.post("/api/rig/animate")
+def api_rig_animate(payload: dict = Body(default={})):
+    """Key a named locomotion clip onto a rigged GLB (the step after "Build rig").
+
+    No motion library is installed here, so the clips are procedural sine gaits in
+    tools/anim/animate_clip.py — walk / trot / gallop / idle. Writes vr/<asset>_anim.glb
+    and logs to rig/anim_<asset>.log; the room's Anim button plays clip 0 by name."""
+    asset = payload.get("asset") or "asset"
+    slug = _rig_slug(asset)
+    source = payload.get("source")
+    if not source:
+        # <asset>_rigged.glb is what "Build rig" writes; an already-rigged asset in the room
+        # (e.g. a Rigify export) is the fallback, so the card works on either.
+        for cand in (f"vr/{slug}_rigged.glb", f"vr/{slug}.glb"):
+            if (STACK / cand).is_file():
+                source = cand
+                break
+        source = source or f"vr/{slug}_rigged.glb"
+    clip = str(payload.get("clip") or "walk")
+    frames = int(payload.get("frames") or 24)
+    batch = STACK / "bin" / "blender"
+    tool = STACK / "tools" / "anim" / "animate_clip.py"
+    if not tool.is_file():
+        return JSONResponse({"ok": False, "message": f"missing {tool}"}, status_code=500)
+
+    def _resolve(q):
+        q = Path(q)
+        return q if q.is_absolute() else (STACK / q)
+
+    src = _resolve(source)
+    if not src.is_file():
+        return JSONResponse({"ok": False, "message": f"missing {src} — build the rig first"},
+                            status_code=400)
+    dest = VR / f"{_rig_slug(asset)}_anim.glb"
+    RIG.mkdir(parents=True, exist_ok=True)
+    log = RIG / f"anim_{_rig_slug(asset)}.log"
+    cmd = [str(batch), "-b", "--python", str(tool), "--", str(src), str(dest),
+           "--clip", clip, "--frames", str(frames)]
+    with open(log, "wb") as fh:
+        proc = subprocess.Popen(cmd, cwd=str(STACK), stdout=fh, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    return {"ok": True, "pid": proc.pid, "clip": clip, "dest": str(dest), "log": str(log),
+            "asset": _rig_slug(asset), "source": str(src)}
+
+
+@app.get("/api/rig/animate/status")
+def api_rig_animate_status(asset: str = "asset"):
+    log = RIG / f"anim_{_rig_slug(asset)}.log"
+    txt = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+    dest = VR / f"{_rig_slug(asset)}_anim.glb"
+    return {"log": txt, "done": "done:" in txt or "Traceback" in txt,
+            "failed": "Traceback" in txt or "[anim] no armature" in txt,
+            "wrote": dest.exists(), "src": f"/vr/{dest.name}" if dest.exists() else None,
+            "asset": _rig_slug(asset)}
+
+
+@app.get("/api/rig/auto/status")
+def api_rig_auto_status(asset: str = "asset"):
+    log = RIG / f"auto_{_rig_slug(asset)}.log"
+    txt = log.read_text(errors="replace")[-4000:] if log.exists() else ""
+    done = "[auto] wrote" in txt or "Traceback" in txt or "VLM not reachable" in txt
+    return {"log": txt, "done": done, "failed": ("Traceback" in txt or "VLM not reachable" in txt),
+            "asset": _rig_slug(asset)}
+
+
+@app.get("/api/vr/current")
+def api_vr_current():
+    """Which GLB the room opens by default when no ?src= is given."""
+    f = VR / "current.json"
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {"src": "/vr/pig.glb", "asset": "pig", "name": "pig.glb"}
+
+
 @app.post("/api/assets/use")
 def api_assets_use(path: str):
-    """Copy any GLB into the room as pig.glb so the VR tab picks it up."""
+    """Copy a GLB into the room under its own name and make it the default asset.
+
+    It used to copy everything to `vr/pig.glb`, which is why a human loaded here came
+    back as `pig.glb` and the joint picker then opened the pig's joint set."""
     src = Path(path)
     if not src.is_file() or src.suffix.lower() not in {".glb", ".gltf"}:
         return JSONResponse({"ok": False, "message": "not a GLB"}, status_code=400)
+    slug = _rig_slug(src.stem.replace("_rigged", ""))
+    dest = VR / f"{slug}{src.suffix.lower()}"
     try:
-        shutil.copy(src, VR / "pig.glb")
+        if src.resolve() != dest.resolve():
+            shutil.copy(src, dest)
+        (VR / "current.json").write_text(json.dumps(
+            {"src": f"/vr/{dest.name}", "asset": slug, "name": dest.name}, indent=1))
     except Exception as exc:
         return {"ok": False, "message": f"copy failed: {exc}"}
-    return {"ok": True, "message": f"room now uses {src.name}"}
+    return {"ok": True, "src": f"/vr/{dest.name}", "asset": slug,
+            "message": f"room now uses {dest.name} (asset '{slug}')"}
+
+
+# ── ComfyUI queue: name the jobs instead of showing node ids ─────────────
+_JOB_SEEN: dict = {}
+
+
+def _prompt_text(graph):
+    for node in graph.values():
+        ct = node.get("class_type", "")
+        if "TextEncode" in ct or ct in ("CLIPTextEncode",):
+            t = node.get("inputs", {}).get("text")
+            if isinstance(t, str) and t.strip() and len(t) > 3 and not t.startswith("${"):
+                return t.strip()
+    for node in graph.values():
+        for k, v in (node.get("inputs") or {}).items():
+            if k in ("text", "prompt", "positive") and isinstance(v, str) and len(v) > 3:
+                return v.strip()
+    return ""
+
+
+def _prompt_prefix(graph):
+    for node in graph.values():
+        for k in ("filename_prefix", "prefix"):
+            v = (node.get("inputs") or {}).get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
+def _prompt_name(graph):
+    """A human name for a queued ComfyUI prompt, from the nodes it actually contains."""
+    types = [n.get("class_type", "") for n in graph.values()]
+    joined = " ".join(types)
+    prefix = _prompt_prefix(graph)
+    text = _prompt_text(graph)
+    short = (text[:60] + "…") if len(text) > 60 else text
+
+    if "Trellis2" in joined or "RemeshMesh" in joined:
+        return f"TRELLIS.2 image→3D → {prefix or 'model'}"
+    if "HunyuanVideo" in joined:
+        return f"HunyuanVideo 1.5 → {short or prefix or 'clip'}"
+    if "Wan" in joined and any(k in joined for k in ("Video", "Sampler", "I2V", "T2V")):
+        return f"Wan 2.2 video → {short or prefix or 'clip'}"
+    if "QwenImageEdit" in joined or "QwenImage" in joined:
+        return f"Qwen image edit → {short or prefix or 'image'}"
+    if any(k in joined for k in ("KSampler", "SamplerCustom")):
+        return f"image → {short or prefix or 'image'}"
+    if "ACE" in joined or "StableAudio" in joined:
+        return f"audio → {short or prefix or 'clip'}"
+    if types:
+        return f"{types[0]} → {prefix or short or 'job'}"
+    return "ComfyUI job"
+
+
+@app.get("/api/comfy/jobs")
+def api_comfy_jobs():
+    """Running + queued ComfyUI prompts with names, elapsed and queue position.
+
+    `exec_info.queue_remaining` counts the running job too, which is why the panel used to
+    say "2 queued" when one job was running and one was waiting. This reports them apart.
+    """
+    import urllib.request as _u
+    try:
+        with _u.urlopen("http://127.0.0.1:8188/queue", timeout=3) as r:
+            q = json.loads(r.read() or b"{}")
+    except Exception as exc:
+        return {"reachable": False, "error": str(exc), "running": [], "pending": [],
+                "counts": {"running": 0, "pending": 0}}
+    now = time.time()
+    out = {"reachable": True, "running": [], "pending": []}
+    for pos, item in enumerate(q.get("queue_running") or []):
+        pid, graph = item[1], (item[2] or {})
+        _JOB_SEEN.setdefault(pid, now)
+        out["running"].append({"id": item[0], "prompt_id": pid, "name": _prompt_name(graph),
+                               "nodes": len(graph), "elapsed": round(now - _JOB_SEEN[pid])})
+    for pos, item in enumerate(q.get("queue_pending") or []):
+        pid, graph = item[1], (item[2] or {})
+        _JOB_SEEN.setdefault(pid, now)
+        out["pending"].append({"id": item[0], "prompt_id": pid, "name": _prompt_name(graph),
+                               "nodes": len(graph), "position": pos + 1,
+                               "waiting": round(now - _JOB_SEEN[pid])})
+    live = {it["prompt_id"] for it in out["running"] + out["pending"]}
+    for pid in [k for k in _JOB_SEEN if k not in live]:
+        _JOB_SEEN.pop(pid, None)
+    out["counts"] = {"running": len(out["running"]), "pending": len(out["pending"]),
+                     "total": len(out["running"]) + len(out["pending"])}
+    return out
+
+
+@app.post("/api/comfy/cancel")
+def api_comfy_cancel(payload: dict = Body(default={})):
+    """Cancel a ComfyUI job from the panel's status bar.
+
+    A pending job is deleted from the queue by id; a running one has to be interrupted
+    (ComfyUI has no per-job stop), so the caller must say which it is — the UI reads that
+    off /api/comfy/jobs rather than guessing."""
+    import urllib.request as _u
+    job_id = payload.get("id")
+    prompt_id = payload.get("prompt_id")
+    kind = payload.get("kind") or ("pending" if job_id else "running")
+    data, path = {}, "/interrupt"
+    if kind == "pending" and job_id is not None:
+        path, data = "/queue", {"delete": [int(job_id)]}
+    elif kind == "pending":
+        path, data = "/queue", {"clear": True}
+    try:
+        req = _u.Request(f"http://127.0.0.1:8188{path}",
+                         data=json.dumps(data).encode() if data else b"",
+                         headers={"Content-Type": "application/json"}, method="POST")
+        with _u.urlopen(req, timeout=5) as r:
+            r.read()
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": f"cancel failed: {exc}"}, status_code=500)
+    return {"ok": True, "kind": kind, "id": job_id, "prompt_id": prompt_id,
+            "message": (f"deleted queued job {job_id}" if kind == "pending"
+                        else "interrupted the running job")}
 
 
 @app.get("/api/comfy/job")
