@@ -86,6 +86,40 @@ SERVICES = {
     },
 }
 
+if sys.platform.startswith("linux"):
+    # ---- NVIDIA/Linux overrides (billie): reuse the services that already run here ----
+    # ComfyUI runs as comfyui-v100.service on :8189; bin/comfy-shim fronts it on :8188.
+    # The MLX servers from the Mac build do not exist on this box, so audio/llm/vision are
+    # monitored through the ports billie's own services already answer on.
+    SERVICES["comfy"].update({
+        "external": "comfyui-v100.service (:8189, shimmed to :8188)",
+        "desc": "Image, video + 3D generation (ComfyUI on the V100, :8189 via shim)",
+    })
+    SERVICES["audio"] = {
+        "label": "voice (chatterbox + whisper)",
+        "port": int(os.environ.get("TTS_PORT", "3200")),
+        "cmd": None,
+        "cwd": str(STACK),
+        "external": "voice-tts.service :3200 · voice-stt.service :3201",
+        "desc": "TTS / STT — billie's local voice services",
+    }
+    SERVICES["llm"] = {
+        "label": "writer LLM",
+        "port": int(os.environ.get("LLM_PORT", "8000")),
+        "cmd": None,
+        "cwd": str(STACK),
+        "external": "llama-server :8000 (pepper-brain local mode)",
+        "desc": "OpenAI-compatible chat · local llama-server (:8000)",
+    }
+    SERVICES["vision"] = {
+        "label": "vision VLM",
+        "port": int(os.environ.get("VLM_PORT", "8200")),
+        "cmd": None,
+        "cwd": str(STACK),
+        "external": "vision-vl.service :8200",
+        "desc": "image understanding · Qwen3-VL-8B (:8200)",
+    }
+
 
 def lan_ip() -> str | None:
     """This machine's LAN address (no packets sent — UDP connect only picks a route)."""
@@ -282,12 +316,12 @@ def _service_launch(name: str) -> tuple[dict, dict, str | None]:
 
 
 def start(name: str) -> dict:
-    base = SERVICES[name]
-    if read_pid(name) or port_open(base["port"]):
-        return {"ok": True, "already": True, "message": f"{base['label']} already running"}
-    svc, env, err = _service_launch(name)
-    if err:
-        return {"ok": False, "message": err}
+    svc = SERVICES[name]
+    if svc.get("cmd") is None:
+        return {"ok": False, "external": True,
+                "message": f"{svc['label']} is managed outside the panel ({svc.get('external','system service')})"}
+    if read_pid(name) or port_open(svc["port"]):
+        return {"ok": True, "already": True, "message": f"{svc['label']} already running"}
     log = LOGS / f"{name}.log"
     fh = open(log, "ab")
     fh.write(f"\n=== start {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n".encode())
@@ -302,6 +336,9 @@ def start(name: str) -> dict:
 
 def stop(name: str) -> dict:
     svc = SERVICES[name]
+    if svc.get("cmd") is None:
+        return {"ok": False, "external": True,
+                "message": f"{svc['label']} is managed outside the panel ({svc.get('external','system service')}) — use systemctl --user"}
     pid = read_pid(name)
     if not pid:
         return {"ok": True, "already": True, "message": f"{svc['label']} not running"}
@@ -390,7 +427,66 @@ _RES_TTL = 1.2
 
 
 def _gpu_stats() -> dict:
-    """GPU utilisation via ioreg's IOAccelerator PerformanceStatistics (no root needed)."""
+    """GPU utilisation. Linux: nvidia-smi. macOS: ioreg's IOAccelerator (no root needed)."""
+    if sys.platform.startswith("linux"):
+        q = ("index,name,uuid,pci.bus_id,utilization.gpu,memory.used,memory.total,"
+             "temperature.gpu,power.draw,power.limit,fan.speed")
+        raw = _run(["nvidia-smi", "--query-gpu=" + q, "--format=csv,noheader,nounits"])
+
+        def num(s):
+            try:
+                return float(s)
+            except (TypeError, ValueError):
+                return None  # "[N/A]" on passthrough cards, failure states, etc.
+
+        gpus = []
+        for line in raw.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 7:
+                continue
+            try:
+                gpus.append({
+                    "index": int(num(parts[0]) or 0),
+                    "name": parts[1],
+                    "uuid": parts[2],
+                    "bus": parts[3],
+                    "util": int(num(parts[4]) or 0),
+                    "mem_used": int(num(parts[5]) or 0) * 1024 * 1024,
+                    "mem_total": int(num(parts[6]) or 0) * 1024 * 1024,
+                    "temp": num(parts[7]) if len(parts) > 7 else None,
+                    "power": num(parts[8]) if len(parts) > 8 else None,
+                    "power_cap": num(parts[9]) if len(parts) > 9 else None,
+                    "fan": num(parts[10]) if len(parts) > 10 else None,
+                    "procs": [],
+                })
+            except ValueError:
+                continue
+        if not gpus:
+            return {"available": False, "count": 0}
+        # what is actually running on each card (by UUID — indices disagree with CUDA)
+        apps = _run(["nvidia-smi",
+                     "--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
+                     "--format=csv,noheader,nounits"])
+        by_uuid = {g["uuid"]: g for g in gpus}
+        for line in apps.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 4:
+                continue
+            g = by_uuid.get(parts[0])
+            if not g:
+                continue
+            name = parts[2].split("/")[-1][:40]
+            try:
+                g["procs"].append({"pid": int(num(parts[1]) or 0), "name": name,
+                                   "mem": int(num(parts[3]) or 0) * 1024 * 1024})
+            except ValueError:
+                pass
+        for g in gpus:
+            g["procs"].sort(key=lambda p: -p["mem"])
+        g = gpus[0]
+        return {"available": True, "count": len(gpus), "util": g["util"],
+                "mem_used": g["mem_used"], "mem_alloc": g["mem_total"],
+                "name": g["name"], "gpus": gpus}
     raw = _run(["ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"])
     m = re.search(r'"PerformanceStatistics"\s*=\s*(\{.*?\})\s*\n', raw)
     if not m:
@@ -413,6 +509,22 @@ def _gpu_stats() -> dict:
 
 def _cpu_stats() -> dict:
     out = {}
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/stat") as f:
+                vals = [int(x) for x in f.readline().split()[1:]]
+            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+            total = sum(vals) or 1
+            out.update({"idle": round(100 * idle / total, 1),
+                        "busy": round(100 * (total - idle) / total, 1)})
+        except Exception:
+            pass
+        try:
+            with open("/proc/loadavg") as f:
+                out["load"] = [float(x) for x in f.read().split()[:3]]
+        except Exception:
+            pass
+        return out
     raw = _run(["top", "-l", "1", "-n", "0", "-s", "0"], timeout=4.0)
     m = re.search(r"CPU usage:\s*([\d.]+)% user,\s*([\d.]+)% sys,\s*([\d.]+)% idle", raw)
     if m:
@@ -425,6 +537,27 @@ def _cpu_stats() -> dict:
 
 
 def _mem_stats() -> dict:
+    if sys.platform.startswith("linux"):
+        info: dict[str, int] = {}
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, v = line.split(":", 1)
+                    info[k] = int(re.sub(r"[^\d]", "", v) or 0) * 1024
+        except Exception:
+            return {}
+        total = info.get("MemTotal", 0)
+        free = info.get("MemAvailable", info.get("MemFree", 0))
+        return {
+            "total": total,
+            "free": free,
+            "used": max(total - free, 0),
+            "wired": 0,
+            "compressed": info.get("SwapCached", 0),
+            "active": info.get("Active", 0),
+            "swap_total": info.get("SwapTotal", 0),
+            "swap_used": max(info.get("SwapTotal", 0) - info.get("SwapFree", 0), 0),
+        }
     total = 0
     try:
         total = int(_run(["sysctl", "-n", "hw.memsize"]).strip())
@@ -912,6 +1045,122 @@ def api_assets_use(path: str):
         return {"ok": False, "message": f"copy failed: {exc}"}
     return {"ok": True, "src": f"/vr/{dest.name}", "asset": slug,
             "message": f"room now uses {dest.name} (asset '{slug}')"}
+
+
+# ── ComfyUI queue: name the jobs instead of showing node ids ─────────────
+_JOB_SEEN: dict = {}
+
+
+def _prompt_text(graph):
+    for node in graph.values():
+        ct = node.get("class_type", "")
+        if "TextEncode" in ct or ct in ("CLIPTextEncode",):
+            t = node.get("inputs", {}).get("text")
+            if isinstance(t, str) and t.strip() and len(t) > 3 and not t.startswith("${"):
+                return t.strip()
+    for node in graph.values():
+        for k, v in (node.get("inputs") or {}).items():
+            if k in ("text", "prompt", "positive") and isinstance(v, str) and len(v) > 3:
+                return v.strip()
+    return ""
+
+
+def _prompt_prefix(graph):
+    for node in graph.values():
+        for k in ("filename_prefix", "prefix"):
+            v = (node.get("inputs") or {}).get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
+def _prompt_name(graph):
+    """A human name for a queued ComfyUI prompt, from the nodes it actually contains."""
+    types = [n.get("class_type", "") for n in graph.values()]
+    joined = " ".join(types)
+    prefix = _prompt_prefix(graph)
+    text = _prompt_text(graph)
+    short = (text[:60] + "…") if len(text) > 60 else text
+
+    if "Trellis2" in joined or "RemeshMesh" in joined:
+        return f"TRELLIS.2 image→3D → {prefix or 'model'}"
+    if "HunyuanVideo" in joined:
+        return f"HunyuanVideo 1.5 → {short or prefix or 'clip'}"
+    if "Wan" in joined and any(k in joined for k in ("Video", "Sampler", "I2V", "T2V")):
+        return f"Wan 2.2 video → {short or prefix or 'clip'}"
+    if "QwenImageEdit" in joined or "QwenImage" in joined:
+        return f"Qwen image edit → {short or prefix or 'image'}"
+    if any(k in joined for k in ("KSampler", "SamplerCustom")):
+        return f"image → {short or prefix or 'image'}"
+    if "ACE" in joined or "StableAudio" in joined:
+        return f"audio → {short or prefix or 'clip'}"
+    if types:
+        return f"{types[0]} → {prefix or short or 'job'}"
+    return "ComfyUI job"
+
+
+@app.get("/api/comfy/jobs")
+def api_comfy_jobs():
+    """Running + queued ComfyUI prompts with names, elapsed and queue position.
+
+    `exec_info.queue_remaining` counts the running job too, which is why the panel used to
+    say "2 queued" when one job was running and one was waiting. This reports them apart.
+    """
+    import urllib.request as _u
+    try:
+        with _u.urlopen("http://127.0.0.1:8188/queue", timeout=3) as r:
+            q = json.loads(r.read() or b"{}")
+    except Exception as exc:
+        return {"reachable": False, "error": str(exc), "running": [], "pending": [],
+                "counts": {"running": 0, "pending": 0}}
+    now = time.time()
+    out = {"reachable": True, "running": [], "pending": []}
+    for pos, item in enumerate(q.get("queue_running") or []):
+        pid, graph = item[1], (item[2] or {})
+        _JOB_SEEN.setdefault(pid, now)
+        out["running"].append({"id": item[0], "prompt_id": pid, "name": _prompt_name(graph),
+                               "nodes": len(graph), "elapsed": round(now - _JOB_SEEN[pid])})
+    for pos, item in enumerate(q.get("queue_pending") or []):
+        pid, graph = item[1], (item[2] or {})
+        _JOB_SEEN.setdefault(pid, now)
+        out["pending"].append({"id": item[0], "prompt_id": pid, "name": _prompt_name(graph),
+                               "nodes": len(graph), "position": pos + 1,
+                               "waiting": round(now - _JOB_SEEN[pid])})
+    live = {it["prompt_id"] for it in out["running"] + out["pending"]}
+    for pid in [k for k in _JOB_SEEN if k not in live]:
+        _JOB_SEEN.pop(pid, None)
+    out["counts"] = {"running": len(out["running"]), "pending": len(out["pending"]),
+                     "total": len(out["running"]) + len(out["pending"])}
+    return out
+
+
+@app.post("/api/comfy/cancel")
+def api_comfy_cancel(payload: dict = Body(default={})):
+    """Cancel a ComfyUI job from the panel's status bar.
+
+    A pending job is deleted from the queue by id; a running one has to be interrupted
+    (ComfyUI has no per-job stop), so the caller must say which it is — the UI reads that
+    off /api/comfy/jobs rather than guessing."""
+    import urllib.request as _u
+    job_id = payload.get("id")
+    prompt_id = payload.get("prompt_id")
+    kind = payload.get("kind") or ("pending" if job_id else "running")
+    data, path = {}, "/interrupt"
+    if kind == "pending" and job_id is not None:
+        path, data = "/queue", {"delete": [int(job_id)]}
+    elif kind == "pending":
+        path, data = "/queue", {"clear": True}
+    try:
+        req = _u.Request(f"http://127.0.0.1:8188{path}",
+                         data=json.dumps(data).encode() if data else b"",
+                         headers={"Content-Type": "application/json"}, method="POST")
+        with _u.urlopen(req, timeout=5) as r:
+            r.read()
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": f"cancel failed: {exc}"}, status_code=500)
+    return {"ok": True, "kind": kind, "id": job_id, "prompt_id": prompt_id,
+            "message": (f"deleted queued job {job_id}" if kind == "pending"
+                        else "interrupted the running job")}
 
 
 @app.get("/api/comfy/job")

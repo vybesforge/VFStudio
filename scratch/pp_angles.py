@@ -343,11 +343,20 @@ def api(path, payload=None, timeout=3600, tries=6):
     raise last
 
 
-def wait_idle(give_up=7200):
+def wait_idle(give_up=7200, patience=600):
+    """Wait for an idle queue, but do not starve: another session can keep ComfyUI busy
+    for hours, and ComfyUI is FIFO anyway, so after `patience` seconds submit regardless
+    rather than blocking the whole batch."""
     t0 = time.time()
     while time.time() - t0 < give_up:
-        q = api("/queue")
-        if not q.get("queue_running") and not q.get("queue_pending"):
+        try:
+            q = api("/queue")
+            if not q.get("queue_running") and not q.get("queue_pending"):
+                return True
+        except Exception:
+            pass
+        if time.time() - t0 > patience:
+            print("[ang] queue busy for %ds, submitting anyway (FIFO)" % patience, flush=True)
             return True
         time.sleep(5)
     return False

@@ -1,4 +1,4 @@
-#!/Users/dcruse/media-stack/tools/.venv/bin/python
+#!/home/billie/media-stack/tools/.venv/bin/python
 """vid — ffmpeg wrapper CLI for common video edits. Fully local; no network.
 
 Every subcommand prints the exact ffmpeg command it runs (prefixed with "$ ")

@@ -12,6 +12,44 @@ diagonal pairs swinging fore-aft in the rendered frames; `hog_rig_test.glb` → 
 No local motion model exists, so these are gaits, not authored animation — `--save-blend` in the
 rig builders is the route for hand-keyed work.
 
+## 2026-11-02 (desktop): ComfyUI queue is named, and the count is no longer off by one
+
+`GET /api/comfy/jobs` returns running + pending prompts with a human name derived from the graph
+(`TRELLIS.2 image→3D → 3d/hog_hq`, `Wan 2.2 video → <prompt text>`, `Qwen image edit → …`), elapsed
+time (first-seen, since ComfyUI does not expose a start stamp) and queue position. The panel's
+progress card renders that list under the bar. The old "N queued" came from
+`exec_info.queue_remaining`, which **counts the running job as queued** — verified against the live
+queue: ComfyUI reports `queue_remaining: 1` while one job runs and nothing waits; the panel now
+shows `1 running · 0 queued`.
+
+## 2026-11-02 (desktop): calmer refreshes, cancel in the status bar, i2v sizes follow the image
+
+- Auto-refresh was too eager (job lists every 3 s, galleries every 8 s, services 2.5 s). Now:
+  status bar 5 s (it is the only live thing), job lists + galleries 60 s, services/resources 15 s.
+- The status bar's job rows carry **cancel** (`POST /api/comfy/cancel`): a queued job is deleted
+  by id, a running one is interrupted (ComfyUI has no per-job stop). Verified the button renders
+  on the running row.
+- `gen video` took its latent size from `--w/--h` (default 1280x704) even for image-to-video, so a
+  square upload came back re-framed. `--w/--h` now default to None and `video_dims()` derives the
+  size from the start image — aspect kept, area capped at 1280x704, sides snapped to 16 (the VAE
+  needs multiples of 16). The panel's Video tab has an `auto · match the start image` size option,
+  selected automatically once a start image is set. Measured: 927x652 image → 928x656; explicit
+  sizes still win; t2v keeps 1280x704 (Wan) / 832x480 (HunyuanVideo 480p model).
+
+## 2026-11-02 (desktop): video clips up to 30 s (chained passes, stitched)
+
+Wan 2.2 TI2V 5B is trained at **121 frames**, so "longer" cannot be a bigger number in the graph.
+`gen video --seconds N` now plans the clip in passes of at most 121 frames (`snap_wan_len` keeps
+length = 4k+1), renders each pass as **image-to-video seeded with the previous pass's last frame**
+(ffmpeg `-sseof` grab), and concatenates them with ffmpeg (`-c copy`, re-encode fallback) into one
+mp4. `--plan` prints the split without submitting; `--fps` trades passes for clip length
+(12 fps = 10 s in a single pass). Panel Video tab: length 2/5/10/15/30 s + fps, and a note that
+over 5 s it renders in passes.
+
+Measured: 30 s @ 24 fps → 6 passes × 121 f (726 f); a 2-pass / 130-frame smoke run at 320×192×2
+steps rendered, chained and stitched in 61 s to a single 16.25 s mp4. At 832×480×20 steps a pass
+costs ~15 min, so 30 s ≈ 1.5 h — the panel says so.
+
 # Project state — read this first
 
 ## 2026-11-02 (desktop): rig joints — local VLM places them, and the pig.glb identity bug

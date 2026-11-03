@@ -1,4 +1,4 @@
-#!/Users/dcruse/media-stack/llm/.venv/bin/python
+#!/home/billie/media-stack/tools/.venv/bin/python
 """scribe — local, uncensored creative-writing CLI over the mlx-lm server (:8081).
 
   scribe chat "prompt"                                   plain completion with the writer system prompt

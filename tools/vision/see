@@ -1,4 +1,4 @@
-#!/Users/dcruse/media-stack/llm/.venv/bin/python
+#!/home/billie/media-stack/tools/.venv/bin/python
 """see — local vision: describe / question images, capture from the camera. mlx-vlm server :8082.
 
   see describe photo.jpg                       detailed description
