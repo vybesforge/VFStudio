@@ -125,13 +125,14 @@
     <div class="card"><div class="name">Text → image</div>
       <label>prompt</label><textarea id="im-prompt">a brass compass on an old map, soft window light, macro</textarea>
       <div class="fields">
-        <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option></select></div>
+        <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option><option value="animagine">Animagine XL 4.0 · anime / illustration · 30 steps</option></select></div>
+        <div><label>negative (anime lane)</label><input id="im-neg" placeholder="lowres, bad anatomy, text, watermark"></div>
         <div><label>LoRA (trained in the Train tab)</label><div class="row" style="gap:6px"><select id="im-lora" style="flex:1"><option value="">none</option></select><input id="im-lora-s" value="0.9" size="3" title="strength"></div></div>
-        <div><label>size</label><select id="im-size"><option value="1024x1024">1024 × 1024</option><option value="1344x768">1344 × 768 landscape</option><option value="768x1344">768 × 1344 portrait</option><option value="1536x1024">1536 × 1024</option></select></div>
+        <div><label>size</label><select id="im-size"><option value="1024x1024">1024 × 1024</option><option value="1344x768">1344 × 768 landscape</option><option value="768x1344">768 × 1344 portrait</option><option value="832x1216">832 × 1216 portrait (SDXL anime)</option><option value="1536x1024">1536 × 1024</option></select></div>
         <div><label>seed (blank = random)</label><input id="im-seed" placeholder="random"></div>
         <div><label>count</label><input id="im-n" value="1" type="number" min="1" max="4"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n'),lora:v('im-lora'),lora_strength:v('im-lora-s')})">Generate</button></div>
+      <div class="btns"><button class="primary" onclick="runJob('image',{prompt:v('im-prompt'),model:v('im-model'),negative:v('im-neg'),w:sz('im-size')[0],h:sz('im-size')[1],seed:v('im-seed'),n:v('im-n'),lora:v('im-lora'),lora_strength:v('im-lora-s')})">Generate</button></div>
       <div class="hint">CLI: <code>gen image "prompt" --model zimage</code></div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Upscale / control</div>
@@ -165,16 +166,17 @@
   <div>
     <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B</span></div>
       <label>prompt</label><textarea id="vd-prompt">a mulefoot hog walks slowly across a sunlit barn floor, dust in the air, cinematic</textarea>
-      <label>start image (optional — image-to-video)</label>
-      <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')">Upload…</button></div>
+      <label>source (optional — an image or a video; the render matches its format)</label>
+      <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1" onchange="vdApplyInput()"><button onclick="pickFile('vd-img','image')">Image…</button><button onclick="pickFile('vd-img','video')">Video…</button><button onclick="$('vd-img').value='';vdApplyInput()" title="clear the source">Clear</button></div>
+      <div class="desc" id="vd-src" style="font-size:11px;min-height:15px">no source · text-to-video at the size below</div>
       <div class="fields">
         <div><label>model</label><select id="vd-model"><option value="wan">Wan 2.2 5B · fast path (measured)</option><option value="hyv15">HunyuanVideo 1.5 8.3B · quality (t2v 480p / i2v 720p, untested)</option></select></div>
-        <div><label>size</label><select id="vd-size"><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
-        <div><label>frames (24 fps)</label><select id="vd-frames"><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
+        <div><label>size</label><select id="vd-size"><option value="auto" selected>match source · its real size</option><option value="832x480">832 × 480 · ~6 min / 2 s</option><option value="1280x704">1280 × 704 · 720p, slow</option><option value="704x1280">704 × 1280 portrait</option></select></div>
+        <div><label>frames (24 fps)</label><select id="vd-frames"><option value="auto" selected>match source length</option><option value="49">49 · 2 s</option><option value="81">81 · 3.4 s</option><option value="121">121 · 5 s</option></select></div>
         <div><label>steps</label><input id="vd-steps" value="20"></div>
         <div><label>seed</label><input id="vd-seed" placeholder="random"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="runJob('video',{prompt:v('vd-prompt'),model:v('vd-model'),image:v('vd-img'),w:sz('vd-size')[0],h:sz('vd-size')[1],frames:v('vd-frames'),fps:24,steps:v('vd-steps'),seed:v('vd-seed')})">Generate video</button></div>
+      <div class="btns"><button class="primary" onclick="runJob('video',vdArgs())">Generate video</button></div>
       <div class="hint">~14 s/step at 832×480×49f on this GPU. Editing (trim/concat/captions): <code>vid</code> CLI, skill <code>studio-video-edit</code>.</div>
     </div>
     <div id="jobs-video" class="card" style="margin-top:12px"></div>
@@ -191,8 +193,15 @@
   <div class="row" style="margin-top:14px"><h2 style="margin:0">Game projects <span class="muted" style="font-weight:400;font-size:12px">~/media-stack/game/ — their models, audio and sprites also appear in the galleries</span></h2><button onclick="loadGames()">Refresh</button></div>
   <div id="games" class="grid"></div>
   <div class="grid" style="margin-top:14px">
-    <div class="card"><div class="name">Photo → mesh</div><div class="desc">TRELLIS.2 (gold path) runs through the ComfyUI UI template; it cannot be driven from this page. Recipe: skill <code>local-media-stack</code> → <code>photo-to-3d-gold-standard.md</code>. Progress shows in the bar above while it runs.</div>
-      <div class="btns"><button onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div></div>
+    <div class="card"><div class="name">Image → 3D mesh <span class="tag">TRELLIS.2</span></div><div class="desc">Headless TRELLIS.2: the shipped ComfyUI template with a <code>SaveGLB</code> appended to its textured mesh output. Reference must be a cut-out on a plain background, cropped tight — margin becomes geometry. ~15–40 min on the V100; the GLB lands in <code>output/3d/</code> and shows in the gallery below.</div>
+      <div class="fields">
+        <div><label>reference image</label><div class="row" style="gap:6px"><input id="m3-image" placeholder="/path/ref.png" style="flex:1"><button onclick="pickFile('m3-image','image')">Upload…</button></div></div>
+        <div><label>texture bake</label><select id="m3-tex"><option value="4096">4096 (best)</option><option value="2048">2048 (faster)</option><option value="1024">1024</option></select></div>
+        <div><label>name</label><input id="m3-name" value="mesh"></div>
+      </div>
+      <div class="btns"><button class="primary" onclick="runJob('mesh3d',{image:v('m3-image'),texres:v('m3-tex'),prefix:'3d/'+v('m3-name')})">Mesh it</button>
+        <button onclick="window.open('http://127.0.0.1:8188','_blank')">Open ComfyUI</button></div>
+    </div>
     <div class="card"><div class="name">Print</div><div class="desc">build123d part → <code>meshcheck.py</code> → <code>slice --preset bambu|generic</code> → G-code/3MF. Skill <code>studio-3d-print</code>. STL/G-code previews appear in the gallery.</div></div>
     <div class="card"><div class="name">VR build</div><div class="desc">Godot 4.7 OpenXR room at <code>~/media-stack/vr-godot</code>; Windows SteamVR export + <code>optimize_glb.sh</code>. Skill <code>studio-vr</code>.</div></div>
   </div>
@@ -487,15 +496,48 @@ function trainJob(){
 // generic uploader: any input that wants a file path gets an "Upload…" button → /api/studio/upload?kind=image|voice|model
 function pickFile(inputId, kind){
   let f=document.getElementById('__picker'); if(!f){ f=document.createElement('input'); f.type='file'; f.id='__picker'; f.style.display='none'; document.body.appendChild(f); }
-  f.accept = kind==='image' ? 'image/*' : kind==='model' ? '.glb,.gltf,.stl,.obj' : 'audio/*,video/*';
+  f.accept = kind==='image' ? 'image/*' : kind==='video' ? 'video/*,.mp4,.webm,.mov,.mkv,.avi' : kind==='model' ? '.glb,.gltf,.stl,.obj' : 'audio/*,video/*';
   f.onchange = async () => { const file=f.files[0]; if(!file) return; flash('uploading…');
     const fd=new FormData(); fd.append('file', file, file.name);
     const r=await (await fetch('/api/studio/upload?kind='+kind,{method:'POST',body:fd})).json();
     if(!r.ok){ flash('upload failed: '+r.error); return; }
     $(inputId).value=r.path; flash('uploaded → '+r.path.split('/').pop());
     const prev=$(inputId+'-prev'); if(prev&&kind==='image'){ prev.src=r.url; prev.style.display='block'; }
+    $(inputId).dispatchEvent(new Event('change'));   // let the tab read the file's real format
     f.value=''; };
   f.click();
+}
+// ── video source: whatever you feed it, the render matches its format
+let vdProbe=null;
+async function vdApplyInput(){
+  const p=(v('vd-img')||'').trim(), el=$('vd-src');
+  if(!p){ vdProbe=null; if(el) el.textContent='no source · text-to-video at the size below'; return null; }
+  try{
+    const r=await (await fetch('/api/studio/probe?path='+encodeURIComponent(p))).json();
+    if(!r.ok){ vdProbe=null; if(el) el.textContent='cannot read input — '+(r.error||'unknown'); flash('input not readable'); return null; }
+    vdProbe=r;
+    const bits=[`<b>${r.kind}</b>`, `${r.width}×${r.height}`];
+    if(r.kind==='video'&&r.fps) bits.push(`${r.fps} fps`);
+    if(r.kind==='video'&&r.seconds) bits.push(`${r.seconds.toFixed(2)} s`);
+    bits.push(`→ rendering ${r.fit_w}×${r.fit_h}`);
+    if(r.fit_frames) bits.push(`${r.fit_frames} f`);
+    if(el) el.innerHTML=bits.join(' · ');
+    if(r.kind==='video' && r.frame) flash('video source — frame 0 is the start frame');
+    return r;
+  }catch(e){ vdProbe=null; if(el) el.textContent='probe failed — '+e; return null; }
+}
+function vdArgs(){
+  const src=(v('vd-img')||'').trim();
+  let w=832,h=480,frames=49,fps=24;
+  if(vdProbe){
+    w=vdProbe.fit_w||w; h=vdProbe.fit_h||h;
+    if(vdProbe.fit_frames) frames=vdProbe.fit_frames;
+    if(vdProbe.kind==='video' && vdProbe.fps) fps=Math.max(8,Math.min(30,Math.round(vdProbe.fps)));
+  }
+  const size=v('vd-size'); if(size&&size!=='auto'){ const s=sz(size); w=s[0]; h=s[1]; }
+  const fr=v('vd-frames'); if(fr&&fr!=='auto') frames=+fr;
+  const image=(vdProbe && vdProbe.kind==='video') ? (vdProbe.frame||'') : src;
+  return {prompt:v('vd-prompt'),model:v('vd-model'),image,w,h,frames,fps,steps:v('vd-steps'),seed:v('vd-seed')};
 }
 async function uploadRef(fileOrBlob, name){
   if(!fileOrBlob) return; flash('uploading…');
@@ -519,11 +561,13 @@ async function refreshJobs(){
   for(const job of j.jobs){ if(job.status==='done'&&job.text){ if(job.kind==='write'&&$('wr-result').dataset.id!==job.id){$('wr-result').textContent=job.text;$('wr-result').dataset.id=job.id;} if(job.kind==='see'&&$('vi-result').dataset.id!==job.id){$('vi-result').textContent=job.text;$('vi-result').dataset.id=job.id;} } }
   for(const t of ['image','video','sound','voice','write','vision']){
     const el=$('jobs-'+t); if(!el) continue; const list=(byTab[t]||[]).slice(0,6);
-    el.innerHTML='<div class="name" style="font-size:13px">Jobs</div>'+(list.length?list.map(job=>`<div class="job"><span class="chip ${job.status==='running'?'run':job.status}">${job.status}</span>
+    const html='<div class="name" style="font-size:13px">Jobs</div>'+(list.length?list.map(job=>`<div class="job"><span class="chip ${job.status==='running'?'run':job.status}">${job.status}</span>
       <span style="flex:1"><code>${job.kind}</code> ${(job.args.prompt||job.args.text||job.args.image||job.args.file||'').toString().slice(0,60)}</span>
       <span class="desc">${job.elapsed}s</span>${job.status==='running'?`<button onclick="cancelJob('${job.id}')">cancel</button>`:''}
       ${job.status==='failed'?`<button onclick="showLog('${job.id}')">log</button>`:''}</div>`
       +(job.status==='failed'?`<pre id="log-${job.id}" style="display:none">${(job.log_tail||'').replace(/</g,'&lt;')}</pre>`:'')).join(''):'<div class="desc">no jobs yet this session</div>');
+    if(el.__html===html) continue;      // same content → leave the DOM alone (no flicker)
+    el.__html=html; el.innerHTML=html;
   }
 }
 function showLog(id){const p=$('log-'+id); p.style.display=p.style.display==='none'?'block':'none';}
@@ -533,7 +577,7 @@ function thumb(it,kind){
   const e=it.ext;
   if(['md','txt','json','fountain'].includes(e)) return `<div class="ph" style="font-size:22px">¶</div>`;
   if(['png','jpg','jpeg','webp','gif'].includes(e)) return `<img src="${it.url}" loading="lazy">`;
-  if(['mp4','webm','mov'].includes(e)) return `<video src="${it.url}#t=0.5" muted preload="metadata"></video>`;
+  if(['mp4','webm','mov'].includes(e)) return `<img src="/api/studio/thumb?path=${encodeURIComponent(it.path)}" loading="eager" alt="">`;
   if(['glb','gltf'].includes(e)) return `<div class="ph">◈</div>`;
   if(['stl','obj'].includes(e)) return `<div class="ph">▲</div>`;
   return `<div class="ph">♪</div>`;
@@ -548,11 +592,18 @@ function openItem(it){
   $('modal').classList.add('open');
 }
 function closeModal(){ $('modal').classList.remove('open'); $('modal-ct').innerHTML=''; }
-const galCache={};
-async function loadGallery(kind){
-  const j=await (await fetch('/api/studio/outputs?kind='+kind)).json(); galCache[kind]=j.items;
-  const el=$('gal-'+kind); if(!j.items.length){ el.innerHTML='<div class="desc">nothing generated yet</div>'; return; }
-  el.innerHTML=j.items.map((it,i)=>renderItem(it,i,kind)).join('');
+const galCache={}, galSig={};
+async function loadGallery(kind, force){
+  const j=await (await fetch('/api/studio/outputs?kind='+kind)).json();
+  const items=j.items||[], el=$('gal-'+kind); if(!el) return;
+  if(!items.length){ galCache[kind]=[]; galSig[kind]=''; el.innerHTML='<div class="desc">nothing generated yet</div>'; return; }
+  // Only touch the DOM when the list actually changed. The 8-second timer used to rebuild
+  // every tile — re-creating 48 video elements on a timer is what crashed the tab.
+  const sig=items.map(it=>it.path+'|'+it.mtime+'|'+it.bytes).join(';');
+  galCache[kind]=items;
+  if(!force && galSig[kind]===sig) return;
+  galSig[kind]=sig;
+  el.innerHTML=items.map((it,i)=>renderItem(it,i,kind)).join('');
 }
 function renderItem(it,i,kind,cache){
     cache=cache||`galCache['${kind}']`;
@@ -565,7 +616,7 @@ function renderItem(it,i,kind,cache){
         ${kind==='image'?`<button onclick="$('im-src').value='${it.path}';flash('source set')">use</button>`:''}
         ${kind==='voice'?`<button onclick="$('vo-ref').value='${it.path}';flash('reference set')">as ref</button><button onclick="$('vo-file').value='${it.path}'">transcribe</button>`:''}
         ${kind==='sound'?`<button onclick="$('st-file').value='${it.path}';flash('stems source set')">stems</button>`:''}
-        ${kind==='video'||kind==='image'?`<button onclick="$('vd-img').value='${it.path}';flash('start image set')">→ video</button>`:''}
+        ${kind==='video'||kind==='image'?`<button onclick="$('vd-img').value='${it.path}';vdApplyInput();flash('source set — format matched')">→ video</button>`:''}
         ${is3d?`<button class="primary" onclick="useAsset('${it.path}')">set in room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}','_blank')">room</button><button onclick="window.open('/vr/index.html?src=${encodeURIComponent(it.url)}&rig=1','_blank')">rig</button>`:''}
         ${['png','jpg','jpeg','webp'].includes(it.ext)?`<button onclick="$('vi-image').value='${it.path}';flash('vision input set')">ask</button>`:''}
         ${kind==='text'?`<button onclick="$('wr-file').value='${it.path}';flash('draft set')">as draft</button>`:''}
@@ -684,10 +735,25 @@ function bar(pct,tone){const x=Math.max(0,Math.min(100,pct));const t=tone||(x>88
 async function refreshResources(){
   const r=await (await fetch('/api/resources')).json(); const c=r.cpu||{},m=r.mem||{},g=r.gpu||{},d=r.disk||{};
   const memPct=m.total?m.used/m.total*100:0, swapPct=m.swap_total?m.swap_used/m.swap_total*100:0;
+  const gpus=(g.gpus||[]);
+  const gpuCards=gpus.length?gpus.map(x=>{
+    const pct=x.mem_total?x.mem_used/x.mem_total*100:0;
+    const short=x.name.replace('NVIDIA ','').replace(' Corporation','');
+    const bits=[];
+    if(x.util!==undefined&&x.util!==null) bits.push(`util ${x.util}%`);
+    if(x.temp!==null&&x.temp!==undefined) bits.push(`${x.temp}°C`);
+    if(x.power!==null&&x.power!==undefined) bits.push(`power ${Math.round(x.power)}${x.power_cap?`/${Math.round(x.power_cap)}`:''} W`);
+    if(x.fan!==null&&x.fan!==undefined) bits.push(`fan ${x.fan}%`);
+    const procs=(x.procs||[]).slice(0,3).map(p=>`${p.name} ${p.mem>GB?(p.mem/GB).toFixed(1)+' GB':(p.mem/MB).toFixed(0)+' MB'}`).join(' · ');
+    return `<div class="card stat"><div class="k">GPU ${x.index} · ${short}</div>
+      <div class="v">${(x.mem_used/GB).toFixed(1)}<small> / ${(x.mem_total/GB).toFixed(1)} GB</small></div>${bar(pct)}
+      <div class="meta">${bits.join(' · ')||'idle'}</div>
+      <div class="meta">${procs||'no processes'}</div></div>`;
+  }).join(''):`<div class="card stat"><div class="k">GPU</div><div class="v"><small>none detected</small></div><div class="meta">nvidia-smi returned nothing</div></div>`;
   $('stats').innerHTML=`<div class="card stat"><div class="k">CPU</div><div class="v">${c.busy??'–'}<small>%</small></div>${bar(c.busy||0)}<div class="meta">${r.cores} cores · load ${(c.load||[]).map(x=>x.toFixed(2)).join(' / ')}</div></div>
-  <div class="card stat"><div class="k">GPU</div><div class="v">${g.available&&g.util!==undefined?g.util+'<small>%</small>':'<small>n/a</small>'}</div>${bar(g.util||0)}<div class="meta">${g.available?`renderer ${g.renderer??'–'}% · tiler ${g.tiler??'–'}%`:'not exposed'}</div></div>
-  <div class="card stat"><div class="k">Memory</div><div class="v">${(m.used/GB).toFixed(1)}<small> / ${(m.total/GB).toFixed(0)} GB</small></div>${bar(memPct)}<div class="meta">wired ${(m.wired/GB).toFixed(1)} GB · compressed ${(m.compressed/GB).toFixed(1)} GB</div></div>
-  <div class="card stat"><div class="k">Swap</div><div class="v">${(m.swap_used/MB).toFixed(0)}<small> / ${(m.swap_total/MB).toFixed(0)} MB</small></div>${bar(swapPct,'a')}<div class="meta">${swapPct>50?'pressure — models evicting':'healthy'}</div></div>`;
+  ${gpuCards}
+  <div class="card stat"><div class="k">Memory</div><div class="v">${(m.used/GB).toFixed(1)}<small> / ${(m.total/GB).toFixed(0)} GB</small></div>${bar(memPct)}<div class="meta">${(m.free/GB).toFixed(1)} GB available${m.active?(` · active ${(m.active/GB).toFixed(1)} GB`):''}</div></div>
+  <div class="card stat"><div class="k">Swap</div><div class="v">${m.swap_total>GB?(m.swap_used/GB).toFixed(1):(m.swap_used/MB).toFixed(0)}<small> / ${m.swap_total>GB?(m.swap_total/GB).toFixed(1)+' GB':(m.swap_total/MB).toFixed(0)+' MB'}</small></div>${bar(swapPct,'a')}<div class="meta">${m.swap_used>0?(swapPct>50?'pressure — models evicting':'in use'):'unused — plenty of RAM'}</div></div>`;
   $('procs').querySelector('tbody').innerHTML=(r.procs||[]).map(p=>`<tr><td><code>${p.comm}</code></td><td class="r">${p.pid}</td><td class="r">${p.rss>GB?(p.rss/GB).toFixed(2)+' GB':(p.rss/MB).toFixed(0)+' MB'}</td><td class="r">${p.cpu.toFixed(1)}</td></tr>`).join('');
   $('disk').textContent=`${(d.used/GB).toFixed(0)} / ${(d.total/GB).toFixed(0)} GB used · ${(d.free/GB).toFixed(0)} GB free`; $('diskbar').style.width=(d.total?d.used/d.total*100:0)+'%';
 }
@@ -695,7 +761,8 @@ async function unloadAll(hard){ $('unload-result').textContent='working…'; con
 async function loadVoices(){ try{const j=await (await fetch('/api/studio/voices')).json(); if(j.voices&&j.voices.length) $('vo-voice').innerHTML=j.voices.map(x=>`<option${x==='af_heart'?' selected':''}>${x}</option>`).join('');}catch(e){} }
 
 refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
-setInterval(refreshProgress,1500); setInterval(refreshJobs,3000);
-setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); },2500);
-setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); },8000);
+setInterval(refreshProgress,1500); setInterval(refreshJobs,5000);
+setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); },5000);
+// one minute, not eight seconds — and loadGallery only touches the DOM when the list changed
+setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); },60000);
 </script></body></html>

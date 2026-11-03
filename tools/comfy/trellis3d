@@ -1,0 +1,326 @@
+#!/home/billie/media-stack/tools/.venv/bin/python
+"""trellis3d — image -> textured 3D asset (TRELLIS.2), driven over ComfyUI's HTTP API.
+
+  trellis3d ref.png [--prefix 3d/pepper_anime] [--texres 4096] [--out DIR] [--timeout S]
+                    [--save-prompt FILE] [--queue-only]
+
+Why this exists (and why it is not the UI route): the shipped ComfyUI template
+`3d_pixal3d_trellis2_image_to_model.json` cannot be queued over /prompt as-is —
+`Save3DAdvanced` / `Preview3DAdvanced` need a `viewport_state` socket that only the
+web frontend injects. But `SaveGLB` (a real OUTPUT_NODE taking just `mesh` +
+`filename_prefix`) can be appended to the same mesh output, so the graph runs
+headless and writes an actual GLB. No browser, no CDP, reproducible.
+
+Everything else about the template is left exactly as the authors shipped it:
+the graph is NOT rebuilt (that produces garbage textures — the RescaleCFG /
+CFGOverride guidance-emulation nodes are what make the paint stage work).
+
+Pitfalls encoded here:
+  * Pixal3D + MoGe branch nodes must go: their weights are not installed and ComfyUI
+    validates the WHOLE prompt, not just the branch the master switch selects.
+  * `RemeshMesh.sign_mode` is a COMFY_DYNAMICCOMBO_V3 that expands into hidden
+    sub-widgets, so positional widget mapping shifts. Set its inputs explicitly.
+  * `status_str=success` is not success. The only proof is the GLB on disk.
+"""
+import argparse, json, os, shutil, sys, time, urllib.request
+from pathlib import Path
+
+COMFY = os.environ.get("COMFY_HOST", "http://127.0.0.1:8189")
+ROOT = Path(os.environ.get("COMFY_ROOT", "/home/billie/comfy/ComfyUI"))
+TEMPLATE = Path(os.environ.get(
+    "TRELLIS_TEMPLATE",
+    "/home/billie/comfy/.venv-v100/lib/python3.12/site-packages/"
+    "comfyui_workflow_templates_json/templates/3d_pixal3d_trellis2_image_to_model.json"))
+
+UI_ONLY = {"control_after_generate", "image_upload", "videopreview"}
+# a widget-backed input is the only kind that can legitimately have no link.
+# COMFY_DYNAMICCOMBO_V3 is a widget too — it consumes one widgets_values slot (the
+# chosen option key) and then requires that option's sub-inputs as "name.sub".
+WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO", "COLOR", "COMFY_DYNAMICCOMBO_V3"}
+DROP_IDS = {"319", "55", "56", "242", "298", "322", "246", "323"}   # pixal3d + MoGe branch
+DROP_CLASSES = {"Preview3DAdvanced", "Save3DAdvanced", "MeshToFile3D"}
+
+
+def api(path, payload=None, timeout=120):
+    url = COMFY + path
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")
+        die(f"{path} -> HTTP {e.code}\n{body[:3000]}")
+
+
+def die(msg, code=2):
+    print(json.dumps({"ok": False, "error": msg}))
+    sys.exit(code)
+
+
+def widget_names(node_type, oi):
+    spec = oi.get(node_type, {}).get("input", {})
+    ordered = []
+    for group in ("required", "optional"):
+        for name, meta in spec.get(group, {}).items():
+            kind = meta[0]
+            if isinstance(kind, list) or kind in WIDGET_TYPES:
+                ordered.append(name)
+            if len(meta) > 1 and isinstance(meta[1], dict) and meta[1].get("control_after_generate"):
+                ordered.append("control_after_generate")
+    return ordered
+
+
+def convert(ui, oi):
+    nodes = {n["id"]: n for n in ui["nodes"]}
+    links = {}
+    for link in ui.get("links", []):
+        lid, onode, oslot, tnode, tslot, _t = link[:6]
+        links[lid] = (str(onode), oslot)
+    prompt = {}
+    for nid, node in nodes.items():
+        ntype = node.get("type")
+        if node.get("mode", 0) in (2, 4) or ntype in ("Note", "MarkdownNote"):
+            continue
+        inputs = {}
+        wv = node.get("widgets_values")
+        if isinstance(wv, dict):
+            inputs.update({k: v for k, v in wv.items() if k not in UI_ONLY})
+        elif isinstance(wv, list):
+            names = widget_names(ntype, oi)
+            vi = 0
+            for name in names:
+                if vi >= len(wv):
+                    break
+                if name in UI_ONLY:
+                    vi += 1
+                    continue
+                inputs[name] = wv[vi]
+                vi += 1
+        for sock in node.get("inputs", []):
+            lid = sock.get("link")
+            if lid is None or lid not in links:
+                continue
+            src_id, src_slot = links[lid]
+            inputs[sock["name"]] = [src_id, src_slot]
+        prompt[str(nid)] = {"class_type": ntype, "inputs": inputs,
+                            "_meta": {"title": node.get("title") or ntype}}
+    return prompt
+
+
+def prep(ui, ref_name, texres, oi):
+    for n in ui["nodes"]:
+        t = n.get("type")
+        if t == "PrimitiveBoolean":
+            n["widgets_values"] = [True]          # True = TRELLIS.2, False = Pixal3D
+        elif t == "LoadImage":
+            n["widgets_values"] = [ref_name, "image"]
+        elif t == "PrimitiveInt":
+            n["widgets_values"] = [texres, "fixed"]
+        elif t == "UNETLoader":
+            # template ships the int8_convrot repack; point at whatever TRELLIS.2
+            # diffusion model is actually installed (bf16 here) — ComfyUI refuses
+            # a name that is not in its scan.
+            have = oi["UNETLoader"]["input"]["required"]["unet_name"][0]
+            want = n["widgets_values"][0] if n.get("widgets_values") else ""
+            if want not in have:
+                pick = next((h for h in have if "trellis_2" in h), None)
+                if not pick:
+                    die(f"no TRELLIS.2 diffusion model installed (have: {have})")
+                n["widgets_values"] = [pick, n["widgets_values"][1] if len(n.get("widgets_values") or []) > 1 else "default"]
+        elif t == "VAELoader":
+            have = oi["VAELoader"]["input"]["required"]["vae_name"][0]
+            if n.get("widgets_values") and n["widgets_values"][0] not in have:
+                die(f"VAE {n['widgets_values'][0]} not installed")
+    return ui
+
+
+def validate(prompt, oi):
+    """Every widget-backed required input must be present, and dynamic-combo
+    sub-inputs must carry the chosen option's key ("sign_mode.fill")."""
+    problems = {}
+    for nid, n in prompt.items():
+        spec = oi.get(n["class_type"], {}).get("input", {}).get("required", {})
+        for name, meta in spec.items():
+            kind = meta[0]
+            if not (isinstance(kind, list) or kind in WIDGET_TYPES):
+                continue
+            if name not in n["inputs"]:
+                problems.setdefault(f"{nid}:{n['class_type']}", []).append(name)
+                continue
+            if kind == "COMFY_DYNAMICCOMBO_V3":
+                key = n["inputs"][name]
+                opts = {o["key"]: o for o in (meta[1].get("options") or [])}
+                for sub in (opts.get(key, {}).get("inputs", {}).get("required") or {}):
+                    if f"{name}.{sub}" not in n["inputs"]:
+                        problems.setdefault(f"{nid}:{n['class_type']}", []).append(f"{name}.{sub}")
+    return problems
+
+
+def final_mesh(prompt):
+    """The mesh worth saving is the TEXTURED one, not the raw voxel decode.
+
+    The template feeds its viewer/saver nodes from three different places: the raw
+    VoxelToMesh decode, the smoothed shape stage, and the painted result. Node id
+    order says nothing, so follow the chain backwards from ApplyTextureToMesh.
+    """
+    for nid, n in prompt.items():
+        if n["class_type"] == "MeshSmoothNormals":
+            src = n["inputs"].get("mesh")
+            if isinstance(src, list) and prompt.get(str(src[0]), {}).get("class_type") == "ApplyTextureToMesh":
+                return [nid, 0]
+    for nid, n in prompt.items():
+        if n["class_type"] == "ApplyTextureToMesh":
+            return [nid, 0]
+    for nid, n in prompt.items():
+        if n["class_type"] == "VoxelToMesh":
+            print("[trellis3d] WARNING: no textured mesh found — saving raw voxel mesh")
+            return [nid, 0]
+    die("no mesh output in graph")
+
+
+def repair(prompt, save_prefix):
+    for nid in list(prompt):
+        if nid in DROP_IDS or prompt[nid]["class_type"] in DROP_CLASSES:
+            del prompt[nid]
+    # RemeshMesh: dynamic combo — set base inputs explicitly instead of positionally
+    for node in prompt.values():
+        if node["class_type"] == "RemeshMesh":
+            node["inputs"] = {k: v for k, v in node["inputs"].items() if isinstance(v, list)}
+            # sign_mode is a COMFY_DYNAMICCOMBO_V3: the sub-inputs of the chosen option
+            # are addressed as "sign_mode.fill" / "sign_mode.qef" and are REQUIRED.
+            # Omit them and ComfyUI quietly validates the node out of the run.
+            node["inputs"].update({"resolution": 768, "sign_mode": "solid",
+                                   "sign_mode.fill": 20.0, "sign_mode.qef": False,
+                                   "band": 1.0, "project_back": 0.0, "fix_poles": False,
+                                   "smooth_iters": 20, "drop_small_components": 0.01,
+                                   "precluster_max_verts": 20000000})
+    # ImageCropToMask: the node's own tooltip says pad_factor 1.0 is what TRELLIS.2
+    # wants; the shipped template carries 1.1 (the Pixal3D default). Extra pad is
+    # margin, and margin becomes geometry — it lands on the model's proportions.
+    for node in prompt.values():
+        if node["class_type"] == "ImageCropToMask":
+            node["inputs"].update({"width": 1024, "height": 1024, "pad_factor": 1.0,
+                                   "grow_mask": 0, "background": "#000000"})
+    # UnwrapMesh segmenter must be pec or adaptive; positional mapping can corrupt it
+    for node in prompt.values():
+        if node["class_type"] == "UnwrapMesh":
+            seg = node["inputs"].get("segmenter")
+            if seg not in ("pec", "adaptive"):
+                node["inputs"]["segmenter"] = "pec"
+            node["inputs"]["resolution"] = 2048
+            node["inputs"]["padding"] = 1
+            node["inputs"]["weld_distance"] = 0.0002
+    mesh_src = final_mesh(prompt)
+    prompt["9000"] = {"class_type": "SaveGLB",
+                      "inputs": {"mesh": mesh_src, "filename_prefix": save_prefix},
+                      "_meta": {"title": "SaveGLB"}}
+    # nothing may point at a dropped node
+    for node in prompt.values():
+        for key, val in list(node["inputs"].items()):
+            if isinstance(val, list) and len(val) == 2 and str(val[0]) not in prompt:
+                del node["inputs"][key]
+    return prompt
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="trellis3d", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("image", help="reference image (cut-out, cropped tight, plain background)")
+    ap.add_argument("--prefix", default="3d/trellis")
+    ap.add_argument("--texres", type=int, default=4096)
+    ap.add_argument("--out", default=os.path.expanduser("~/media-stack/output/3d"))
+    ap.add_argument("--timeout", type=int, default=5400)
+    ap.add_argument("--wait", type=int, default=900, help="seconds to wait for an idle GPU queue before giving up")
+    ap.add_argument("--save-prompt", default=None, help="write the API prompt JSON here and exit")
+    ap.add_argument("--validate", action="store_true", help="build + check the graph locally, do not queue")
+    a = ap.parse_args()
+
+    if not TEMPLATE.exists():
+        die(f"template not found: {TEMPLATE}")
+    ref = Path(a.image).resolve()
+    if not ref.exists():
+        die(f"no such image: {ref}")
+    ref_name = f"trellis_{ref.stem}{ref.suffix}"
+    (ROOT / "input").mkdir(parents=True, exist_ok=True)
+    shutil.copy(ref, ROOT / "input" / ref_name)
+
+    oi = api("/object_info")
+    ui = json.loads(TEMPLATE.read_text())
+    ui = prep(ui, ref_name, a.texres, oi)
+    prompt = repair(convert(ui, oi), a.prefix)
+
+    if a.save_prompt or a.validate:
+        problems = validate(prompt, oi)
+        if a.save_prompt:
+            Path(a.save_prompt).write_text(json.dumps(prompt, indent=1))
+        print(json.dumps({"ok": not problems, "prompt_nodes": len(prompt), "problems": problems,
+                          "wrote": a.save_prompt}))
+        if problems:
+            sys.exit(4)
+        return
+
+    # queue must be idle: a submit during a queue clear can vanish silently.
+    # Someone else may be using the GPU (other Pepper sessions do), so wait for it
+    # rather than dying — but never preempt.
+    waited = 0
+    while True:
+        q = api("/queue")
+        busy = q.get("queue_running") or q.get("queue_pending")
+        if not busy:
+            break
+        if waited >= a.wait:
+            print(json.dumps({"ok": False, "error": "queue busy", "waited": waited,
+                              "running": len(q.get("queue_running", [])),
+                              "pending": len(q.get("queue_pending", []))}))
+            sys.exit(3)
+        time.sleep(5)
+        waited += 5
+        if waited % 60 == 0:
+            print(f"  waiting for idle GPU queue ({waited}s)", flush=True)
+
+    t0 = time.time()
+    r = api("/prompt", {"prompt": prompt, "client_id": "trellis3d"})
+    pid = r.get("prompt_id")
+    errs = r.get("node_errors") or {}
+    if errs:
+        # ComfyUI returns 200 + node_errors when only PART of the graph fails
+        # validation: everything else runs, the failed branch is dropped, and the
+        # run ends "success" having produced nothing. Never ignore this field.
+        die("graph validation failed for " + ", ".join(f"{k}:{v['class_type']}" for k, v in errs.items())
+            + " -> " + json.dumps({k: [e["message"] + " " + str(e.get("details")) for e in v["errors"]]
+                                   for k, v in errs.items()})[:1200])
+    if not pid:
+        die("submit rejected: " + json.dumps(r)[:3000])
+    print(f"[trellis3d] queued {pid} ({len(prompt)} nodes) ref={ref_name} texres={a.texres} prefix={a.prefix}", flush=True)
+
+    last = ""
+    while time.time() - t0 < a.timeout:
+        time.sleep(10)
+        h = api(f"/history/{pid}")
+        if pid in h:
+            st = h[pid].get("status", {})
+            if st.get("completed") or st.get("status_str") in ("success", "error"):
+                break
+        q = api("/queue")
+        run = [x for x in q.get("queue_running", []) if pid in json.dumps(x)]
+        if run and run[0][-2:] and str(run[0][2]) != last:   # not reliable, just informative
+            last = str(run[0][2])
+        print(f"  {int(time.time()-t0)}s …", flush=True)
+
+    # the GLB is the proof, not the status
+    out3d = ROOT / "output" / "3d"
+    hits = [p for p in out3d.glob("*.glb") if p.stat().st_mtime >= t0 - 5]
+    if not hits:
+        die("run ended but NO GLB was written — status_str success is not success")
+    glb = max(hits, key=lambda p: p.stat().st_mtime)
+    os.makedirs(a.out, exist_ok=True)
+    dst = Path(a.out) / f"{Path(a.prefix).name}_{glb.name}"
+    shutil.copy2(glb, dst)
+    print(json.dumps({"ok": True, "files": [str(dst)], "out": str(dst), "glb": str(dst),
+                      "bytes": dst.stat().st_size,
+                      "seconds": round(time.time() - t0, 1), "source": str(glb)}, indent=1))
+
+
+if __name__ == "__main__":
+    main()

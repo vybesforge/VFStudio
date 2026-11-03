@@ -365,26 +365,64 @@ _RES_TTL = 1.2
 def _gpu_stats() -> dict:
     """GPU utilisation. Linux: nvidia-smi. macOS: ioreg's IOAccelerator (no root needed)."""
     if sys.platform.startswith("linux"):
-        raw = _run(["nvidia-smi",
-                    "--query-gpu=index,name,utilization.gpu,memory.used,memory.total",
-                    "--format=csv,noheader,nounits"])
+        q = ("index,name,uuid,pci.bus_id,utilization.gpu,memory.used,memory.total,"
+             "temperature.gpu,power.draw,power.limit,fan.speed")
+        raw = _run(["nvidia-smi", "--query-gpu=" + q, "--format=csv,noheader,nounits"])
+
+        def num(s):
+            try:
+                return float(s)
+            except (TypeError, ValueError):
+                return None  # "[N/A]" on passthrough cards, failure states, etc.
+
         gpus = []
         for line in raw.strip().splitlines():
             parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 5:
+            if len(parts) < 7:
                 continue
             try:
-                gpus.append({"index": int(float(parts[0])), "name": parts[1],
-                             "util": int(float(parts[2])),
-                             "mem_used": int(float(parts[3])) * 1024 * 1024,
-                             "mem_total": int(float(parts[4])) * 1024 * 1024})
+                gpus.append({
+                    "index": int(num(parts[0]) or 0),
+                    "name": parts[1],
+                    "uuid": parts[2],
+                    "bus": parts[3],
+                    "util": int(num(parts[4]) or 0),
+                    "mem_used": int(num(parts[5]) or 0) * 1024 * 1024,
+                    "mem_total": int(num(parts[6]) or 0) * 1024 * 1024,
+                    "temp": num(parts[7]) if len(parts) > 7 else None,
+                    "power": num(parts[8]) if len(parts) > 8 else None,
+                    "power_cap": num(parts[9]) if len(parts) > 9 else None,
+                    "fan": num(parts[10]) if len(parts) > 10 else None,
+                    "procs": [],
+                })
             except ValueError:
                 continue
         if not gpus:
-            return {"available": False}
+            return {"available": False, "count": 0}
+        # what is actually running on each card (by UUID — indices disagree with CUDA)
+        apps = _run(["nvidia-smi",
+                     "--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
+                     "--format=csv,noheader,nounits"])
+        by_uuid = {g["uuid"]: g for g in gpus}
+        for line in apps.strip().splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 4:
+                continue
+            g = by_uuid.get(parts[0])
+            if not g:
+                continue
+            name = parts[2].split("/")[-1][:40]
+            try:
+                g["procs"].append({"pid": int(num(parts[1]) or 0), "name": name,
+                                   "mem": int(num(parts[3]) or 0) * 1024 * 1024})
+            except ValueError:
+                pass
+        for g in gpus:
+            g["procs"].sort(key=lambda p: -p["mem"])
         g = gpus[0]
-        return {"available": True, "util": g["util"], "mem_used": g["mem_used"],
-                "mem_alloc": g["mem_total"], "name": g["name"], "gpus": gpus}
+        return {"available": True, "count": len(gpus), "util": g["util"],
+                "mem_used": g["mem_used"], "mem_alloc": g["mem_total"],
+                "name": g["name"], "gpus": gpus}
     raw = _run(["ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"])
     m = re.search(r'"PerformanceStatistics"\s*=\s*(\{.*?\})\s*\n', raw)
     if not m:
