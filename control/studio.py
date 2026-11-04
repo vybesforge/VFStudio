@@ -70,7 +70,6 @@ TOOLS = [
     ("optimize_glb.sh", STACK / "tools" / "vr" / "optimize_glb.sh", "gltf-transform: decimate + resize textures for VR"),
     ("blender", STACK / "bin" / "blender", "Blender 5.2 headless wrapper"),
     ("fetch-models", STACK / "bin" / "fetch-models", "download missing manifest models"),
-    ("forge-recommend", STACK / "bin" / "forge-recommend", "probe this machine and print the model set to fetch"),
     ("Godot", Path("/Applications/Godot.app"), "Godot 4.7 OpenXR room (~/media-stack/vr-godot)"),
     ("OrcaSlicer", Path("/Applications/OrcaSlicer.app"), "slicer GUI + CLI"),
     ("Krita", Path("/Applications/Krita.app"), "raster painting"),
@@ -86,15 +85,13 @@ GROUPS = [
                "flux2-klein-4b", "flux2-vae", "qwen-image-edit-2509", "qwen-image-edit-2509-gguf", "qwen-2.5-vl-7b", "qwen-image-vae",
                "animagine-xl-4.0",
                "4x-ultrasharp", "realesrgan-x4plus", "seedvr2-3b-int8", "seedvr2-vae"]),
-    ("Video", ["wan2.2-ti2v-5b", "wan2.2-vae", "umt5-xxl-fp8",
-               "hyvideo15-720p-i2v", "hyvideo15-480p-t2v", "hyvideo15-vae", "hyvideo15-byt5", "hyvideo15-sigclip"]),
+    ("Video", ["wan2.2-ti2v-5b", "wan2.2-vae", "umt5-xxl-fp8"]),
     ("3D", ["trellis2-int8", "trellis2-shape-vae", "trellis2-texture-vae", "dinov3-L", "birefnet"]),
-    ("Sound", ["stable-audio-open-1.0", "t5-base", "sa3-small-sfx", "stable-audio-3-medium", "t5gemma-b-b-ul2", "ace-step-1.5-turbo-aio"]),
+    ("Sound", ["stable-audio-open-1.0", "t5-base", "stable-audio-3-medium", "t5gemma-b-b-ul2", "ace-step-1.5-turbo-aio"]),
 ]
 
 AUDIO_MODELS = [
     ("mlx-community/Kokoro-82M-bf16", "TTS (50+ voices)"),
-    ("mlx-community/parakeet-tdt-0.6b-v3", "speech-to-text (default)"),
     ("mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16", "voice cloning"),
     ("mlx-community/chatterbox-turbo-fp16", "voice cloning (fallback)"),
     ("mlx-community/whisper-large-v3-turbo-asr-fp16", "speech-to-text"),
@@ -109,90 +106,10 @@ def _hf_cached(repo: str) -> bool:
     return d.exists() and any(d.glob("snapshots/*/*"))
 
 
-_FORGE = None
-
-
-def _forge():
-    """The hardware probe lives next to this file so the panel and the CLI share it."""
-    global _FORGE
-    if _FORGE is None:
-        import importlib.util
-        path = Path(__file__).resolve().parents[1] / "tools" / "forge" / "recommend.py"
-        spec = importlib.util.spec_from_file_location("forge_recommend", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        _FORGE = mod
-    return _FORGE
-
-
-def _recommendation():
-    try:
-        mod = _forge()
-        stack = Path(__file__).resolve().parents[1]
-        manifest = mod.load_manifest(stack / "models" / "manifest.json")
-        machine = mod.probe(stack)
-        if os.environ.get("VF_UNCENSORED") == "1":
-            machine["uncensored"] = True
-        result = mod.recommend(manifest, machine)
-        engines = result.get("engines")
-        if engines:
-            path = stack / "run" / "forge-engines.json"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps({"engines": engines, "backend": engines.get("backend")}, indent=2) + "\n")
-        return result
-    except Exception as exc:  # the inventory must still render if the probe fails
-        return {"error": str(exc), "models": [], "hf": {}, "summary": {}, "notes": []}
-
-
-@router.get("/recommend")
-def studio_recommend():
-    return _recommendation()
-
-
-@router.post("/fetch")
-def fetch_profile(body: dict | None = Body(default=None)):
-    """Start fetch-models for a profile. Same rules as the CLI, including the license preflight."""
-    profile = (body or {}).get("profile") or "auto"
-    if profile not in ("auto", "essentials", "full", "quality"):
-        raise HTTPException(400, "profile must be auto, essentials, quality, or full")
-    mod = _forge()
-    stack = Path(__file__).resolve().parents[1]
-    manifest = mod.load_manifest(stack / "models" / "manifest.json")
-    machine = mod.probe(stack)
-    if os.environ.get("VF_UNCENSORED") == "1":
-        machine["uncensored"] = True
-    result = mod.recommend(manifest, machine)
-    tier = {"auto": "recommended", "quality": "recommended", "essentials": "essentials", "full": "all"}[profile]
-    report = mod.preflight(manifest, mod.ids_for(result, tier))
-    if not report["ok"]:
-        raise HTTPException(
-            409,
-            "A model in this set needs a Hugging Face login. Run huggingface-cli login or export HF_TOKEN, then try again. The token is not stored here.",
-        )
-    log = stack / "logs" / "fetch-models.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(log, "ab")
-    proc = subprocess.Popen(
-        [str(stack / "bin" / "fetch-models"), "--profile", profile],
-        cwd=str(stack), stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
-    )
-    return {"ok": True, "pid": proc.pid, "profile": profile, "message": f"fetching the {profile} set for this machine"}
-
-
 @router.get("/inventory")
 def inventory():
     man = json.load(open(MANIFEST))["models"] if MANIFEST.exists() else []
     by_id = {m["id"]: m for m in man}
-    advice = _recommendation()
-    fit_by_id = {m["id"]: m for m in advice.get("models") or []}
-    hf_fit = {}
-    for bucket, rows in (advice.get("hf") or {}).items():
-        for row in rows:
-            if row.get("repo"):
-                hf_fit[row["repo"]] = {
-                    "bucket": row.get("bucket") or bucket, "reason": row.get("reason") or "",
-                    "uncensored": bool(row.get("uncensored")), "gate": row.get("gate") or "open",
-                }
     groups = []
     for label, ids in GROUPS:
         rows = []
@@ -202,38 +119,22 @@ def inventory():
                 continue
             p = MODELS / m["path"]
             part = Path(str(p) + ".part")
-            fit = fit_by_id.get(i) or {}
             rows.append({"id": i, "role": m["role"], "gb": m["gb"], "path": m["path"],
                          "present": p.exists(), "downloading": part.exists(),
-                         "part_gb": round(part.stat().st_size / 1e9, 2) if part.exists() else 0,
-                         "bucket": fit.get("bucket"), "reason": fit.get("reason") or "",
-                         "gate": fit.get("gate") or "open", "license": fit.get("license") or ""})
+                         "part_gb": round(part.stat().st_size / 1e9, 2) if part.exists() else 0})
         groups.append({"label": label, "models": rows})
     known = {i for _, ids in GROUPS for i in ids}
-    extra = []
-    for m in man:
-        if m["id"] in known:
-            continue
-        fit = fit_by_id.get(m["id"]) or {}
-        extra.append({"id": m["id"], "role": m["role"], "gb": m["gb"], "path": m["path"],
-                      "present": (MODELS / m["path"]).exists(), "downloading": False, "part_gb": 0,
-                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or "",
-                      "gate": fit.get("gate") or "open", "license": fit.get("license") or ""})
+    extra = [{"id": m["id"], "role": m["role"], "gb": m["gb"], "path": m["path"],
+              "present": (MODELS / m["path"]).exists(), "downloading": False, "part_gb": 0}
+             for m in man if m["id"] not in known]
     if extra:
         groups.append({"label": "Other", "models": extra})
-    audio = []
-    for r, n in AUDIO_MODELS:
-        fit = hf_fit.get(r) or {}
-        audio.append({"id": r, "role": n, "present": _hf_cached(r),
-                      "bucket": fit.get("bucket"), "reason": fit.get("reason") or "",
-                      "uncensored": bool(fit.get("uncensored")), "gate": fit.get("gate") or "open"})
+    audio = [{"id": r, "role": n, "present": _hf_cached(r)} for r, n in AUDIO_MODELS]
     tools = [{"name": n, "path": str(p), "present": p.exists(), "desc": d} for n, p, d in TOOLS]
     present_gb = sum(m["gb"] for g in groups for m in g["models"] if m["present"])
     total_gb = sum(m["gb"] for g in groups for m in g["models"])
     return {"groups": groups, "audio": audio, "tools": tools,
-            "present_gb": round(present_gb, 1), "total_gb": round(total_gb, 1),
-            "recommend": advice.get("summary") or {},
-            "recommend_error": advice.get("error")}
+            "present_gb": round(present_gb, 1), "total_gb": round(total_gb, 1)}
 
 
 # ───────────────────────── outputs ─────────────────────────
@@ -274,18 +175,7 @@ def _game_projects():
     for d in sorted(GAME_DIR.iterdir()):
         if not d.is_dir() or d.name in GAME_SKIP or d.name == "tools":
             continue
-        if (d / "project.godot").exists():
-            kind = "godot"
-        elif (d / "package.json").exists():
-            try:
-                pkg = (d / "package.json").read_text(errors="replace")
-            except OSError:
-                pkg = ""
-            kind = "three" if '"three"' in pkg else "web"
-        elif (d / "index.html").exists():
-            kind = "web"
-        else:
-            kind = None
+        kind = "godot" if (d / "project.godot").exists() else "web" if (d / "package.json").exists() or (d / "index.html").exists() else None
         if not kind:
             continue
         counts = {}
@@ -359,18 +249,106 @@ _progress = {"connected": False, "prompt_id": None, "node": None, "value": 0, "m
              "status": "idle", "started": None, "updated": None, "queue_remaining": 0, "last_node_type": None}
 _plock = threading.Lock()
 
+# Per-instance, per-prompt progress, keyed by (backend_port, prompt_id).
+# The single-dict tracker above could not survive the second V100: two ComfyUI
+# instances overwrote each other's value/max, which is why the old header tile
+# showed "step 8/20" with prompt_id=null and no idea whose job it was.
+_PROG: dict = {}
+_ws_up: dict = {}
+COMFY_BACKEND_PORTS = (8189, 8190)
+_PROG_TTL = 900.0
 
-def _ws_loop():
+
+def _apply_progress(port: int, t: str, d: dict, now: float):
+    """Fold one websocket message into _PROG, and mirror :8189 into legacy _progress."""
+    pid = d.get("prompt_id")
+
+    if t == "execution_start" and pid:
+        _PROG[(port, pid)] = {"value": 0, "max": 0, "node": None,
+                              "status": "running", "started": now, "updated": now}
+    elif t == "executing":
+        if d.get("node") is None:
+            if pid and (port, pid) in _PROG:
+                e = _PROG[(port, pid)]
+                e.update(status="done", value=e.get("max") or 1, max=e.get("max") or 1, updated=now)
+        elif pid and (port, pid) in _PROG:
+            _PROG[(port, pid)]["node"] = d.get("node")
+    elif t in ("progress", "progress_state") and pid:
+        e = _PROG.setdefault((port, pid), {"value": 0, "max": 0, "node": None,
+                                           "status": "running", "started": now, "updated": now})
+        cur = e.get("node")
+        if t == "progress":
+            mx = d.get("max") or 0
+            # Ignore degenerate counters (max=1 utility nodes); a real sampler has steps.
+            if mx >= 2:
+                e.update(value=d.get("value") or 0, max=mx, node=d.get("node"),
+                         status="running", updated=now)
+        else:
+            # progress_state snapshots every node. Stay on the node we already track
+            # while it is still running, otherwise the headline number jumps between
+            # nodes and the bar jitters (saw 84% → 15% → 65% inside one job).
+            nodes = d.get("nodes") or {}
+            keep = nodes.get(str(cur)) if cur is not None else None
+            if isinstance(keep, dict) and (keep.get("max") or 0) >= 2 \
+               and keep.get("state") in (None, "running"):
+                e.update(value=keep.get("value") or 0, max=keep.get("max") or 0,
+                         status="running", updated=now)
+            else:
+                best = None
+                for nid, nd in nodes.items():
+                    if not isinstance(nd, dict):
+                        continue
+                    mx = nd.get("max") or 0
+                    if mx < 2 or nd.get("state") not in (None, "running"):
+                        continue
+                    if best is None or mx > (best[1].get("max") or 0):
+                        best = (nid, nd)
+                if best:
+                    nid, nd = best
+                    e.update(value=nd.get("value") or 0, max=nd.get("max") or 0,
+                             node=nid, status="running", updated=now)
+    elif t in ("execution_error", "execution_interrupted") and pid:
+        _PROG.setdefault((port, pid), {}).update(
+            status="error" if t == "execution_error" else "interrupted", updated=now)
+
+    # Legacy single tracker, fed from :8189 so /progress keeps working for old callers.
+    if port == 8189:
+        _progress["updated"] = now
+        if t == "status":
+            _progress["queue_remaining"] = (d.get("status") or {}).get("exec_info", {}).get("queue_remaining", 0)
+            if _progress["queue_remaining"] == 0 and _progress["status"] != "running":
+                _progress["status"] = "idle"
+        elif t == "execution_start":
+            _progress.update(prompt_id=pid, status="running", started=now, value=0, max=0, node=None)
+        elif t == "executing":
+            if d.get("node") is None:
+                _progress.update(status="done", node=None,
+                                 value=_progress["max"] or 1, max=_progress["max"] or 1)
+            else:
+                _progress["node"] = d.get("node")
+        elif t == "progress":
+            _progress.update(value=d.get("value", 0), max=d.get("max", 0),
+                             node=d.get("node"), status="running")
+        elif t == "execution_error":
+            _progress.update(status="error", node=None)
+        elif t == "execution_interrupted":
+            _progress.update(status="interrupted", node=None)
+
+
+def _ws_loop(port: int):
     try:
         import websocket  # websocket-client
     except Exception:
         return
+    url = f"ws://127.0.0.1:{port}/ws?clientId=gen-cli"
     while True:
         try:
-            ws = websocket.create_connection("ws://127.0.0.1:8188/ws?clientId=gen-cli", timeout=5)
+            ws = websocket.create_connection(url, timeout=5)
             ws.settimeout(30)
             with _plock:
-                _progress["connected"] = True
+                _ws_up[port] = True
+                if port == 8189:
+                    _progress["connected"] = True
             while True:
                 try:
                     raw = ws.recv()
@@ -379,34 +357,36 @@ def _ws_loop():
                 if not isinstance(raw, str):
                     continue
                 msg = json.loads(raw)
-                t, d = msg.get("type"), msg.get("data", {})
                 now = time.time()
                 with _plock:
-                    _progress["updated"] = now
-                    if t == "status":
-                        _progress["queue_remaining"] = d.get("status", {}).get("exec_info", {}).get("queue_remaining", 0)
-                        if _progress["queue_remaining"] == 0 and _progress["status"] != "running":
-                            _progress["status"] = "idle"
-                    elif t == "execution_start":
-                        _progress.update(prompt_id=d.get("prompt_id"), status="running", started=now, value=0, max=0, node=None)
-                    elif t == "executing":
-                        if d.get("node") is None:
-                            _progress.update(status="done", node=None, value=_progress["max"] or 1, max=_progress["max"] or 1)
-                        else:
-                            _progress["node"] = d.get("node")
-                    elif t == "progress":
-                        _progress.update(value=d.get("value", 0), max=d.get("max", 0), node=d.get("node"), status="running")
-                    elif t in ("execution_error",):
-                        _progress.update(status="error", node=None)
-                    elif t == "execution_interrupted":
-                        _progress.update(status="interrupted", node=None)
+                    _apply_progress(port, msg.get("type"), msg.get("data") or {}, now)
+                    for k, v in list(_PROG.items()):
+                        if now - (v.get("updated") or 0) > _PROG_TTL:
+                            _PROG.pop(k, None)
         except Exception:
             with _plock:
-                _progress["connected"] = False
+                _ws_up[port] = False
+                if port == 8189:
+                    _progress["connected"] = False
             time.sleep(3)
 
 
-threading.Thread(target=_ws_loop, daemon=True, name="comfy-ws").start()
+def progress_for(port: int, prompt_id):
+    """Live {value,max,node,status} for one prompt on one instance, or None."""
+    if not prompt_id:
+        return None
+    with _plock:
+        entry = _PROG.get((port, prompt_id))
+        return dict(entry) if entry else None
+
+
+def ws_connected(port: int) -> bool:
+    with _plock:
+        return bool(_ws_up.get(port))
+
+
+for _p in COMFY_BACKEND_PORTS:
+    threading.Thread(target=_ws_loop, args=(_p,), daemon=True, name=f"comfy-ws-{_p}").start()
 
 
 @router.get("/progress")
