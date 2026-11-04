@@ -1165,10 +1165,18 @@ STUDIO_HTML = Path(__file__).parent / "studio.html"
 _GPU_MAP_FILE = Path("/etc/default/vf-gpus")
 _SVC_PORTS = {3200: "voice-tts", 3201: "voice-stt", 8880: "kokoro",
               8000: "llama-server", 8189: "ComfyUI :8189", 8190: "ComfyUI :8190",
-              5001: "koboldcpp", 3389: "remote-desktop"}
-# ComfyUI backend ports we know how to read a queue from. 8188 is the shim that
-# forwards to 8189; the backends are queried directly here.
-_COMFY_PORTS = (8189, 8190)
+              8188: "ComfyUI :8188", 5001: "koboldcpp", 3389: "remote-desktop"}
+
+
+def _comfy_ports():
+    """ComfyUI backend ports to read queues from.
+
+    Resolved at call time and overridable with VF_COMFY_PORTS, because the port
+    layout is platform-specific: macOS runs ComfyUI directly on 8188, while the
+    Linux box runs a shim on 8188 forwarding to a backend on 8189 (plus a second
+    instance on 8190 for the second V100).
+    """
+    return tuple(getattr(_studio, "COMFY_BACKEND_PORTS", (8189,)))
 
 
 def _comfy_queue(port: int):
@@ -1212,16 +1220,43 @@ def _gpu_roles() -> dict:
 
 
 def _listener_ports() -> dict:
-    """pid -> listening TCP port, for the local services (ss -tlnp)."""
-    out = {}
-    for line in _run(["ss", "-tlnp"]).splitlines():
-        mport, mpid = re.search(r":(\d+)\s", line), re.search(r"pid=(\d+)", line)
-        if mport and mpid:
-            out[int(mpid.group(1))] = int(mport.group(1))
+    """pid -> {listening TCP ports}, for naming what is on a card.
+
+    Cross-platform on purpose: psutil covers macOS and Windows as well as Linux,
+    with `ss` (Linux) and `lsof` (macOS) as fallbacks for venvs without psutil.
+    """
+    out: dict = {}
+    try:
+        import psutil
+        for c in psutil.net_connections(kind="tcp"):
+            if c.status == psutil.CONN_LISTEN and c.pid and c.laddr:
+                out.setdefault(int(c.pid), set()).add(int(c.laddr.port))
+        if out:
+            return out
+    except Exception:
+        pass  # macOS without root raises AccessDenied — fall through to lsof
+
+    if sys.platform.startswith("linux"):
+        for line in _run(["ss", "-tlnp"]).splitlines():
+            mport, mpid = re.search(r":(\d+)\s", line), re.search(r"pid=(\d+)", line)
+            if mport and mpid:
+                out.setdefault(int(mpid.group(1)), set()).add(int(mport.group(1)))
+    elif sys.platform == "darwin":
+        for line in _run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"]).splitlines()[1:]:
+            f = line.split()
+            if len(f) >= 9 and f[1].isdigit():
+                port = f[8].rsplit(":", 1)[-1]
+                if port.isdigit():
+                    out.setdefault(int(f[1]), set()).add(int(port))
     return out
 
 
 def _ppid(pid: int):
+    try:
+        import psutil
+        return psutil.Process(pid).ppid()
+    except Exception:
+        pass
     try:
         data = Path(f"/proc/{pid}/stat").read_text(errors="replace")
         return int(data[data.rindex(")") + 2:].split()[1])
@@ -1255,6 +1290,19 @@ def api_cards():
 
     roles = _gpu_roles()
     ports = _listener_ports()
+    comfy_ports = _comfy_ports()
+
+    # macOS: one GPU, and ioreg reports no per-process attribution, so _gpu_stats()
+    # returns top-level fields instead of a "gpus" list. Synthesise one card from
+    # them rather than rendering an empty strip.
+    gpus = g.get("gpus")
+    if not gpus:
+        gpus = [{
+            "uuid": "single", "name": g.get("name") or "GPU", "index": 0, "bus": "",
+            "util": g.get("util", 0), "mem_used": g.get("mem_used", 0),
+            "mem_total": g.get("mem_alloc") or g.get("mem_total") or 0,
+            "temp": None, "power": None, "power_cap": None, "procs": [],
+        }]
 
     job_pids = {}
     try:
@@ -1265,43 +1313,68 @@ def api_cards():
     except Exception:
         job_pids = {}
 
+    def name_for(pid: int):
+        open_ports = ports.get(pid)
+        if not open_ports:
+            return None
+        for port in sorted(open_ports):
+            if port in _SVC_PORTS:
+                return _SVC_PORTS[port]
+        return f"port {sorted(open_ports)[0]}"
+
     def label(pid: int):
         if pid in job_pids:
             return job_pids[pid]
-        if pid in ports:
-            return _SVC_PORTS.get(ports[pid]) or f"port {ports[pid]}"
+        named = name_for(pid)
+        if named:
+            return named
         for anc in _ancestry(pid):
             if anc in job_pids:
                 return job_pids[anc]
-            if anc in ports:
-                return _SVC_PORTS.get(ports[anc]) or f"port {ports[anc]}"
+            named = name_for(anc)
+            if named:
+                return named
         return None
 
-    # ComfyUI queues: one per instance. Query each backend directly and attach the
-    # queue to whichever card that instance is actually resident on, so re-pinning
-    # a ComfyUI to the other V100 moves its queue with it.
+    def queue_entry(port: int):
+        q = _comfy_queue(port)
+        if not q:
+            return None
+        ent = {"source": f"ComfyUI :{port}", "running": q["running"],
+               "pending": q["pending"], "items": q["items"],
+               "pct": None, "step": None, "steps": None}
+        # Live step progress comes from that instance's own websocket listener
+        # (studio.progress_for), matched by the running prompt_id.
+        rid = (q.get("run_ids") or [None])[0]
+        prog = _studio.progress_for(port, rid)
+        if prog and prog.get("max"):
+            ent["pct"] = round(100.0 * prog.get("value", 0) / prog["max"], 1)
+            ent["step"] = prog.get("value")
+            ent["steps"] = prog.get("max")
+        return ent
+
+    # ComfyUI queues: one per instance. Attach each queue to the card that instance
+    # is actually resident on, so re-pinning a ComfyUI moves its queue with it.
     comfy_by_uuid = {}
-    for c in g["gpus"]:
+    for c in gpus:
         for p in c["procs"]:
-            lp = ports.get(p["pid"])
-            if lp in _COMFY_PORTS:
-                q = _comfy_queue(lp)
-                if q:
-                    ent = {"source": f"ComfyUI :{lp}", "running": q["running"],
-                           "pending": q["pending"], "items": q["items"],
-                           "pct": None, "step": None, "steps": None}
-                    # Live step progress comes from that instance's own websocket
-                    # listener (studio.progress_for), matched by running prompt_id.
-                    rid = (q.get("run_ids") or [None])[0]
-                    prog = _studio.progress_for(lp, rid)
-                    if prog and prog.get("max"):
-                        ent["pct"] = round(100.0 * prog.get("value", 0) / prog["max"], 1)
-                        ent["step"] = prog.get("value")
-                        ent["steps"] = prog.get("max")
-                    comfy_by_uuid[c["uuid"]] = ent
+            for port in sorted(ports.get(p["pid"]) or ()):
+                if port in comfy_ports:
+                    ent = queue_entry(port)
+                    if ent:
+                        comfy_by_uuid[c["uuid"]] = ent
+
+    # Without per-process attribution (macOS) there is only one GPU, so any queue
+    # that answers belongs to it.
+    if len(gpus) == 1 and not comfy_by_uuid:
+        for port in comfy_ports:
+            ent = queue_entry(port)
+            if ent:
+                comfy_by_uuid[gpus[0]["uuid"]] = ent
+                break
 
     cards = []
-    for c in g["gpus"]:
+    for c in gpus:
         running = [{"pid": p["pid"], "mem": p["mem"], "name": p["name"],
                     "what": label(p["pid"]) or _clean_name(p["name"])} for p in c["procs"]]
         running.sort(key=lambda r: -r["mem"])

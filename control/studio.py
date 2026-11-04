@@ -25,6 +25,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -255,8 +256,25 @@ _plock = threading.Lock()
 # showed "step 8/20" with prompt_id=null and no idea whose job it was.
 _PROG: dict = {}
 _ws_up: dict = {}
-COMFY_BACKEND_PORTS = (8189, 8190)
 _PROG_TTL = 900.0
+
+
+def _default_comfy_ports():
+    """ComfyUI backend ports to listen on, per platform.
+
+    VF_COMFY_PORTS overrides (comma separated). macOS runs ComfyUI directly on
+    8188; the Linux box runs a shim on 8188 that forwards to a backend on 8189,
+    plus a second instance on 8190 for the second card.
+    """
+    env = os.environ.get("VF_COMFY_PORTS", "").strip()
+    if env:
+        ports = tuple(int(p) for p in env.split(",") if p.strip().isdigit())
+        if ports:
+            return ports
+    return (8188,) if sys.platform == "darwin" else (8189, 8190)
+
+
+COMFY_BACKEND_PORTS = _default_comfy_ports()
 
 
 def _apply_progress(port: int, t: str, d: dict, now: float):
