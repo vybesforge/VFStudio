@@ -54,71 +54,97 @@ def _base_env() -> dict:
     return env
 
 
-SERVICES = {
-    "comfy": {
+def _services() -> dict:
+    """Service definitions for the platform this panel is running on.
+
+    Diffusion is ComfyUI everywhere. The language, voice and vision engines are
+    *not* interchangeable — Apple Silicon runs MLX servers, Linux and Windows run
+    llama-server plus either speaches or the dedicated voice services — so the set
+    is built per platform instead of a Mac dict with Linux patched over the top.
+    Ports are env-overridable because deployments genuinely differ; see README,
+    "Model decisions by platform".
+    """
+    comfy_port = int(os.environ.get("COMFY_PORT", "8188"))
+    comfy = {
         "label": "ComfyUI",
-        "port": 8188,
+        "port": comfy_port,
         "cmd": [str(COMFY / ".venv" / "bin" / "python"), "main.py",
-                "--listen", "127.0.0.1", "--port", "8188"],
+                "--listen", "127.0.0.1", "--port", str(comfy_port)],
         "cwd": str(COMFY),
         "desc": "Image, video + 3D generation (diffusion)",
-    },
-    "audio": {
-        "label": "mlx-audio",
-        "port": 8000,
-        "cmd": [str(AUDIO_PY), "-m", "mlx_audio.server", "--host", "127.0.0.1", "--port", "8000"],
-        "cwd": str(STACK / "audio"),
-        "desc": "TTS, STT, music + SFX (MLX)",
-    },
-    "llm": {
-        "label": "writer LLM",
-        "port": 8081,
-        "cmd": [str(LLM_PY), "-m", "mlx_lm.server", "--host", "127.0.0.1", "--port", "8081", "--model", LLM_MODEL],
-        "cwd": str(STACK / "llm"),
-        "desc": f"OpenAI-compatible chat · {LLM_MODEL.split('/')[-1]} (uncensored, ~16 GB)",
-    },
-    "vision": {
-        "label": "vision VLM",
-        "port": 8082,
-        "cmd": [str(LLM_PY), "-m", "mlx_vlm.server", "--host", "127.0.0.1", "--port", "8082", "--model", VLM_MODEL],
-        "cwd": str(STACK / "llm"),
-        "desc": f"image understanding · {VLM_MODEL.split('/')[-1]} (~5 GB)",
-    },
-}
+    }
 
-if sys.platform.startswith("linux"):
-    # ---- NVIDIA/Linux overrides (billie): reuse the services that already run here ----
-    # ComfyUI runs as comfyui-v100.service on :8189; bin/comfy-shim fronts it on :8188.
-    # The MLX servers from the Mac build do not exist on this box, so audio/llm/vision are
-    # monitored through the ports billie's own services already answer on.
-    SERVICES["comfy"].update({
-        "external": "comfyui-v100.service (:8189, shimmed to :8188)",
-        "desc": "Image, video + 3D generation (ComfyUI on the V100, :8189 via shim)",
+    if sys.platform == "darwin":
+        llm_port = int(os.environ.get("LLM_PORT", "8081"))
+        vlm_port = int(os.environ.get("VLM_PORT", "8082"))
+        return {
+            "comfy": comfy,
+            "audio": {
+                "label": "mlx-audio",
+                "port": 8000,
+                "cmd": [str(AUDIO_PY), "-m", "mlx_audio.server",
+                        "--host", "127.0.0.1", "--port", "8000"],
+                "cwd": str(STACK / "audio"),
+                "desc": "TTS, STT, music + SFX (MLX)",
+            },
+            "llm": {
+                "label": "writer LLM",
+                "port": llm_port,
+                "cmd": [str(LLM_PY), "-m", "mlx_lm.server", "--host", "127.0.0.1",
+                        "--port", str(llm_port), "--model", LLM_MODEL],
+                "cwd": str(STACK / "llm"),
+                "desc": f"OpenAI-compatible chat · {LLM_MODEL.split('/')[-1]} (uncensored, ~16 GB)",
+            },
+            "vision": {
+                "label": "vision VLM",
+                "port": vlm_port,
+                "cmd": [str(LLM_PY), "-m", "mlx_vlm.server", "--host", "127.0.0.1",
+                        "--port", str(vlm_port), "--model", VLM_MODEL],
+                "cwd": str(STACK / "llm"),
+                "desc": f"image understanding · {VLM_MODEL.split('/')[-1]} (~5 GB)",
+            },
+        }
+
+    # Linux / Windows: no MLX servers exist here. These engines are started by the
+    # system, so the panel monitors them (cmd=None -> start/stop defer to systemctl).
+    on_linux = sys.platform.startswith("linux")
+    comfy.update({
+        "external": "comfyui-v100.service (:8189, shimmed to :8188)" if on_linux
+                    else "ComfyUI (:8188, external)",
+        "desc": "Image, video + 3D generation (ComfyUI on the GPU, :8189 via shim)"
+                if on_linux else "Image, video + 3D generation (ComfyUI)",
     })
-    SERVICES["audio"] = {
-        "label": "voice (chatterbox + whisper)",
-        "port": int(os.environ.get("TTS_PORT", "3200")),
-        "cmd": None,
-        "cwd": str(STACK),
-        "external": "voice-tts.service :3200 · voice-stt.service :3201",
-        "desc": "TTS / STT — billie's local voice services",
+    return {
+        "comfy": comfy,
+        "audio": {
+            "label": "voice (chatterbox + whisper)",
+            "port": int(os.environ.get("TTS_PORT", "3200")),
+            "cmd": None,
+            "cwd": str(STACK),
+            "external": "voice-tts.service :3200 · voice-stt.service :3201" if on_linux
+                        else "voice-tts :3200 · voice-stt :3201",
+            "desc": "TTS / STT — local voice services",
+        },
+        "llm": {
+            "label": "writer LLM",
+            "port": int(os.environ.get("LLM_PORT", "8000")),
+            "cmd": None,
+            "cwd": str(STACK),
+            "external": "llama-server :8000" if on_linux else "llama-server :8000 (external)",
+            "desc": "OpenAI-compatible chat · local llama-server (:8000)",
+        },
+        "vision": {
+            "label": "vision VLM",
+            "port": int(os.environ.get("VLM_PORT", "8200")),
+            "cmd": None,
+            "cwd": str(STACK),
+            "external": "vision-vl.service :8200" if on_linux else "llama-server + mmproj :8200",
+            "desc": "image understanding · Qwen3-VL-8B (:8200)",
+        },
     }
-    SERVICES["llm"] = {
-        "label": "writer LLM",
-        "port": int(os.environ.get("LLM_PORT", "8000")),
-        "cmd": None,
-        "cwd": str(STACK),
-        "external": "llama-server :8000 (pepper-brain local mode)",
-        "desc": "OpenAI-compatible chat · local llama-server (:8000)",
-    }
-    SERVICES["vision"] = {
-        "label": "vision VLM",
-        "port": int(os.environ.get("VLM_PORT", "8200")),
-        "cmd": None,
-        "cwd": str(STACK),
-        "external": "vision-vl.service :8200",
-        "desc": "image understanding · Qwen3-VL-8B (:8200)",
-    }
+
+
+SERVICES = _services()
 
 
 def lan_ip() -> str | None:
@@ -166,11 +192,11 @@ ENDPOINTS = [
     {
         "key": "clone", "label": "Voice clone (Qwen3-TTS)", "svc": "audio", "port": 8000,
         "env": "VF_CLONE", "path": "/v1/audio/speech",
-        "desc": "Same speech endpoint — add ref_audio (a wav on this Mac) and the ref_text it says.",
+        "desc": "Same speech endpoint — add ref_audio (a wav on this machine) and the ref_text it says.",
         "paths": [("POST", "/v1/audio/speech", "JSON + ref_audio, ref_text")],
         "snippet": (
             "curl -s -X POST {{base}} -H 'Content-Type: application/json' \\\n"
-            f"  -d '{{\"model\":\"{CLONE_MODEL}\",\"input\":\"New line in your voice\",\"ref_audio\":\"/Users/dcruse/media-stack/output/voice/ref.wav\",\"ref_text\":\"the words in the reference\",\"response_format\":\"wav\"}}' \\\n"
+            f"  -d '{{\"model\":\"{CLONE_MODEL}\",\"input\":\"New line in your voice\",\"ref_audio\":\"{STACK}/output/voice/ref.wav\",\"ref_text\":\"the words in the reference\",\"response_format\":\"wav\"}}' \\\n"
             "  -o clone.wav"
         ),
     },
@@ -223,6 +249,52 @@ ENDPOINTS = [
         "snippet": "curl -s {{base}} | python3 -m json.tool | head -40",
     },
 ]
+
+
+def _endpoints() -> list:
+    """ENDPOINTS with ports resolved from SERVICES for this platform.
+
+    The catalogue was written against the Apple layout (writer :8081, vision
+    :8082). On Linux the same services answer elsewhere — writer on :8000, vision
+    on :8200 — so advertising the literal numbers points other programs at dead
+    URLs. Resolve per platform, and name the engine behind each tile.
+    """
+    endpoints = []
+    for src in ENDPOINTS:
+        e = dict(src)
+        svc = SERVICES.get(e.get("svc") or "")
+        if svc:
+            e["port"] = svc["port"]
+            if svc.get("external"):
+                e["external"] = svc["external"]
+        if sys.platform != "darwin":
+            if e["key"] == "tts":
+                # voice-tts serves /tts, not the OpenAI /v1/audio/speech route.
+                e["path"] = "/tts"
+                e["label"] = "TTS · text → speech (Chatterbox)"
+                e["desc"] = ("Chatterbox TTS on :3200 (voice-tts.service). POST JSON "
+                             "{text, tts_voice} and get audio bytes back.")
+                e["paths"] = [("POST", "/tts", 'JSON {"text": "...", "tts_voice": "neutral"}'),
+                              ("GET", "/voices", "available voice ids"),
+                              ("GET", "/health", "model + VRAM state")]
+                e["snippet"] = ("curl -s -X POST {{base}} -H 'Content-Type: application/json' \\\n"
+                                "  -d '{\"text\":\"voice check\",\"tts_voice\":\"neutral\"}' -o out.wav")
+            elif e["key"] == "stt":
+                # On Linux voice splits across two ports: TTS on :3200, STT on :3201.
+                e["port"] = int(os.environ.get("STT_PORT", "3201"))
+                e["desc"] = ("Transcription endpoint (faster-whisper on :3201 / "
+                             "voice-stt.service), OpenAI-shaped.")
+            elif e["key"] == "clone":
+                e["path"] = "/tts"
+                e["desc"] = ("Voice cloning on this deployment is CLI-only: "
+                             "`voice clone <ref.wav> \"your text\"`.")
+                e["snippet"] = 'voice clone ref.wav "text to say in that voice"'
+            elif e["key"] == "llm":
+                e["label"] = "Writer LLM (llama-server, OpenAI-compatible chat)"
+            elif e["key"] == "vision":
+                e["label"] = "Vision VLM (llama-server + mmproj)"
+        endpoints.append(e)
+    return endpoints
 
 
 def port_open(port: int, host: str = "127.0.0.1") -> bool:
@@ -677,7 +749,7 @@ def api_endpoints():
     if lan and lan not in hosts:
         hosts.append(lan)
     out = []
-    for e in ENDPOINTS:
+    for e in _endpoints():
         url = f"http://{{host}}:{e['port']}{e['path']}"
         out.append({**e, "url": url, "origin": f"http://{{host}}:{e['port']}",
                     "status": "loaded" if e["svc"] == "panel" else None})

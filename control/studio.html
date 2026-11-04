@@ -172,7 +172,7 @@
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Upscale / control</div>
       <label>source image (click a gallery item → "use", or upload)</label>
-      <div class="row" style="gap:6px"><input id="im-src" placeholder="/Users/dcruse/media-stack/output/image/…png" style="flex:1"><button onclick="pickFile('im-src','image')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>
+      <div class="row" style="gap:6px"><input id="im-src" placeholder="~/media-stack/output/image/…png" style="flex:1"><button onclick="pickFile('im-src','image')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>
       <img id="im-src-prev" style="max-height:120px;border-radius:6px;display:none;margin:4px 0">
       <div class="fields">
         <div><label>upscaler</label><select id="im-up"><option value="esrgan">RealESRGAN x4 · fast</option><option value="ultrasharp">4x-UltraSharp · crisper</option><option value="seedvr2">SeedVR2 3B · diffusion, slow</option></select></div>
@@ -276,7 +276,7 @@
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Stems (Demucs) — split a song into drums / bass / vocals / other</div>
       <label>audio file (gallery item → "stems", or upload)</label>
-      <div class="row" style="gap:6px"><input id="st-file" placeholder="/Users/dcruse/media-stack/output/music/….flac" style="flex:1"><button onclick="pickFile('st-file','voice')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>
+      <div class="row" style="gap:6px"><input id="st-file" placeholder="~/media-stack/output/music/….flac" style="flex:1"><button onclick="pickFile('st-file','voice')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>
       <div class="fields"><div><label>model</label><select id="st-model"><option value="htdemucs">htdemucs · fast (~5 s / 30 s)</option><option value="htdemucs_ft">htdemucs_ft · better, 2× slower</option><option value="htdemucs_6s">htdemucs_6s · + guitar, piano</option></select></div></div>
       <div class="btns"><button class="primary" onclick="runJob('stems',{file:v('st-file'),model:v('st-model')})" title="Demucs: split the file into vocals / drums / bass / other">Split into stems</button>
         <button onclick="runJob('stems',{file:v('st-file'),karaoke:true})" title="Demucs: instrumental only, vocals discarded">Karaoke (remove vocals)</button></div>
@@ -304,7 +304,7 @@
         <button onclick="$('vo-upload').click()" title="Choose an existing file instead of recording">Upload file…</button>
       </div>
       <audio id="vo-preview" controls style="width:100%;margin:6px 0;display:none"></audio>
-      <input id="vo-ref" placeholder="/Users/dcruse/…/ref.wav">
+      <input id="vo-ref" placeholder="~/media-stack/…/ref.wav">
       <label>what the reference says (transcript; blank = auto-transcribe first)</label><input id="vo-reftext">
       <div class="btns"><button class="primary" onclick="cloneJob()" title="Clone the reference voice and speak the text with it">Clone &amp; speak the text above</button></div>
     </div>
@@ -327,7 +327,7 @@
         <option value="lore">lore — world bible entries</option><option value="chat">chat — free prompt</option>
         <option value="continue">continue — extend a draft file</option><option value="revise">revise — edit a draft file</option></select>
       <label id="wr-prompt-l">premise / prompt</label><textarea id="wr-prompt" style="min-height:110px">A lighthouse keeper discovers the fog is listening.</textarea>
-      <div id="wr-file-row" style="display:none"><label>draft file path (.md)</label><input id="wr-file" placeholder="/Users/dcruse/media-stack/output/text/prose_….md"><label>editor's note (revise)</label><input id="wr-note" placeholder="tighten pacing, more sensory detail"></div>
+      <div id="wr-file-row" style="display:none"><label>draft file path (.md)</label><input id="wr-file" placeholder="~/media-stack/output/text/prose_….md"><label>editor's note (revise)</label><input id="wr-note" placeholder="tighten pacing, more sensory detail"></div>
       <div class="fields">
         <div><label>genre</label><input id="wr-genre" value="literary horror"></div><div><label>tone</label><input id="wr-tone" placeholder="dry, slow-burn"></div>
         <div><label>POV</label><select id="wr-pov"><option>third</option><option>first</option><option>second</option></select></div>
@@ -352,7 +352,7 @@
     <div class="card"><div class="name">Look at an image <span class="tag">local VLM</span></div>
       <div class="desc" id="vlm-state">checking vision VLM…</div>
       <label>image (click a gallery item → "ask", or upload)</label>
-      <div class="row" style="gap:6px"><input id="vi-image" placeholder="/Users/dcruse/media-stack/output/image/….png" style="flex:1"><button onclick="pickFile('vi-image','image')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>
+      <div class="row" style="gap:6px"><input id="vi-image" placeholder="~/media-stack/output/image/….png" style="flex:1"><button onclick="pickFile('vi-image','image')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>
       <label>question</label><input id="vi-q" value="Describe this image. Any defects or artifacts?">
       <div class="btns"><button class="primary" onclick="runJob('see',{op:'ask',image:v('vi-image'),question:v('vi-q')})" title="Ask the local vision model a question about the image">Ask</button>
         <button onclick="runJob('see',{op:'describe',image:v('vi-image')})" title="Detailed description of the image from the local VLM">Describe</button><button onclick="runJob('see',{op:'ocr',image:v('vi-image')})" title="Transcribe all visible text in the image">OCR</button></div>
@@ -800,7 +800,7 @@ function panelCard(){
 }
 function renderServices(){
   $('ep-note').innerHTML = epHost==='127.0.0.1'
-    ? `Each card below carries its own copy-paste endpoints — links use <code>127.0.0.1</code>, the address every CLI on this Mac already uses.`
+    ? `Each card below carries its own copy-paste endpoints — links use <code>127.0.0.1</code>, the address every CLI on this machine already uses.`
     : `Each card below carries its own copy-paste endpoints — links use <code>${esc(epHost)}</code>. Only the panel is LAN-bound (<code>PANEL_HOST=0.0.0.0</code>); the others answer only after a 0.0.0.0 listen.`;
   $('ep-h-local').className = epHost==='127.0.0.1'?'primary':'';
   $('ep-h-lan').className = epHost!=='127.0.0.1'?'primary':'';
