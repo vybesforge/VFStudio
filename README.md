@@ -54,6 +54,28 @@ Gated downloads: `huggingface-cli login` or `HF_TOKEN`. The token is not stored 
 Every `gen` call prints one JSON line (`{"ok":true,"files":[…],"seconds":…}`), waits for an idle
 GPU queue, and fails loudly when ComfyUI reports success without writing a file.
 
+## Model decisions by platform
+
+Diffusion, 3D and upscale are ComfyUI on every platform. The **language / voice / vision** engines
+are where the platforms diverge, and they are not interchangeable:
+
+| Job | Apple Silicon | Linux (NVIDIA / ROCm) | Windows |
+|---|---|---|---|
+| Diffusion · 3D · upscale | ComfyUI, MPS | ComfyUI, CUDA/ROCm — backend on `:8189`, shim on `:8188` | ComfyUI, CUDA |
+| Writer LLM | `mlx_lm.server` `:8081` · `mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit` | `llama-server` `:8000` with a GGUF (e.g. `Qwen3.8-27B-…-Q4_K_P.gguf`) | `llama-server` `:8000`, same GGUF |
+| Vision VLM | `mlx_vlm.server` `:8082` · `mlx-community/Qwen3-VL-8B-Instruct-4bit` | `llama-server` with a `Qwen3-VL` GGUF + `mmproj` | `llama-server` + `mmproj` |
+| TTS / STT | `mlx-audio` `:8000` (Kokoro, Qwen3-TTS, Whisper turbo) | `speaches` `:8000` (installer default) **or** `voice-tts` `:3200` (Chatterbox) + `voice-stt` `:3201` (faster-whisper) on the V100 deployment | CUDA or CPU path |
+| Stems · LoRA | MPS (Demucs, ai-toolkit) | CUDA | CUDA |
+
+Two model *choices* that follow from the hardware:
+
+- **fp8 does not pay on MPS** — it upcasts to bf16 and Qwen-Image-Edit balloons to ~39 GB. Use the
+  Q4 GGUF (~13 GB) on Apple Silicon; fp8 is fine on CUDA.
+- **VRAM is measured per card, not summed.** The probe uses the largest GPU; `VF_GPU=1` selects
+  another index. A 2 GB display card in the box must never receive a model.
+
+Override ComfyUI ports with `VF_COMFY_PORTS` — macOS defaults to `8188`, Linux to `8189,8190`.
+
 ## The panel (`control/`)
 
 http://127.0.0.1:8787 — one origin, tabs per modality:
@@ -66,9 +88,18 @@ http://127.0.0.1:8787 — one origin, tabs per modality:
 | Services | start / stop / restart / logs for ComfyUI, mlx-audio, writer LLM, vision VLM |
 | Resources | CPU, GPU (IOAccelerator), memory, swap, disk, top processes · **Unload all models / Stop everything** |
 
-The header shows the **live ComfyUI progress bar** (step N/M, elapsed, queue depth). It works
-because `gen` and the Hermes plugin submit with `client_id: gen-cli` and the panel's websocket
-listens under the same id — ComfyUI only sends per-step progress to the submitting client.
+The header is a **per-card strip**: one tile per GPU, showing identity (resolved by UUID, never by
+index — enumeration shifts when cards are added), util / VRAM / temp / power, what that card is
+running, and the queue attached to it with a live step bar (`step N/M · P%`).
+
+Queue→card attribution is discovered, not configured: the panel finds where each ComfyUI instance
+is actually resident and attaches that instance's queue to it, so re-pinning a ComfyUI to another
+card moves its queue with it. Two instances are handled (a second card's ComfyUI on `:8190`).
+
+Progress comes from one websocket listener per ComfyUI instance, keyed by `(port, prompt_id)`, so
+two instances can never overwrite each other's numbers. ComfyUI **broadcasts** execution events to
+every connected client — measured, two different `clientId`s received identical streams — so the
+listener does not need to be the client that submitted the prompt.
 
 ## Daily use
 
@@ -92,13 +123,20 @@ weaker model: exact commands, exact paths, expected output, measured pitfalls.
 
 ## Services
 
-| Service | Port | Protocol |
-|---|---|---|
-| ComfyUI | 8188 | `POST /prompt`, `GET /history/{id}`, `GET /queue`, `POST /free`, `ws /ws?clientId=` |
-| mlx-audio | 8000 | OpenAI-compatible `/v1/audio/speech`, `/v1/audio/transcriptions`; models by HF repo id, loaded on demand |
-| writer LLM | 8081 | `mlx_lm.server`, OpenAI-compatible chat; Qwen3.8-27B-Uncensored 4-bit (`stack start llm`) |
-| vision VLM | 8082 | `mlx_vlm.server`, OpenAI-compatible chat with image parts; Qwen3-VL-8B 4-bit (`stack start vision`) |
-| panel | 8787 | FastAPI; `PANEL_HOST=0.0.0.0 stack panel` exposes it to the LAN (WebXR still needs localhost/HTTPS) |
+| Service | Port | Where | Protocol |
+|---|---|---|---|
+| ComfyUI (shim) | 8188 | all — on Linux forwards to the `:8189` backend | `POST /prompt`, `GET /history/{id}`, `GET /queue`, `POST /free`, `ws /ws?clientId=` |
+| ComfyUI (backend) | 8189 · 8190 | Linux/Windows; macOS runs ComfyUI on `:8188` directly | same API — the second card's instance is `:8190` |
+| mlx-audio | 8000 | **Apple Silicon** | OpenAI-compatible `/v1/audio/speech`, `/v1/audio/transcriptions`; models by HF repo id, loaded on demand |
+| writer LLM | 8081 | **Apple Silicon** — `mlx_lm.server` | OpenAI-compatible chat; Qwen3.8-27B-Uncensored 4-bit (`stack start llm`) |
+| vision VLM | 8082 | **Apple Silicon** — `mlx_vlm.server` | OpenAI-compatible chat with image parts; Qwen3-VL-8B 4-bit (`stack start vision`) |
+| llama-server | 8000 | **Linux / Windows** | OpenAI-compatible chat; GGUF + `mmproj` for vision. Replaces the three MLX services above |
+| speaches | 8000 | **Linux** — the installer default | faster-whisper + Kokoro behind the same `/v1/audio/*` routes mlx-audio uses |
+| voice-tts | 3200 | **Linux** — V100 deployment | Chatterbox TTS, fp16 |
+| voice-stt | 3201 | **Linux** — V100 deployment | faster-whisper, int8 |
+| panel | 8787 | all | FastAPI; `PANEL_HOST=0.0.0.0 stack panel` exposes it to the LAN (WebXR still needs localhost/HTTPS) |
+
+The panel's **Services** tab controls whichever engines exist on the machine it runs on.
 
 ## Hard-won constraints
 
