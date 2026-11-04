@@ -170,7 +170,7 @@ ENDPOINTS = [
         "paths": [("POST", "/v1/audio/speech", "JSON + ref_audio, ref_text")],
         "snippet": (
             "curl -s -X POST {{base}} -H 'Content-Type: application/json' \\\n"
-            f"  -d '{{\"model\":\"{CLONE_MODEL}\",\"input\":\"New line in your voice\",\"ref_audio\":\"ref.wav\",\"ref_text\":\"the words in the reference\",\"response_format\":\"wav\"}}' \\\n"
+            f"  -d '{{\"model\":\"{CLONE_MODEL}\",\"input\":\"New line in your voice\",\"ref_audio\":\"/Users/dcruse/media-stack/output/voice/ref.wav\",\"ref_text\":\"the words in the reference\",\"response_format\":\"wav\"}}' \\\n"
             "  -o clone.wav"
         ),
     },
@@ -251,70 +251,6 @@ def read_pid(name: str) -> int | None:
     return pid
 
 
-def _engines() -> dict:
-    """Last probe written by forge-recommend. Empty if this machine has not been probed yet."""
-    path = STACK / "run" / "forge-engines.json"
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data.get("engines") or {}
-
-
-def _service_launch(name: str) -> tuple[dict, dict, str | None]:
-    """Return (service copy, env, error). The engine map picks CUDA, ROCm, MLX, or a stand-in."""
-    svc = dict(SERVICES[name])
-    svc["cmd"] = list(svc["cmd"])
-    env = _base_env()
-    eng = _engines()
-    if not eng:
-        return svc, env, None
-    backend = eng.get("backend") or "mlx"
-    if name == "comfy":
-        if backend in ("cuda", "rocm") and eng.get("gpu_index") is not None:
-            env["CUDA_VISIBLE_DEVICES"] = str(eng["gpu_index"])
-        if backend == "cpu":
-            svc["cmd"].append("--cpu")
-        return svc, env, None
-    if name == "audio" and backend != "mlx":
-        speaches = shutil.which("speaches")
-        if not speaches:
-            return svc, env, "Voice on this machine is speaches (not MLX), and speaches is not on PATH. See INSTALL-UBUNTU.md section 5."
-        env["UVICORN_HOST"] = "127.0.0.1"
-        env["UVICORN_PORT"] = "8000"
-        svc["cmd"] = [speaches]
-        svc["label"] = "speaches"
-        svc["desc"] = "TTS and STT (speaches)"
-        return svc, env, None
-    if name == "llm":
-        slot = eng.get("llm") or {}
-        if slot.get("engine") == "llama-server":
-            binary = os.environ.get("LLAMA_SERVER") or shutil.which("llama-server")
-            model = os.environ.get("WRITER_GGUF") or slot.get("model") or ""
-            if not binary or not model or not Path(model).exists():
-                return svc, env, "Writer here is llama-server. Set LLAMA_SERVER if needed and WRITER_GGUF to a local GGUF. VF_UNCENSORED=1 selects the labeled uncensored writer. See INSTALL-UBUNTU.md section 6."
-            svc["cmd"] = [binary, "-m", model, "--host", "127.0.0.1", "--port", "8081"]
-            svc["label"] = "writer (llama-server)"
-            return svc, env, None
-        model = os.environ.get("LLM_MODEL") or slot.get("model") or ""
-        if not model:
-            return svc, env, "No writer model selected. Export LLM_MODEL, or VF_UNCENSORED=1 for the labeled uncensored Qwen."
-        svc["cmd"] = [str(LLM_PY), "-m", "mlx_lm.server", "--host", "127.0.0.1", "--port", "8081", "--model", model]
-        if os.environ.get("VF_UNCENSORED") == "1" or "Uncensored" in model or "uncensored" in model:
-            svc["desc"] = "labeled uncensored writer"
-        return svc, env, None
-    if name == "vision" and backend != "mlx":
-        binary = os.environ.get("LLAMA_SERVER") or shutil.which("llama-server")
-        model = os.environ.get("VLM_GGUF") or ""
-        mmproj = os.environ.get("VLM_MMPROJ") or ""
-        if not binary or not model or not mmproj:
-            return svc, env, "Vision here is llama-server with a VLM GGUF and mmproj. Set VLM_GGUF and VLM_MMPROJ. See INSTALL-UBUNTU.md section 6."
-        svc["cmd"] = [binary, "-m", model, "--mmproj", mmproj, "--host", "127.0.0.1", "--port", "8082"]
-        svc["label"] = "vision (llama-server)"
-        return svc, env, None
-    return svc, env, None
-
-
 def start(name: str) -> dict:
     svc = SERVICES[name]
     if svc.get("cmd") is None:
@@ -328,7 +264,7 @@ def start(name: str) -> dict:
     fh.flush()
     proc = subprocess.Popen(
         svc["cmd"], cwd=svc["cwd"], stdout=fh, stderr=subprocess.STDOUT,
-        env=env, start_new_session=True,
+        env=_base_env(), start_new_session=True,
     )
     pidfile(name).write_text(str(proc.pid))
     return {"ok": True, "pid": proc.pid, "message": f"{svc['label']} starting on :{svc['port']}"}
@@ -1218,6 +1154,170 @@ _sys.path.insert(0, str(Path(__file__).parent))
 import studio as _studio  # noqa: E402  (Studio tabs: run forms, progress, galleries, inventory)
 app.include_router(_studio.router)
 STUDIO_HTML = Path(__file__).parent / "studio.html"
+
+
+# ── per-card view: what each GPU is running, and what is queued for it ────────
+#
+# Attribution is by GPU UUID straight out of nvidia-smi, never by index: CUDA and
+# nvidia-smi disagree about ordering on this box, and the 750 Ti is a CUDA device
+# too. A process is named by matching its pid — or an ancestor of it, since GPU
+# work is usually forked — to a listening service port or a live Studio job pid.
+_GPU_MAP_FILE = Path("/etc/default/vf-gpus")
+_SVC_PORTS = {3200: "voice-tts", 3201: "voice-stt", 8880: "kokoro",
+              8000: "llama-server", 8189: "ComfyUI :8189", 8190: "ComfyUI :8190",
+              5001: "koboldcpp", 3389: "remote-desktop"}
+# ComfyUI backend ports we know how to read a queue from. 8188 is the shim that
+# forwards to 8189; the backends are queried directly here.
+_COMFY_PORTS = (8189, 8190)
+
+
+def _comfy_queue(port: int):
+    """Running/pending prompts for one ComfyUI instance, or None if unreachable."""
+    import urllib.request as _u
+    try:
+        with _u.urlopen(f"http://127.0.0.1:{port}/queue", timeout=3) as r:
+            q = json.loads(r.read() or b"{}")
+    except Exception:
+        return None
+    run = [_prompt_name((i[2] or {})) for i in (q.get("queue_running") or [])]
+    pend = [_prompt_name((i[2] or {})) for i in (q.get("queue_pending") or [])]
+    run_ids = [i[1] for i in (q.get("queue_running") or [])]
+    return {"running": len(run), "pending": len(pend), "items": (run + pend)[:6],
+            "run_ids": run_ids}
+
+
+def _clean_name(name: str) -> str:
+    """nvidia-smi truncates process_name; browsers render as junk argv fragments."""
+    low = name.lower()
+    if "crashpad" in low or low.startswith("renderd"):
+        return "browser GPU process"
+    return name.strip()
+
+
+def _gpu_roles() -> dict:
+    """uuid -> short role ('display' / 'A' / 'B') from the canonical map."""
+    roles = {}
+    keys = {"GPU_DISPLAY": "display", "GPU_A": "A", "GPU_B": "B"}
+    try:
+        for line in _GPU_MAP_FILE.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() in keys:
+                roles[v.strip().strip("\"'")] = keys[k.strip()]
+    except OSError:
+        pass  # no map on this box (e.g. the macOS lane) — roles just come back empty
+    return roles
+
+
+def _listener_ports() -> dict:
+    """pid -> listening TCP port, for the local services (ss -tlnp)."""
+    out = {}
+    for line in _run(["ss", "-tlnp"]).splitlines():
+        mport, mpid = re.search(r":(\d+)\s", line), re.search(r"pid=(\d+)", line)
+        if mport and mpid:
+            out[int(mpid.group(1))] = int(mport.group(1))
+    return out
+
+
+def _ppid(pid: int):
+    try:
+        data = Path(f"/proc/{pid}/stat").read_text(errors="replace")
+        return int(data[data.rindex(")") + 2:].split()[1])
+    except Exception:
+        return None
+
+
+def _ancestry(pid: int, depth: int = 6):
+    """Ancestors of pid, nearest first."""
+    cur, seen = pid, set()
+    while depth > 0:
+        cur = _ppid(cur)
+        if not cur or cur <= 1 or cur in seen:
+            return
+        seen.add(cur)
+        yield cur
+        depth -= 1
+
+
+@app.get("/api/cards")
+def api_cards():
+    """Per-GPU identity, live load, what it is running, and what is queued for it.
+
+    The only real queue on this box is ComfyUI's, and it belongs to whichever card
+    ComfyUI is actually resident on — that is discovered, not assumed, so re-pinning
+    ComfyUI to the other V100 moves the queue with it automatically.
+    """
+    g = _gpu_stats()
+    if not g.get("available"):
+        return {"available": False, "cards": []}
+
+    roles = _gpu_roles()
+    ports = _listener_ports()
+
+    job_pids = {}
+    try:
+        with _studio._jlock:
+            for jid, j in _studio._jobs.items():
+                if j.get("status") == "running" and j.get("pid"):
+                    job_pids[int(j["pid"])] = f"{j.get('kind', 'job')} job {jid}"
+    except Exception:
+        job_pids = {}
+
+    def label(pid: int):
+        if pid in job_pids:
+            return job_pids[pid]
+        if pid in ports:
+            return _SVC_PORTS.get(ports[pid]) or f"port {ports[pid]}"
+        for anc in _ancestry(pid):
+            if anc in job_pids:
+                return job_pids[anc]
+            if anc in ports:
+                return _SVC_PORTS.get(ports[anc]) or f"port {ports[anc]}"
+        return None
+
+    # ComfyUI queues: one per instance. Query each backend directly and attach the
+    # queue to whichever card that instance is actually resident on, so re-pinning
+    # a ComfyUI to the other V100 moves its queue with it.
+    comfy_by_uuid = {}
+    for c in g["gpus"]:
+        for p in c["procs"]:
+            lp = ports.get(p["pid"])
+            if lp in _COMFY_PORTS:
+                q = _comfy_queue(lp)
+                if q:
+                    ent = {"source": f"ComfyUI :{lp}", "running": q["running"],
+                           "pending": q["pending"], "items": q["items"],
+                           "pct": None, "step": None, "steps": None}
+                    # Live step progress comes from that instance's own websocket
+                    # listener (studio.progress_for), matched by running prompt_id.
+                    rid = (q.get("run_ids") or [None])[0]
+                    prog = _studio.progress_for(lp, rid)
+                    if prog and prog.get("max"):
+                        ent["pct"] = round(100.0 * prog.get("value", 0) / prog["max"], 1)
+                        ent["step"] = prog.get("value")
+                        ent["steps"] = prog.get("max")
+                    comfy_by_uuid[c["uuid"]] = ent
+
+    cards = []
+    for c in g["gpus"]:
+        running = [{"pid": p["pid"], "mem": p["mem"], "name": p["name"],
+                    "what": label(p["pid"]) or _clean_name(p["name"])} for p in c["procs"]]
+        running.sort(key=lambda r: -r["mem"])
+        card = {
+            "uuid": c["uuid"], "name": c["name"], "index": c["index"], "bus": c["bus"],
+            "role": roles.get(c["uuid"], ""),
+            "util": c["util"], "mem_used": c["mem_used"], "mem_total": c["mem_total"],
+            "temp": c["temp"], "power": c["power"], "power_cap": c["power_cap"],
+            "running": running,
+            "queue": {"source": None, "running": 0, "pending": 0, "items": []},
+        }
+        if c["uuid"] in comfy_by_uuid:
+            card["queue"] = comfy_by_uuid[c["uuid"]]
+        cards.append(card)
+
+    return {"available": True, "cards": cards, "at": time.time()}
 
 
 @app.get("/", response_class=HTMLResponse)

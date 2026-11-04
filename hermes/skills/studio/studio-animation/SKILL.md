@@ -26,7 +26,7 @@ through Krita and Tahoma2D/OpenToonz. Outputs drop straight into the `studio-gam
 - "Turn these PNG frames into a sprite sheet for Godot" → Recipe 4; AI sprites → Recipe 5.
 - "I drew frames in Krita — get them into Blender / Godot / a video" → Recipes 6-7.
 - "Open a hand-drawn animation app" → Recipe 8 (Tahoma2D works; OpenToonz needs Rosetta).
-- Not for: video editing of finished clips (`studio-video-edit`), VR optimisation (`studio-vr`), a falling prop or soft-body shot (`studio-physics`).
+- Not for: video editing of finished clips (`studio-video-edit`), VR optimisation (`studio-vr`).
 
 ## Prerequisites (exact paths — verify, don't reinstall)
 | Thing | Path |

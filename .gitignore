@@ -123,3 +123,11 @@ game/*
 !game/templates/
 !game/tools/
 !game/new_project.sh
+
+# ── not part of this repo (2026-11-03) ────────────────────────────────────────
+# This repo is the non-Mac VF Studio: code and docs only. vr-pepper/ is a
+# separate local project that happens to live in this working directory, and
+# ComfyUI is the build box's clone reached through an absolute-path symlink.
+# Neither belongs in a commit.
+vr-pepper/
+/ComfyUI

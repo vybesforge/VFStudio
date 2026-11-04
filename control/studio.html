@@ -101,10 +101,42 @@
   .eptile .btns{margin-top:0;flex:0 0 auto} .eptile .btns button{padding:3px 8px;font-size:11px}
   .eptile pre{max-height:150px;margin-top:8px} .eptile table{margin-top:8px}
   .eptile td{padding:3px 0}
+  /* per-card strip: which GPU is running what, and what is queued for it */
+  .gcards{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0 6px}
+  .gcard{flex:1 1 320px;min-width:288px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .gcard.gidle{opacity:.72}
+  .ghead{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .grole{font-size:10px;font-weight:700;letter-spacing:.09em;padding:2px 7px;border-radius:5px;background:#0f2432;color:var(--cyan);text-transform:uppercase;flex:0 0 auto}
+  .grole.disp{background:#2a1d0a;color:var(--amber)}
+  .grole.none{background:#141c28;color:var(--mut)}
+  .gname{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+  .gstat{font-size:11.5px;color:var(--mut);display:flex;flex-wrap:wrap;gap:0}
+  .gstat span{padding:0 10px;border-left:1px solid var(--line)}
+  .gstat span:first-child{padding-left:0;border-left:none}
+  .gstat b{color:var(--fg);font-weight:600}
+  .gbar{height:4px;background:#141c28;border-radius:3px;overflow:hidden;margin:8px 0 2px}
+  .gbar>i{display:block;height:100%;background:var(--cyan);transition:width .3s}
+  .gbar.hot>i{background:var(--amber)}
+  .gsec{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#6f7681;margin:10px 0 4px;display:flex;justify-content:space-between}
+  .grow{font-size:11.5px;display:flex;justify-content:space-between;gap:8px;padding:1px 0}
+  .grow .m{color:var(--mut);flex:0 0 auto}
+  .grow .w{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gq{font-size:11.5px;color:var(--amber);line-height:1.5;min-height:1.4em}
+  .gq .m{color:var(--mut)}
+  .gq .gql{display:flex;justify-content:space-between;gap:8px}
+  .gq .gbar{margin:4px 0 3px;height:3px;background:#2a2113}
+  .gq .gbar>i{background:var(--amber)}
+  .gqi{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gempty{font-size:11.5px;color:#6f7681;font-style:italic;min-height:1.4em}
+  /* header placement: sits where the old single-instance progress tile was */
+  .gcards.hdr{flex:1;min-width:0;margin:0;align-items:stretch}
+  .gcards.hdr .gcard{flex:1 1 230px;min-width:200px;padding:9px 11px}
+  .gcards.hdr .gname{font-size:12px}
+  .gcards.hdr .gstat,.gcards.hdr .grow,.gcards.hdr .gq,.gcards.hdr .gempty{font-size:11px}
 </style></head><body>
 <header>
   <div class="brand"><img src="/brand/icon-192.png" alt="VF"><div><h1><b>VF</b> Studio</h1><div class="sub">VybesForge local asset forge</div></div></div>
-  <div class="card" id="progress" style="min-width:360px;flex:1;max-width:720px;padding:10px 14px"></div>
+  <div id="cards" class="gcards hdr"></div>
 </header>
 <nav>
   <button data-tab="image" class="active" title="Image · generate, upscale, canny-guided re-render and Qwen edit — all on the local ComfyUI">Image</button>
@@ -451,7 +483,7 @@ async function refreshProgress(){
   try{
     const [p,q]=await Promise.all([fetch('/api/studio/progress').then(r=>r.json()),
                                   fetch('/api/comfy/jobs').then(r=>r.json()).catch(()=>({reachable:false}))]);
-    const el=$('progress'); let pct=p.max?Math.round(100*p.value/p.max):0;
+    const el=$('progress'); if(!el) return; let pct=p.max?Math.round(100*p.value/p.max):0;
     if(!p.connected && !q.reachable){ el.innerHTML='<span class="dot off"></span><b>ComfyUI</b> <span class="desc">not reachable — start it in Services</span>'; return; }
     const c=q.counts||{running:0,pending:0};
     // ComfyUI's exec_info.queue_remaining counts the running job too, so it is not "queued"
@@ -831,12 +863,49 @@ document.getElementById('vd-img').addEventListener('input', ev=>{
   const sel=document.getElementById('vd-size');
   if(ev.target.value.trim()) sel.value='auto';
 });
+// per-card strip — which GPU is running what, and what is queued for it.
+// Cards are identified by UUID server-side; the strip never reasons about indices.
+async function refreshCards(){
+  const el=$('cards'); if(!el) return;
+  try{
+    const d=await (await fetch('/api/cards')).json();
+    if(!d.available){ el.innerHTML=''; return; }
+    const gb=x=>(x/GB).toFixed(1);
+    el.innerHTML=(d.cards||[]).map(c=>{
+      const role=(c.role||'').toUpperCase();
+      const rcls=role==='DISPLAY'?'grole disp':(role?'grole':'grole none');
+      const pct=c.mem_total?Math.round(100*c.mem_used/c.mem_total):0;
+      const run=(c.running||[]).map(p=>
+        `<div class="grow"><span class="w" title="pid ${p.pid} · ${esc(p.name)} · ${gb(p.mem)} GB">${esc(p.what)}</span><span class="m">${gb(p.mem)} GB</span></div>`
+      ).join('')||'<div class="gempty">idle</div>';
+      const q=(c.queue&&c.queue.source)
+        ? ((c.queue.running+c.queue.pending)===0
+            ? '<div class="gempty">idle — queue empty</div>'
+            : '<div class="gq">'
+              + `<div class="gql"><span>${c.queue.running} job${c.queue.running===1?'':'s'} running · ${c.queue.pending} waiting</span>`
+              +   (c.queue.steps?`<span class="m">step ${c.queue.step}/${c.queue.steps} · ${Math.round(c.queue.pct)}%</span>`:'')
+              + '</div>'
+              + (c.queue.pct!=null?`<div class="gbar"><i style="width:${Math.min(100,c.queue.pct)}%"></i></div>`:'')
+              + (c.queue.items.length?`<div class="gqi m">${esc(c.queue.items[0])}</div>`:'')
+              + '</div>')
+        : '<div class="gempty">no queue</div>';
+      const hot=(c.temp!=null&&c.temp>=80)||pct>=92;
+      return `<div class="gcard${(c.running||[]).length?'':' gidle'}">
+        <div class="ghead"><span class="${rcls}">${esc(role||'GPU')}</span><span class="gname" title="${esc(c.name)} · ${esc(c.uuid)}">${esc(c.name)}</span></div>
+        <div class="gstat"><span><b>${c.util}%</b> util</span><span><b>${gb(c.mem_used)}</b>/${gb(c.mem_total)} GB</span><span><b>${c.temp!=null?Math.round(c.temp)+'°':'—'}</b></span><span><b>${c.power!=null?Math.round(c.power):'—'}</b>/${c.power_cap?Math.round(c.power_cap):'—'} W</span></div>
+        <div class="gbar${hot?' hot':''}"><i style="width:${pct}%"></i></div>
+        <div class="gsec"><span>on card</span><span>${(c.running||[]).length}</span></div>${run}
+        <div class="gsec"><span>queue${(c.queue&&c.queue.source)?' · '+esc(c.queue.source):''}</span></div>${q}
+      </div>`;
+    }).join('');
+  }catch(e){}
+}
 onTabDesc(current);
-refreshProgress(); refreshJobs(); loadGallery('image'); loadVoices();
+refreshJobs(); refreshCards(); loadGallery('image'); loadVoices();
 // Refreshes are deliberately slow: the galleries and job lists were re-fetching every 3-8 s
 // and the page felt like it was reloading itself. The status bar keeps a 5 s beat because it
 // is the only thing that has to feel live (progress + cancel).
-setInterval(refreshProgress, 5000);
+setInterval(refreshCards, 4000);
 setInterval(refreshJobs, 60000);
 setInterval(()=>{ if(current==='resources') refreshResources(); if(current==='services') refreshServices(); }, 15000);
 setInterval(()=>{ if(['image','video','3d','sound','voice'].includes(current)) loadGallery(current); }, 60000);

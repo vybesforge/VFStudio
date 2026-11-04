@@ -1,14 +1,13 @@
-# CUDA and ROCm stand-ins
+# VF Studio on Ubuntu (NVIDIA)
 
-Start with `python3 tools/forge/install.py`. It probes the machine and writes `run/forge-engines.json`. This file is the detail for a discrete GPU: ComfyUI on CUDA or ROCm, speaches for voice, llama-server for the writer and for vision. MLX weights are not loaded here.
-
-The stack was first exercised on Apple Silicon. It ports to Linux, but **three of the
+The stack was built and measured on an M3 Max Mac. It ports to Ubuntu, but **three of the
 five services are Apple-only (MLX)** and need CUDA stand-ins. Everything else — ComfyUI, the
 `gen`/`vid`/`slice`/`stems`/`lora` CLIs, the panel, Blender/Godot/OrcaSlicer tooling, the
 skills — is plain Python + ffmpeg and runs unchanged.
 
-> Status: **written from the code, not yet executed on an Ubuntu box.** First person to run it: fix this
-> file where reality differs and commit it. Timings quoted in the skills are from one Apple Silicon machine.
+> Status: **written from the code, not yet executed on an Ubuntu box.** Dylan's Precision 5810
+> (V100 32 GB + RTX 2060) and the RTX 4080 box are the targets. First person to run it: fix this
+> file where reality differs and commit it. Timings quoted in the skills are Mac numbers.
 
 ## What changes
 
@@ -26,22 +25,12 @@ skills — is plain Python + ffmpeg and runs unchanged.
 | Demucs / LoRA training | `--device mps` | `--device cuda` | the CLIs auto-pick CUDA when present |
 | Service manager | `bin/stack` (launchd-free, works as is) | same; optional systemd units in §8 | — |
 
-On a discrete GPU you are bound by **VRAM on the largest card**, not the sum of cards and not
-the Mac's unified-memory pool. Run `bin/forge-recommend` before fetching. It reads this machine
-and applies the same limits everywhere:
-
-| Detected limit | What `--profile auto` keeps | What it skips |
-|---|---|---|
-| NVIDIA/AMD ≥ 24 GB | fp8 edit path, Flux dev fp8, Wan 2.2 5B, HunyuanVideo 1.5 | the Qwen GGUF (the fp8 file fits), MLX repos |
-| NVIDIA/AMD 16 GB (a driver that reports ~16376 MiB still counts as 16) | GGUF edit path, Flux dev fp8 (tight), Wan 2.2 5B | fp8 edit (~24 GB), HunyuanVideo (~20 GB), MLX repos |
-| NVIDIA/AMD 8 GB | FLUX.2 klein, small SFX, classical upscalers | Z-Image, Wan, Flux dev |
-| Apple unified ≥ 48 GB | MLX voice / vision / writer, Qwen GGUF, Flux dev | Qwen fp8 (it upcasts) |
-| Apple unified under 48 GB | GGUF edit, Z-Image if memory allows | Flux dev, HunyuanVideo, the 27B writer |
-| no GPU | RealESRGAN and 4x-UltraSharp | every diffusion model |
-
-A 27B Q4 writer is about 17 GB and time-shares a card that large (`stack free` first). Under 24 GB
-VRAM, use a ≤14B Q4 GGUF via llama-server. Text encoders offload on cards under 24 GB. MLX weight
-files are not the CUDA or ROCm build.
+Memory model is different too: on the Mac everything shared one 64 GB pool; on a GPU box you are
+bound by **VRAM**. V100 32 GB: Z-Image (bf16 ≈ 12 GB) + text encoder fits; Flux dev fp8 fits;
+Wan 2.2 5B fits; Qwen-Image-Edit 2509 fp8 (~20 GB) fits alone; a 27B writer at Q4 (~17 GB) does
+**not** coexist with ComfyUI on one 32 GB card — run it on the 2060 (no: 6 GB — too small) or
+time-share with the panel's *Unload all*. RTX 4080 16 GB: use the fp8/4-bit variants and a
+≤14B writer (Q4 ≈ 9 GB).
 
 ## 1. Base packages
 
@@ -71,23 +60,12 @@ ComfyUI/.venv/bin/python -c "import torch;print(torch.cuda.is_available(), torch
 `bin/stack` starts ComfyUI with `--listen 127.0.0.1 --port 8188`; remove any `--force-fp16`/MPS flags
 if you find them in `bin/stack` (grep `mps`). For ≤16 GB cards add `--lowvram` or `--fp8_e4m3fn-unet`.
 
-Models: the same manifest. Probe first, then fetch the profile for this GPU.
+Models: identical manifest.
 ```bash
-bin/forge-recommend                  # or: python3 tools/forge/recommend.py
-bin/forge-recommend --dry-run        # the probe never downloads; this flag is accepted anyway
-bin/fetch-models --dry-run --profile auto
-bin/fetch-models --profile auto      # essentials + quality that fit the largest GPU and the free disk
-bin/fetch-models --list              # ✓/✗ per manifest id
+bin/fetch-models --list
+bin/fetch-models            # ~25 GB essentials (Z-Image, klein, Wan 2.2 5B, SAO, ACE-Step, upscalers)
+bin/fetch-models --all      # ~136 GB everything incl. Qwen-Image-Edit 2509, Flux dev, Stable Audio 3
 ```
-`fetch-models --profile essentials` is the small set that fits (Z-Image, upscalers, Stable Audio
-Open, and TRELLIS.2 when VRAM or unified memory allows). `--profile full` adds optional files
-such as Stable Audio 3 medium. There is no `--all` flag; fetching every id regardless of VRAM is
-`bin/fetch-models` with no profile. Do that only when you mean to.
-
-Windows: `python tools/forge/recommend.py` runs as-is. `bin/fetch-models` is bash — Git Bash or
-WSL. ComfyUI itself is the CUDA install above, pointed at the same `models/` tree. AMD uses the
-same VRAM rules with a ROCm PyTorch build; the stack was measured on CUDA and Apple Silicon, so
-smoke-test klein before fetching the quality tier.
 
 ## 3. Tools venv + CLIs (unchanged)
 
@@ -95,7 +73,7 @@ smoke-test klein before fetching the quality tier.
 uv venv --python 3.12 tools/.venv
 uv pip install --python tools/.venv/bin/python build123d trimesh pygltflib numpy-stl moviepy pedalboard librosa soundfile pillow imageio-ffmpeg requests websocket-client scipy
 mkdir -p ~/.local/bin
-for c in tools/comfy/gen tools/voice/voice tools/video/vid tools/llm/scribe tools/vision/see tools/print/slice tools/vr/gltf tools/audio/stems tools/train/lora bin/stack bin/fetch-models bin/forge-recommend; do ln -sf "$PWD/$c" ~/.local/bin/$(basename "$c"); done
+for c in tools/comfy/gen tools/voice/voice tools/video/vid tools/llm/scribe tools/vision/see tools/print/slice tools/vr/gltf tools/audio/stems tools/train/lora bin/stack bin/fetch-models; do ln -sf "$PWD/$c" ~/.local/bin/$(basename "$c"); done
 ```
 The CLIs have `#!/usr/bin/env` or venv shebangs pointing at `tools/.venv`/`audio/.venv`; if a
 shebang hard-codes a Mac path it will fail with "bad interpreter" — fix the shebang, that is a bug
@@ -185,11 +163,9 @@ GPU is not held by idle weights.
 
 ## 9. Smoke test
 
-`forge-recommend` prints a `gen` line for whatever image model it kept. When klein is in the set:
-
 ```bash
 stack status
-gen image "a brass compass on an old map" --model klein --seed 1      # output/image/klein_*.png
+gen image "a brass compass on an old map" --model klein --seed 1      # expect ~5–8 s on a V100, output/image/klein_*.png
 voice say "ok" --out /tmp/ok.wav && voice transcribe /tmp/ok.wav
 scribe prose "test" --words 60
 see describe output/image/klein_00001_.png
@@ -197,7 +173,7 @@ see describe output/image/klein_00001_.png
 
 ## Known gaps on Linux (honest list)
 - Voice cloning server is not packaged — §5 describes the route, nobody has run it.
-- `control/status.py` live GPU utilisation is still macOS-only (`ioreg`). `bin/forge-recommend` and the Models tab do probe `nvidia-smi` for name, VRAM, and driver; the Resources tab's percent-busy figure does not, yet.
+- `control/status.py` GPU stats are macOS-only until the `nvidia-smi` fallback is added.
 - `bin/stack` service definitions for `llm`/`vision` reference `mlx_lm.server`/`mlx_vlm.server`; swap to `llama-server` lines.
 - Skills quote Mac timings; CUDA numbers will be faster for diffusion, similar or faster for LLMs.
 - No Rosetta-style issues, but AppImages need FUSE (`sudo apt install libfuse2`).

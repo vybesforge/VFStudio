@@ -53,14 +53,9 @@ def ask(images, question, max_tokens=700, temp=0.2):
 def snap(out=None, device=None, warmup=2.0):
     os.makedirs(OUT, exist_ok=True)
     out = out or os.path.join(OUT, f"snap_{time.strftime('%Y%m%d_%H%M%S')}.jpg")
-    if sys.platform == "win32":
-        ff = shutil.which("ffmpeg") or die("ffmpeg not installed")
-        dev = device or "0"
-        src = dev if str(dev).startswith("video=") else f"video={dev}"
-        cmd = [ff, "-y", "-loglevel", "error", "-f", "dshow", "-i", src, "-frames:v", "1", out]
-    elif sys.platform != "darwin":
+    if sys.platform != "darwin":
         # Linux: V4L2 through ffmpeg. --device is /dev/videoN (default /dev/video0).
-        ff = shutil.which("ffmpeg") or die("ffmpeg not installed")
+        ff = shutil.which("ffmpeg") or die("ffmpeg not installed: sudo apt install ffmpeg")
         dev = device or "/dev/video0"
         cmd = [ff, "-y", "-loglevel", "error", "-f", "v4l2", "-i", dev, "-ss", str(warmup), "-frames:v", "1", out]
     else:

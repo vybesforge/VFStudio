@@ -98,7 +98,6 @@ def main():
     def common(sp):
         sp.add_argument("--out"); sp.add_argument("--temp", type=float, default=0.9)
         sp.add_argument("--max-tokens", type=int, default=None); sp.add_argument("--system"); sp.add_argument("--model")
-        sp.add_argument("--uncensored", action="store_true", help="opt in to the labeled uncensored writer (the server must have it loaded)")
         sp.add_argument("--think", action="store_true", help="allow the model's hidden reasoning (slower, needs a bigger --max-tokens)")
 
     s = sub.add_parser("chat"); s.add_argument("prompt"); common(s)
@@ -113,8 +112,6 @@ def main():
     s = sub.add_parser("continue"); s.add_argument("draft"); s.add_argument("--words", type=int, default=800); common(s)
     sub.add_parser("status")
     a = p.parse_args()
-    if getattr(a, "uncensored", False) and not getattr(a, "model", None):
-        a.model = os.environ.get("WRITER_MODEL") or "mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit"
 
     models = server_models()
     if a.cmd == "status":

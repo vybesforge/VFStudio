@@ -67,14 +67,14 @@ def post_json(path, payload, timeout=600):
     except urllib.error.HTTPError as e:
         die(f"server {e.code}: {e.read().decode(errors='replace')[:400]}")
     except urllib.error.URLError as e:
-        die(f"cannot reach the voice server at {SERVER} ({e.reason}). Start it: stack start audio")
+        die(f"cannot reach mlx-audio server at {SERVER} ({e.reason}). Start it: stack start audio")
 
 
 def check_server():
     try:
         urllib.request.urlopen(SERVER + "/", timeout=3)
     except Exception as e:
-        die(f"voice server not responding at {SERVER} ({e}). Start it: stack start audio")
+        die(f"mlx-audio server not responding at {SERVER} ({e}). Start it: stack start audio")
 
 
 def write_audio(data, out):

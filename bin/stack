@@ -88,12 +88,8 @@ case "$cmd" in
     echo "  asset:   $STACK/vr/pig.glb"
     open "$PANEL" 2>/dev/null || true
     ;;
-  recommend)
-    ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-    exec "$ROOT/bin/forge-recommend" "${@:2}"
-    ;;
   *)
-    echo "usage: stack {start|stop|restart|status|logs|panel|free|music|vr|rig|anim|recommend} [comfy|audio]" >&2
+    echo "usage: stack {start|stop|restart|status|logs|panel|free|music|vr|rig|anim} [comfy|audio]" >&2
     exit 1
     ;;
 esac
