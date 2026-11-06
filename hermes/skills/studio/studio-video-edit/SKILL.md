@@ -4,7 +4,7 @@ description: "Use when editing video locally: vid CLI, Blender VSE, SRT."
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [video, ffmpeg, blender, vse, subtitles, whisper, kokoro, local-inference, studio]

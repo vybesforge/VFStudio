@@ -4,7 +4,7 @@ description: "Use when generating image/video/audio/3D locally on Apple Silicon.
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [mlx, mlx-audio, comfyui, flux, tts, stt, music, apple-silicon, local-inference]

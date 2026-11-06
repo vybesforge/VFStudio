@@ -4,7 +4,7 @@ description: "Use when asked to design, check, or slice a 3D-printable part on t
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [3d-printing, cad, build123d, stl, orcaslicer, gcode, 3mf, bambu, fdm, makerworld]

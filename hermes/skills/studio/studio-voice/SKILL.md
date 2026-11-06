@@ -4,7 +4,7 @@ description: "Use when you need local TTS, voice cloning, or speech-to-text on t
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [studio, voice, tts, stt, voice-cloning, kokoro, qwen3-tts, whisper, mlx-audio, local-inference]

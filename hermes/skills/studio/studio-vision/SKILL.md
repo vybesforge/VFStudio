@@ -4,7 +4,7 @@ description: "Use when you must look at an image or the camera locally."
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [studio, vision, vlm, camera, mlx-vlm, qwen3-vl, local-inference]

@@ -4,7 +4,7 @@ description: "Use when writing fiction, scripts, dialogue or lore locally."
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [studio, writing, fiction, screenplay, dialogue, lore, llm, mlx-lm, uncensored, local-inference]

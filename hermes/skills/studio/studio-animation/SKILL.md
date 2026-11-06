@@ -4,7 +4,7 @@ description: "Use when rigging, animating or making sprite sheets."
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     category: studio

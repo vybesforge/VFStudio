@@ -4,7 +4,7 @@ description: "Use when splitting a song into stems or making karaoke."
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [studio, stems, demucs, karaoke, vocals, source-separation, mps, local-inference]

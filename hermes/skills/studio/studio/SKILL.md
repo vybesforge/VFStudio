@@ -4,7 +4,7 @@ description: "Use when making any asset on Dylan's Mac. Routes to tools."
 version: 1.0.0
 author: Jimmy
 license: Apache-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [studio, router, local-inference, comfyui, blender, godot, orcaslicer, mlx-audio, apple-silicon]
