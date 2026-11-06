@@ -29,21 +29,23 @@ CONF = os.path.join(STACK, "config", "gpu-lanes.env")
 
 # unit -> (scope, lane key, port, role)
 SERVICES = [
-    ("comfyui",       "user",   "A", 8190, "stills (ComfyUI)"),
-    ("comfyui",       "user",   "B", 8189, "video + 3D (ComfyUI)"),
+    ("comfyui",       "user",   "A", 8189, "stills + audio (ComfyUI)"),
+    ("comfyui-b",     "user",   "B", 8190, "video + 3D (ComfyUI)"),
     ("vision-vl",     "user",   "A", 8200, "vision VLM"),
     ("llama-qwen14",  "user",   "B", 8102, "writer LLM (backend of :8101)"),
     ("voice-tts",     "system", "A", 3200, "TTS"),
     ("voice-stt",     "system", "A", 3201, "STT"),
 ]
 # dedupe: comfyui appears twice only for display (one unit, two lanes over time)
+# Port -> lane is the contract Dylan set on 2026-11-06: :8189 answers on PCI 2
+# (lane A, stills + audio), :8190 answers on PCI 3 (lane B, video + 3D).
 UNIT_LANE = {
-    "comfyui": "B", "comfyui-b": "A", "vision-vl": "A",
+    "comfyui": "A", "comfyui-b": "B", "vision-vl": "A",
     "llama-qwen14": "B", "voice-tts": "A", "voice-stt": "A",
 }
 UNIT_ROLE = {
-    "comfyui": "video + 3D (ComfyUI :8189)",
-    "comfyui-b": "stills (ComfyUI :8190)",
+    "comfyui": "stills + audio (ComfyUI :8189)",
+    "comfyui-b": "video + 3D (ComfyUI :8190)",
     "vision-vl": "vision VLM :8200",
     "llama-qwen14": "writer LLM (backend :8102, gateway :8101)",
     "voice-tts": "TTS :3200",

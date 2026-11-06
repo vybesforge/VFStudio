@@ -131,8 +131,8 @@ The port **is** the lane. Port → PCI address is fixed and enforced by `bin/gpu
 
 | Port | Lane | PCI | Card | Runs |
 |---|---|---|---|---|
-| `8189` | B | `0000:03:00.0` | V100 B | ComfyUI video + 3D, the lazy writer |
-| `8190` | A | `0000:02:00.0` | V100 A | ComfyUI stills, audio + music |
+| `8189` | A | `0000:02:00.0` | V100 A | ComfyUI stills + audio, and the `:8188` shim target |
+| `8190` | B | `0000:03:00.0` | V100 B | ComfyUI video + 3D, the lazy writer |
 | `8200` | A | `0000:02:00.0` | V100 A | vision VLM |
 | `3200` | A | `0000:02:00.0` | V100 A | TTS |
 | `3201` | A | `0000:02:00.0` | V100 A | STT |

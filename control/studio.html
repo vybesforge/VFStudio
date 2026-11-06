@@ -140,10 +140,10 @@
 </header>
 <nav>
   <button data-tab="index" title="Index · a map of the whole studio: every tab, service, endpoint, tool, model set and workflow on one page">Index</button>
-  <button data-tab="image" class="active" title="Image · generate, upscale, canny re-render, Qwen edit — stills lane, V100 A (:8190)">Image</button>
-  <button data-tab="video" title="Video · Wan 2.2 / HunyuanVideo 1.5 text- or image-to-video — video lane, V100 B (:8189); clips land in output/video">Video</button>
+  <button data-tab="image" class="active" title="Image · generate, upscale, canny re-render, Qwen edit — stills lane, V100 A (:8189)">Image</button>
+  <button data-tab="video" title="Video · Wan 2.2 / HunyuanVideo 1.5 text- or image-to-video — video lane, V100 B (:8190); clips land in output/video">Video</button>
   <button data-tab="3d" title="3D & VR · WebXR asset room, joint picker, Animate, TRELLIS.2 photo→mesh, prints and game projects">3D &amp; VR</button>
-  <button data-tab="sound" title="Sound · SFX, music and Demucs stem split — audio lane, V100 A (:8190)">Sound</button>
+  <button data-tab="sound" title="Sound · SFX, music and Demucs stem split — audio lane, V100 A (:8189)">Sound</button>
   <button data-tab="voice" title="Voice · TTS on voice-tts:3200, transcription on voice-stt:3201">Voice</button>
   <button data-tab="write" title="Write · the uncensored local writer model: prose, screenplay, dialogue, lore">Write</button>
   <button data-tab="vision" title="Vision · local VLM: describe / ask / OCR an image, or snap the camera">Vision</button>
@@ -169,7 +169,7 @@
 <!-- IMAGE -->
 <section class="tab active" id="tab-image"><div class="two">
   <div>
-    <div class="card"><div class="name">Text → image <span class="tag" title="stills lane — Dylan, Nov 2026">V100 A · :8190</span></div>
+    <div class="card"><div class="name">Text → image <span class="tag" title="stills lane — Dylan, Nov 2026">V100 A · :8189</span></div>
       <label>prompt</label><textarea id="im-prompt" placeholder="describe the image you want… (this box starts empty; nothing runs until you press Generate)"></textarea>
       <div class="fields">
         <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option><option value="animagine">Animagine XL 4.0 · anime / illustration · 30 steps</option></select></div>
@@ -211,7 +211,7 @@
 <!-- VIDEO -->
 <section class="tab" id="tab-video"><div class="two">
   <div>
-    <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B · V100 B :8189</span></div>
+    <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B · V100 B :8190</span></div>
       <label>prompt</label><textarea id="vd-prompt">a mulefoot hog walks slowly across a sunlit barn floor, dust in the air, cinematic</textarea>
       <label>start image (optional — image-to-video)</label>
       <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>

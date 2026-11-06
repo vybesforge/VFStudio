@@ -25,7 +25,17 @@ Pitfalls encoded here:
 import argparse, json, os, shutil, sys, time, urllib.request
 from pathlib import Path
 
-COMFY = os.environ.get("COMFY_HOST", "http://127.0.0.1:8189")
+def _lane_url(name):
+    import os as _o, sys as _s
+    _s.path.insert(0, _o.path.expanduser("~/media-stack/lib"))
+    try:
+        import lanes
+        return lanes.url(name)
+    except Exception:
+        return {"stills": "http://127.0.0.1:8189", "video": "http://127.0.0.1:8190"}[name]
+
+
+COMFY = os.environ.get("COMFY_HOST") or _lane_url("3d")
 ROOT = Path(os.environ.get("COMFY_ROOT", "/home/billie/comfy/ComfyUI"))
 TEMPLATE = Path(os.environ.get(
     "TRELLIS_TEMPLATE",

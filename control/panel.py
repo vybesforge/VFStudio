@@ -116,11 +116,11 @@ def _services() -> dict:
     # system, so the panel monitors them (cmd=None -> start/stop defer to systemctl).
     on_linux = sys.platform.startswith("linux")
     comfy.update({
-        "external": ("comfyui.service :8189 (V100 B, video/3D) + comfyui-b.service :8190 "
-                     "(V100 A, stills), shimmed to :8188") if on_linux
+        "external": ("comfyui.service :8189 (V100 A, stills/audio) + comfyui-b.service :8190 "
+                     "(V100 B, video/3D), shimmed to :8188") if on_linux
                     else "ComfyUI (:8188, external)",
-        "desc": ("Image, video + 3D generation — two ComfyUI instances: video/3D on "
-                 ":8189, stills on :8190") if on_linux
+        "desc": ("Image, video + 3D generation — two ComfyUI instances: stills + audio on "
+                 ":8189 (PCI 2), video + 3D on :8190 (PCI 3)") if on_linux
                 else "Image, video + 3D generation (ComfyUI)",
     })
     return {
@@ -1253,8 +1253,22 @@ STUDIO_HTML = Path(__file__).parent / "studio.html"
 # too. A process is named by matching its pid — or an ancestor of it, since GPU
 # work is usually forked — to a listening service port or a live Studio job pid.
 _GPU_MAP_FILE = Path("/etc/default/vf-gpus")
+def _comfy_label(port):
+    """Name the lane, not just the port — the port/card pairing can change."""
+    try:
+        sys.path.insert(0, str(STACK / "lib"))
+        import lanes  # noqa
+        if int(port) == lanes.port("video"):
+            return "ComfyUI video+3D :%d" % port
+        if int(port) == lanes.port("stills"):
+            return "ComfyUI stills+audio :%d" % port
+    except Exception:
+        pass
+    return "ComfyUI :%d" % port
+
+
 _SVC_PORTS = {3200: "voice-tts", 3201: "voice-stt", 8880: "kokoro",
-              8000: "llama-server", 8189: "ComfyUI :8189", 8190: "ComfyUI :8190",
+              8000: "llama-server", 8189: _comfy_label(8189), 8190: _comfy_label(8190),
               8188: "ComfyUI :8188", 5001: "koboldcpp", 3389: "remote-desktop"}
 
 
