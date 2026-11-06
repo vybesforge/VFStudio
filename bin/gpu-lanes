@@ -199,6 +199,93 @@ def dropin_path(unit):
     return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user", "%s.service.d" % unit, "60-lane.conf")
 
 
+def _sysfs(uuid_to_idx=None):
+    """PCIe link truth straight from sysfs — no root, no guessing."""
+    out = []
+    for dev in sorted(os.listdir("/sys/bus/pci/devices")):
+        base = "/sys/bus/pci/devices/" + dev
+        try:
+            cls = open(base + "/class").read().strip()
+            if not cls.startswith("0x03"):          # display controllers only
+                continue
+            speed = open(base + "/current_link_speed").read().strip()
+            maxspeed = open(base + "/max_link_speed").read().strip()
+            width = int(open(base + "/current_link_width").read().strip())
+            maxw = int(open(base + "/max_link_width").read().strip())
+        except (OSError, ValueError):
+            continue
+        slot = "?"
+        for sdir in os.listdir("/sys/bus/pci/slots"):
+            try:
+                if open("/sys/bus/pci/slots/" + sdir + "/address").read().strip() == dev.rsplit(":", 1)[0]:
+                    slot = sdir
+            except OSError:
+                pass
+        name = open(base + "/uevent").read()
+        drv = ""
+        for line in name.splitlines():
+            if line.startswith("DRIVER="):
+                drv = line.split("=", 1)[1]
+        gts = float(speed.split()[0]) if speed.split()[0].replace(".", "").isdigit() else 0.0
+        # theoretical payload bandwidth: GT/s * lanes * 128/130 encoding / 8 bits
+        theo = gts * width * (128 / 130) / 8 if gts else 0.0
+        out.append({"bus": dev, "slot": slot, "speed": speed, "max_speed": maxspeed,
+                    "width": width, "max_width": maxw, "theo": theo, "driver": drv})
+    return out
+
+
+def cmd_links(conf, bench=False):
+    rows = _sysfs()
+    uuid_of_idx = {}
+    for c in gpu_table():
+        uuid_of_idx[c["idx"]] = c["uuid"]
+    print("\n  PCIe links on billie  (sysfs current vs max)\n")
+    print("  %-9s %-6s %-14s %-8s %-10s %-12s %s" % ("BUS", "SLOT", "LINK", "WIDTH", "GEN", "THEORETICAL", "LANE / CARD"))
+    print("  " + "-" * 104)
+    for r in rows:
+        lane = next((k for k in "AB" if conf.get("GPU_%s_UUID" % k, "").endswith(r["bus"][-12:].replace(":", ""))), None)
+        # match by PCI address from nvidia-smi instead of string surgery
+        lane = None
+        for c in gpu_table():
+            if "0000:" + c["pci"] == r["bus"]:
+                lane = next((k for k in "AB" if conf.get("GPU_%s_UUID" % k) == c["uuid"]), None)
+                if lane is None:
+                    lane = "DISPLAY" if c["uuid"] == conf.get("GPU_DISPLAY_UUID") else "—"
+                r["name"] = c["name"]
+                break
+        width_flag = "" if r["width"] == r["max_width"] else "  (slot/card caps at x%d)" % r["max_width"]
+        print("  %-9s %-6s %-14s %-8s %-10s %-12s %s%s" % (
+            r["bus"], r["slot"], r["speed"] + " " + r["max_speed"].split()[0] + " max",
+            "x%d/x%d" % (r["width"], r["max_width"]), "Gen%d" % (3 if "8.0" in r["speed"] else 4),
+            "%.1f GB/s" % r["theo"], "lane " + str(lane) if lane and lane != "DISPLAY" else lane or "—",
+            width_flag))
+    print("\n  theoretical = GT/s x lanes x 128/130 (gen3 encoding) / 8.")
+    if bench:
+        py = "/home/billie/comfy/.venv-v100/bin/python"
+        if os.path.exists(py):
+            code = (
+                "import torch,time\n"
+                "for i in range(torch.cuda.device_count()):\n"
+                "    p=torch.cuda.get_device_properties(i)\n"
+                "    if p.total_memory < 6*2**30: continue\n"
+                "    torch.cuda.set_device(i)\n"
+                "    n=256*1024*1024\n"
+                "    s=torch.empty(n,dtype=torch.uint8,pin_memory=True); d=torch.empty(n,dtype=torch.uint8,device='cuda')\n"
+                "    torch.cuda.synchronize(); d.copy_(s); torch.cuda.synchronize()\n"
+                "    t=time.time()\n"
+                "    for _ in range(10): d.copy_(s)\n"
+                "    torch.cuda.synchronize(); h=n*10/(time.time()-t)/1e9\n"
+                "    t=time.time()\n"
+                "    for _ in range(10): s.copy_(d)\n"
+                "    torch.cuda.synchronize(); dd=n*10/(time.time()-t)/1e9\n"
+                "    print('  measured cuda:%d %-24s H2D %.1f GB/s  D2H %.1f GB/s' % (i,p.name,h,dd))\n"
+            )
+            r = sh([py, "-c", code])
+            print(r.stdout.rstrip() or r.stderr[-300:])
+    print()
+    return 0
+
+
 def cmd_apply(conf, restart):
     changed = []
     for unit in ["comfyui", "comfyui-b", "vision-vl", "llama-qwen14"]:
@@ -244,9 +331,10 @@ def cmd_apply(conf, restart):
 
 def main():
     ap = argparse.ArgumentParser(prog="gpu-lanes")
-    ap.add_argument("cmd", choices=["show", "check", "apply", "which"])
+    ap.add_argument("cmd", choices=["show", "check", "apply", "which", "links"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--restart", action="store_true")
+    ap.add_argument("--bench", action="store_true", help="links: also measure host<->device bandwidth")
     a = ap.parse_args()
     conf = load_conf()
     if a.cmd == "which":
@@ -260,6 +348,8 @@ def main():
         else:
             sys.exit("unknown lane: %s (A, B, video, stills, audio, display)" % a.arg)
         return 0
+    if a.cmd == "links":
+        return cmd_links(conf, bench="--bench" in sys.argv)
     if a.cmd == "apply":
         cmd_apply(conf, a.restart)
         return 0
