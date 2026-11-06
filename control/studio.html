@@ -139,6 +139,7 @@
   <div id="cards" class="gcards hdr"></div>
 </header>
 <nav>
+  <button data-tab="index" title="Index · a map of the whole studio: every tab, service, endpoint, tool, model set and workflow on one page">Index</button>
   <button data-tab="image" class="active" title="Image · generate, upscale, canny re-render, Qwen edit — stills lane, V100 A (:8190)">Image</button>
   <button data-tab="video" title="Video · Wan 2.2 / HunyuanVideo 1.5 text- or image-to-video — video lane, V100 B (:8189); clips land in output/video">Video</button>
   <button data-tab="3d" title="3D & VR · WebXR asset room, joint picker, Animate, TRELLIS.2 photo→mesh, prints and game projects">3D &amp; VR</button>
@@ -148,11 +149,22 @@
   <button data-tab="vision" title="Vision · local VLM: describe / ask / OCR an image, or snap the camera">Vision</button>
   <button data-tab="train" title="Train · LoRA datasets, training runs and the adapters they produce">Train</button>
   <button data-tab="models" title="Models · every weight file on this machine, with size and where it lives">Models</button>
+  <button data-tab="workflows" title="Workflows · every pipeline this box can run, what it does, which weights it needs and whether they are all present">Workflows</button>
   <button data-tab="services" title="Services · start/stop the local services and copy their endpoints elsewhere">Services</button>
   <button data-tab="resources" title="Resources · memory, disk, loaded models and the unload/stop controls">Resources</button>
 </nav>
 <div id="tabdesc"></div>
 <main>
+
+<!-- INDEX -->
+<section class="tab" id="tab-index">
+  <div class="card" id="ix-summary"></div>
+  <h2>Tabs</h2><div class="card" id="ix-tabs"></div>
+  <h2>Services &amp; endpoints</h2><div class="card" id="ix-services"></div>
+  <h2>Workflows</h2><div class="card" id="ix-workflows"></div>
+  <h2>Model sets</h2><div class="card" id="ix-models"></div>
+  <h2>Tools</h2><div class="card" id="ix-tools"></div>
+</section>
 
 <!-- IMAGE -->
 <section class="tab active" id="tab-image"><div class="two">
@@ -411,6 +423,12 @@
   <h2>Tools</h2><div class="card" id="inv-tools"></div>
 </section>
 
+<!-- WORKFLOWS -->
+<section class="tab" id="tab-workflows">
+  <div class="card" id="wf-summary"></div>
+  <div id="wf-body"></div>
+</section>
+
 <!-- SERVICES -->
 <section class="tab" id="tab-services">
   <div class="card" style="margin-bottom:14px;padding:10px 14px">
@@ -472,9 +490,116 @@ const TAB_DESC={
   train:"LoRA datasets, training runs and the adapters they produce. Pick a ready-to-train dataset and watch the log.",
   models:"Every weight file on this machine that the stack knows how to load, with size and location.",
   services:"Start, stop and restart the local services; each card carries its endpoints for other programs.",
-  resources:"Memory, disk and what is loaded right now. Unload models to free RAM without stopping anything."};
+  resources:"Memory, disk and what is loaded right now. Unload models to free RAM without stopping anything.",
+  workflows:"Every pipeline this box can run: what it does, the entry point that runs it, and the weights it needs. READY means every file is on disk right now; BLOCKED lists exactly what is missing.",
+  index:"A map of the whole studio: what each tab is for, which services answer on which ports, what each workflow needs, and every model set and tool on the box — all rolled up live."};
 function onTabDesc(t){ const el=document.getElementById('tabdesc'); if(el) el.textContent=TAB_DESC[t]||''; }
-function onTab(t){ onTabDesc(t); if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='services'){refreshServices();} if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
+function onTab(t){ onTabDesc(t); if(['image','video','3d','sound','voice'].includes(t)) loadGallery(t); if(t==='write'){loadGallery('text');svcState();} if(t==='vision'){loadGallery('camera');svcState();} if(t==='train') loadTrain(); if(t==='image') loadLoras(); if(t==='models') loadInventory(); if(t==='workflows') loadWorkflows(); if(t==='index') loadIndex(); if(t==='services'){refreshServices();} if(t==='resources') refreshResources(); if(t==='3d') refreshVr(); }
+
+// index — a live roll-up: tabs, services, endpoints, workflows, model sets, tools
+function ixGB(n){ return (n/1e9).toFixed(1)+' GB'; }
+function ixRow(label, value, colour){
+  return '<div class="grow"><span class="w">'+label+'</span><span class="m"'+(colour?' style="color:'+colour+'"':'')+'>'+value+'</span></div>';
+}
+async function loadIndex(force){
+  const box=$('ix-summary'); if(!box) return;
+  if(!force && box.dataset.loaded) return;
+  box.innerHTML='<div class="muted">loading…</div>';
+  try{
+    const [st,res,eps,inv,wf] = await Promise.all([
+      fetch('/api/status').then(r=>r.json()),
+      fetch('/api/resources').then(r=>r.json()),
+      fetch('/api/endpoints').then(r=>r.json()),
+      fetch('/api/studio/inventory').then(r=>r.json()),
+      fetch('/api/studio/workflows').then(r=>r.json()),
+    ]);
+    box.dataset.loaded='1';
+    const svcs=Object.entries(st.services||{});
+    const up=svcs.filter(s=>s[1].running).length;
+    const m=res.mem||{}, d=res.disk||{};
+    let h='<div class="gsec"><span>at a glance</span><span>'+new Date().toLocaleTimeString()+'</span></div>'
+      + ixRow('services up', up+' / '+svcs.length, up===svcs.length?'var(--cyan)':'var(--amber)')
+      + ixRow('disk free', ixGB(d.free)+' of '+ixGB(d.total), (d.free/1e9)<30?'var(--amber)':'')
+      + ixRow('memory', ixGB(m.total-m.free)+' used of '+ixGB(m.total))
+      + ixRow('swap', ixGB(m.swap_used||0)+' used of '+ixGB(m.swap_total||0))
+      + ixRow('workflows ready', wf.ready+' / '+wf.total, wf.ready===wf.total?'var(--cyan)':'var(--amber)')
+      + ixRow('models on disk', inv.present_gb+' GB');
+    (((res.gpu||{}).gpus)||[]).forEach(g=>{
+      h+=ixRow('gpu '+g.index+' · '+g.name, ixGB(g.mem_used)+' / '+ixGB(g.mem_total)+(g.temp?' · '+g.temp+'°C':''));
+    });
+    box.innerHTML=h;
+
+    $('ix-tabs').innerHTML=Object.entries(TAB_DESC).map(([k,v])=>
+      '<div class="grow" style="align-items:flex-start"><button class="ix-tabgo" data-go="'+k+'" style="flex:0 0 88px;margin-right:8px">'+(k==='3d'?'3D & VR':k)+'</button><span class="w muted" style="white-space:normal">'+v+'</span></div>').join('');
+    document.querySelectorAll('.ix-tabgo').forEach(b=>b.onclick=()=>{
+      const t=document.querySelector('nav button[data-tab="'+b.dataset.go+'"]'); if(t) t.click();
+    });
+
+    let sh='';
+    svcs.forEach(s=>{
+      const k=s[0], v=s[1];
+      sh+='<div class="gsec"><span>'+v.label+' · :'+v.port+'</span><span style="color:'+(v.running?'var(--cyan)':'var(--amber)')+'">'
+        + (v.running?(v.responding?'up':'up, not answering'):'down')+'</span></div>'
+        + '<div class="grow"><span class="w muted" style="white-space:normal">'+(v.desc||'')+'</span></div>';
+    });
+    (eps.items||[]).forEach(e=>{
+      sh+='<div class="grow" style="margin-top:6px"><span class="w"><code style="color:var(--fg)">'+(e.env||'')+'</code> '+(e.label||'')+'</span><span class="m">:'+e.port+(e.path||'')+'</span></div>';
+    });
+    $('ix-services').innerHTML=sh;
+
+    $('ix-workflows').innerHTML=(wf.lanes||[]).map(ln=>{
+      const r=ln.items.filter(i=>i.ready).length;
+      return '<div class="gsec"><span>'+ln.lane+'</span><span>'+r+'/'+ln.items.length+' ready</span></div>'
+        + ln.items.map(i=>ixRow((i.ready?'':'⚠ ')+i.name, i.ready?'ready':('missing '+i.missing.length), i.ready?'':'var(--amber)')).join('');
+    }).join('');
+
+    $('ix-models').innerHTML=(inv.groups||[]).map(g=>{
+      const have=g.models.filter(x=>x.present).length;
+      const gb=g.models.filter(x=>x.present).reduce((s,x)=>s+(x.gb||0),0);
+      const missing=g.models.filter(x=>!x.present).map(x=>x.id);
+      return '<div class="gsec"><span>'+g.label+'</span><span>'+have+'/'+g.models.length+' · '+gb.toFixed(1)+' GB</span></div>'
+        + (missing.length?'<div class="grow"><span class="w" style="color:var(--amber)">missing: '+missing.join(', ')+'</span></div>':'');
+    }).join('')
+    + '<div class="gsec"><span>audio (HF cache)</span><span>'+(inv.audio||[]).filter(a=>a.present).length+'/'+(inv.audio||[]).length+'</span></div>';
+
+    const tools=inv.tools||[];
+    $('ix-tools').innerHTML='<div class="gsec"><span>installed</span><span>'+tools.filter(t=>t.present).length+'/'+tools.length+'</span></div>'
+      + tools.map(t=>ixRow((t.present?'':'⚠ ')+t.name, t.desc||'', t.present?'':'var(--amber)')).join('');
+  }catch(e){ box.innerHTML='<div class="card">could not build index: '+e+'</div>'; }
+}
+
+// workflows — one card per pipeline: purpose, entry point, weights on disk
+function wfChip(ready){
+  const bg = ready ? 'background:#0f2432;color:var(--cyan)' : 'background:#2a1d0a;color:var(--amber)';
+  return '<span style="font-size:10px;font-weight:700;letter-spacing:.08em;padding:2px 7px;border-radius:5px;flex:0 0 auto;'+bg+'">'+(ready?'READY':'BLOCKED')+'</span>';
+}
+async function loadWorkflows(force){
+  const box=$('wf-body'); if(!box) return;
+  if(!force && box.dataset.loaded) return;
+  box.innerHTML='<div class="card muted">loading…</div>';
+  try{
+    const d=await (await fetch('/api/studio/workflows')).json();
+    box.dataset.loaded='1';
+    const s=$('wf-summary');
+    if(s) s.innerHTML='<b>'+d.ready+' of '+d.total+' workflows ready</b>'
+      +(d.blocked.length?(' <span class="muted">· blocked: '+d.blocked.join(', ')+'</span>'):'');
+    let h='';
+    for(const ln of d.lanes){
+      h+='<h2>'+ln.lane+'</h2>';
+      for(const w of ln.items){
+        const have=w.models.filter(m=>m.present).length;
+        h+='<div class="card" style="margin-bottom:10px">'
+          +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><b style="flex:1;font-size:12.5px">'+w.name+'</b>'+wfChip(w.ready)+'</div>'
+          +'<div class="muted" style="font-size:11.5px;line-height:1.5;margin-bottom:8px">'+w.what+'</div>'
+          +'<div style="font-size:11px;color:var(--mut);margin-bottom:8px">run: <code style="color:var(--fg)">'+w.run+'</code></div>'
+          +'<div class="gsec"><span>weights</span><span>'+have+'/'+w.models.length+' on disk</span></div>'
+          +w.models.map(m=>'<div class="grow"><span class="w">'+(m.present?'':'⚠ ')+m.name+'</span><span class="m">'+(m.gb?m.gb+' GB':'<span style="color:var(--amber)">missing</span>')+'</span></div>').join('')
+          +'</div>';
+      }
+    }
+    box.innerHTML=h;
+  }catch(e){ box.innerHTML='<div class="card">could not load workflows: '+e+'</div>'; }
+}
 
 function vsize(id){ const s=$(id).value; if(!s||s==='auto') return {}; const [w,h]=s.split('x').map(Number); return {w,h}; }
 

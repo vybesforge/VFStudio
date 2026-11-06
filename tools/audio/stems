@@ -1,7 +1,7 @@
-#!/Users/dcruse/media-stack/stems/.venv/bin/python
-"""stems — local music stem separation (Demucs on Apple Silicon MPS).
+#!/usr/bin/env python3
+"""stems — local music stem separation (Demucs; CUDA / Metal / CPU).
 
-Everything runs on this Mac. No cloud calls.
+Everything runs on this machine. No cloud calls.
 
   stems split <audio> [--model htdemucs|htdemucs_ft|htdemucs_6s|mdx_extra] [--two-stems vocals] [--out DIR] [--mp3]
   stems karaoke <audio> [--model ...] [--out DIR] [--mp3]     (= --two-stems vocals; returns no_vocals)
@@ -27,6 +27,73 @@ OUT_ROOT = f"{STACK}/output/stems"
 MODELS = ["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx_extra"]
 STEM_NAMES = ["drums", "bass", "other", "vocals", "guitar", "piano"]
 AUDIO_EXT = (".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".aiff", ".aif", ".wma", ".mp4", ".mov")
+
+
+# ── portable venv bootstrap ────────────────────────────────────────────────
+# The shebang cannot be machine-specific (this repo is shared between a Mac and
+# this Linux box), so re-exec into $STACK/stems/.venv when we are not already
+# running under it. If that venv is missing we fall through and `stems status`
+# reports venv_ok=false rather than pretending.
+def _bootstrap_venv():
+    try:
+        if os.path.exists(VENV_PY) and os.path.realpath(sys.executable) != os.path.realpath(VENV_PY):
+            os.execv(VENV_PY, [VENV_PY, os.path.abspath(__file__)] + sys.argv[1:])
+    except Exception as e:
+        print(f"warning: could not re-exec into {VENV_PY} ({e}); continuing", file=sys.stderr)
+
+
+def _pin_cuda_device():
+    """Pin CUDA_VISIBLE_DEVICES to a real compute card — by UUID, never by index.
+
+    Two traps this avoids, both seen on billie:
+    1. nvidia-smi indices are positional and do NOT match CUDA ordinals
+       (nvidia-smi 0/1/2 = 750 Ti / V100 A / V100 B, CUDA 0/1/2 = V100 / V100 / 750 Ti).
+       Passing an nvidia-smi index through put a 2 GB sm_50 display card in front of
+       Demucs, which then fails or crawls in fp32.
+    2. Choosing purely by free VRAM picks whichever card is idle, which may be the
+       video lane. Audio belongs on the audio card.
+
+    Order of preference: explicit CUDA_VISIBLE_DEVICES / STEMS_DEVICE, then the
+    audio-lane UUID from /etc/default/vf-gpus (GPU_A on this box), then the card
+    with the most free memory among those big enough to compute.
+    """
+    if os.environ.get("CUDA_VISIBLE_DEVICES") or os.environ.get("STEMS_DEVICE"):
+        return
+    smi = shutil.which("nvidia-smi")
+    if not smi:
+        return
+    try:
+        out = subprocess.run(
+            [smi, "--query-gpu=index,name,uuid,memory.free,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10).stdout
+        cards = []
+        for line in out.strip().splitlines():
+            parts = [t.strip() for t in line.split(",")]
+            if len(parts) >= 5:
+                cards.append({"idx": parts[0], "name": parts[1], "uuid": parts[2],
+                              "free": int(parts[3]), "total": int(parts[4])})
+        # a card that cannot hold a model is not a candidate (750 Ti: 2 GB, sm_50)
+        usable = [c for c in cards if c["total"] >= 6000]
+        if not usable:
+            return
+        lane = None
+        try:
+            for ln in open("/etc/default/vf-gpus"):
+                if ln.strip().startswith("GPU_A="):
+                    lane = ln.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            lane = None
+        pick = next((c for c in usable if lane and c["uuid"] == lane), None)
+        if pick is None:
+            pick = max(usable, key=lambda c: c["free"])
+        os.environ["CUDA_VISIBLE_DEVICES"] = pick["uuid"]
+        print("note: pinned CUDA_VISIBLE_DEVICES=%s (%s, %s MiB free)"
+              % (pick["uuid"], pick["name"], pick["free"]), file=sys.stderr)
+    except Exception:
+        pass
+
+_bootstrap_venv()
 
 
 def _find_ffmpeg(name="ffmpeg"):
@@ -172,7 +239,7 @@ def cmd_status(_):
     except Exception as e:
         info["ok"] = False
         info["error"] = f"import failed: {e}"
-    info["device"] = "mps" if info.get("mps_available") else "cpu"
+    info["device"] = pick_device()   # what a run would actually use, not mps-or-cpu
     # demucs 4.1 downloads weights from the HF hub: ~/.cache/huggingface/hub/models--adefossez--<Repo>/
     # (htdemucs -> HTDemucs, htdemucs_ft -> HTDemucs-ft, mdx_extra -> Demucs-mdx_extra).
     hub = os.environ.get("HF_HUB_CACHE") or os.path.join(os.environ.get("HF_HOME", f"{HOME}/.cache/huggingface"), "hub")
@@ -189,6 +256,7 @@ def cmd_status(_):
 
 
 def main():
+    _pin_cuda_device()
     ap = argparse.ArgumentParser(prog="stems", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 

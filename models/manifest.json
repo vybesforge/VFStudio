@@ -3,7 +3,7 @@
  "models": [
   {
    "id": "animagine-xl-4.0",
-   "role": "image/anime (Animagine XL 4.0 \u2014 SDXL anime finetune, cel-shaded illustration / character sheets; OpenRAIL++-M)",
+   "role": "image/anime (Animagine XL 4.0 — SDXL anime finetune, cel-shaded illustration / character sheets; OpenRAIL++-M)",
    "path": "checkpoints/animagine-xl-4.0-opt.safetensors",
    "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0-opt.safetensors",
    "gb": 6.9
@@ -52,7 +52,7 @@
   },
   {
    "id": "sa3-small-sfx",
-   "role": "sfx/dedicated (Stable Audio 3 Small-SFX \u2014 purpose-built for sound effects)",
+   "role": "sfx/dedicated (Stable Audio 3 Small-SFX — purpose-built for sound effects)",
    "path": "checkpoints/stable_audio_3_small_sfx.safetensors",
    "url": "https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_small_sfx.safetensors",
    "gb": 3.5
@@ -94,7 +94,7 @@
   },
   {
    "id": "qwen-image-edit-2509-gguf",
-   "role": "image/edit Q4 GGUF \u2014 use this on Apple Silicon (fp8 upcasts to 39 GB bf16 on MPS; Q4 stays ~13 GB)",
+   "role": "image/edit Q4 GGUF — use this on Apple Silicon (fp8 upcasts to 39 GB bf16 on MPS; Q4 stays ~13 GB)",
    "path": "unet/Qwen-Image-Edit-2509-Q4_K_M.gguf",
    "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_M.gguf",
    "gb": 13.1
@@ -248,14 +248,14 @@
   },
   {
    "id": "Wan2.2-I2V-A14B-HighNoise-Q6_K",
-   "role": "video (Wan 2.2 A14B i2v \u2014 higher-quant Q6_K kept)",
+   "role": "video (Wan 2.2 A14B i2v — higher-quant Q6_K kept)",
    "path": "unet/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf",
    "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf",
    "gb": 12.0
   },
   {
    "id": "Wan2.2-I2V-A14B-LowNoise-Q6_K",
-   "role": "video (Wan 2.2 A14B i2v \u2014 higher-quant Q6_K kept)",
+   "role": "video (Wan 2.2 A14B i2v — higher-quant Q6_K kept)",
    "path": "unet/Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf",
    "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/LowNoise/Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf",
    "gb": 12.0
@@ -469,6 +469,69 @@
    "path": "frame_interpolation/rife_v4.26.safetensors",
    "url": "",
    "gb": 0.02
+  },
+  {
+   "id": "acestep-v15-xl-sft",
+   "role": "music/full songs XL (ACE-Step 1.5 SFT, 4B DiT decoder — highest-fidelity ACE-Step tier; use the resident qwen_1.7b_ace15 LM encoder, all LM sizes are XL-compatible)",
+   "path": "diffusion_models/acestep_v1.5_xl_sft_bf16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/ACE-Step-1.5/resolve/main/split_files/diffusion_models/acestep_v1.5_xl_sft_bf16.safetensors",
+   "gb": 9.97
+  },
+  {
+   "id": "wan2.2-s2v-14b-fp8",
+   "role": "video/singing lipsync (Wan 2.2 S2V 14B — one reference image + an audio track -> lip-synced performance video; the MV 'character sings the song' model)",
+   "path": "diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan-2.2/resolve/main/split_files/diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors",
+   "gb": 16.39
+  },
+  {
+   "id": "wav2vec2-large-english-fp16",
+   "role": "audio encoder (required by the Wan 2.2 S2V graph)",
+   "path": "audio_encoders/wav2vec2_large_english_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan-2.2/resolve/main/split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors",
+   "gb": 0.63
+  },
+  {
+   "id": "clip-vision-h",
+   "role": "clip_vision (required by Wan Animate 2 motion transfer)",
+   "path": "clip_vision/clip_vision_h.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/clip_vision/clip_vision_h.safetensors",
+   "gb": 1.26
+  },
+  {
+   "id": "wan-animate2-lightx2v-lora",
+   "role": "video/lora (Wan Animate 2 accel lora; pairs with the animate-2 int8 model)",
+   "path": "loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+   "gb": 0.74
+  },
+  {
+   "id": "qwen-edit-2509-lightning-4steps",
+   "role": "image/lora (4-step Lightning for Qwen-Image-Edit 2509 — REQUIRED by `gen edit --fast`; was referenced but missing)",
+   "path": "loras/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+   "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+   "gb": 0.85
+  },
+  {
+   "id": "qwen-edit-2509-multiple-angles",
+   "role": "image/lora (Qwen-Edit-2509-Multiple-angles — the A-pose turnaround LoRA; was referenced but missing)",
+   "path": "loras/Qwen-Edit-2509-Multiple-angles.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Edit-2509-Multiple-angles.safetensors",
+   "gb": 0.24
+  },
+  {
+   "id": "wan-animate-2-int8",
+   "role": "video/character animation (Wan Animate 2 14B int8 convrot — reference image = WHO, driving video = WHAT MOTION; transfers motion with identity preserved, no pose extraction, background regenerated from the prompt)",
+   "path": "diffusion_models/wan_animate_2_int8_convrot.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/diffusion_models/wan_animate_2_int8_convrot.safetensors",
+   "gb": 16.65
+  },
+  {
+   "id": "pepperahi-sdxl",
+   "role": "identity LoRA for the self-portrait / person-scene lanes (local; no public mirror)",
+   "path": "loras/pepperahi-sdxl.safetensors",
+   "url": "",
+   "gb": 0.11
   }
  ],
  "_note_3d": "Hunyuan3D 2.0/2.1 shape+paint weights were purged 2026-10-31 to free disk; the 3D lane is TRELLIS.2 (trellis_2_bf16 + shape/texture VAEs). Re-fetch only if a project needs the old route.",
