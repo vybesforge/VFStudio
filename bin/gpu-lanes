@@ -217,7 +217,7 @@ def _sysfs(uuid_to_idx=None):
         slot = "?"
         for sdir in os.listdir("/sys/bus/pci/slots"):
             try:
-                if open("/sys/bus/pci/slots/" + sdir + "/address").read().strip() == dev.rsplit(":", 1)[0]:
+                if open("/sys/bus/pci/slots/" + sdir + "/address").read().strip() == dev.rsplit(".", 1)[0]:
                     slot = sdir
             except OSError:
                 pass
