@@ -19,7 +19,10 @@ craft (show-don't-tell, concrete detail, no summaries unless asked).
 """
 import argparse, json, os, sys, time, urllib.request
 
-HOST = os.environ.get("LLM_HOST", "http://127.0.0.1:8081")
+HOST = os.environ.get(
+    "LLM_HOST",
+    "http://127.0.0.1:8081" if sys.platform == "darwin" else "http://127.0.0.1:8101",
+)
 STACK = os.path.expanduser("~/media-stack")
 
 BASE_SYSTEM = (

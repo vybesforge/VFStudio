@@ -1,81 +1,476 @@
 {
-  "_doc": "Model manifest for ~/media-stack. `fetch-models` downloads anything missing (resumable). Paths are relative to ComfyUI/models/. Keep this in git; it is the reproducible list of what the stack needs.",
-  "models": [
-    {"id": "animagine-xl-4.0", "role": "image/anime (Animagine XL 4.0 — SDXL anime finetune, cel-shaded illustration / character sheets; OpenRAIL++-M)", "path": "checkpoints/animagine-xl-4.0-opt.safetensors",
-     "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0-opt.safetensors", "gb": 6.9},
-    {"id": "flux1-dev-fp8", "role": "image/quality", "path": "checkpoints/flux1-dev-fp8.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors", "gb": 17.2},
-
-    {"id": "z-image-turbo", "role": "image/fast (8 steps, Apache-2.0)", "path": "diffusion_models/z_image_turbo_bf16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors", "gb": 12.3},
-    {"id": "z-image-te", "role": "image/fast text encoder", "path": "text_encoders/qwen_3_4b.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors", "gb": 8.0},
-    {"id": "z-image-vae", "role": "image/fast vae", "path": "vae/ae.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors", "gb": 0.34},
-    {"id": "z-image-controlnet-union", "role": "image/control (canny/depth/pose/hed for Z-Image)", "path": "model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
-     "url": "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors", "gb": 3.1},
-
-    {"id": "qwen-image-edit-2509", "role": "image/edit (instruction editing, turnarounds)", "path": "diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors", "gb": 20.4},
-    {"id": "sa3-small-sfx", "role": "sfx/dedicated (Stable Audio 3 Small-SFX — purpose-built for sound effects)", "path": "checkpoints/stable_audio_3_small_sfx.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_small_sfx.safetensors", "gb": 3.5},
-    {"id": "hyvideo15-720p-i2v", "role": "video/quality (HunyuanVideo 1.5 8.3B, 720p image-to-video, cfg-distilled; Wan 2.2 5B stays the fast path)", "path": "diffusion_models/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/diffusion_models/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors", "gb": 16.7},
-    {"id": "hyvideo15-480p-t2v", "role": "video/quality (HunyuanVideo 1.5 480p text-to-video, cfg-distilled)", "path": "diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors", "gb": 16.7},
-    {"id": "hyvideo15-vae", "role": "video/quality vae", "path": "vae/hunyuanvideo15_vae_fp16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/vae/hunyuanvideo15_vae_fp16.safetensors", "gb": 2.5},
-    {"id": "hyvideo15-byt5", "role": "video/quality glyph text encoder", "path": "text_encoders/byt5_small_glyphxl_fp16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors", "gb": 0.4},
-    {"id": "hyvideo15-sigclip", "role": "video/quality image encoder for i2v", "path": "clip_vision/sigclip_vision_patch14_384.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors", "gb": 0.9},
-    {"id": "qwen-image-edit-2509-gguf", "role": "image/edit Q4 GGUF — use this on Apple Silicon (fp8 upcasts to 39 GB bf16 on MPS; Q4 stays ~13 GB)", "path": "unet/Qwen-Image-Edit-2509-Q4_K_M.gguf",
-     "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_M.gguf", "gb": 13.1},
-    {"id": "qwen-2.5-vl-7b", "role": "image/edit text encoder", "path": "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors", "gb": 9.4},
-    {"id": "qwen-image-vae", "role": "image/edit vae", "path": "vae/qwen_image_vae.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors", "gb": 0.25},
-
-    {"id": "wan2.2-ti2v-5b", "role": "video/text+image-to-video 720p", "path": "diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "gb": 10.0},
-    {"id": "wan2.2-vae", "role": "video vae", "path": "vae/wan2.2_vae.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors", "gb": 1.4},
-    {"id": "umt5-xxl-fp8", "role": "video text encoder", "path": "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "gb": 6.7},
-
-    {"id": "stable-audio-open-1.0", "role": "sfx/text-to-sound (Stable Audio Open 1.0; needs text_encoders/t5-base)", "path": "checkpoints/stable-audio-open-1.0.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/stable-audio-open-1.0_repackaged/resolve/main/stable-audio-open-1.0.safetensors", "gb": 4.85},
-    {"id": "t5-base", "role": "sfx text encoder (required by stable-audio-open-1.0 template)", "path": "text_encoders/t5-base.safetensors",
-     "url": "https://huggingface.co/ComfyUI-Wiki/t5-base/resolve/main/t5-base.safetensors", "gb": 0.89},
-    {"id": "stable-audio-3-medium", "role": "sfx/music text-to-audio (newer, Stability community license)", "path": "checkpoints/stable_audio_3_medium.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_medium.safetensors", "gb": 9.2},
-    {"id": "t5gemma-b-b-ul2", "role": "stable-audio-3 text encoder", "path": "text_encoders/t5gemma_b_b_ul2.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/text_encoders/t5gemma_b_b_ul2.safetensors", "gb": 1.2},
-    {"id": "flux2-klein-4b", "role": "image/fast+edit (FLUX.2 klein 4B distilled; shares qwen_3_4b encoder with Z-Image)", "path": "diffusion_models/flux-2-klein-4b.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/diffusion_models/flux-2-klein-4b.safetensors", "gb": 7.75},
-    {"id": "flux2-vae", "role": "flux.2 vae", "path": "vae/flux2-vae.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors", "gb": 0.34},
-    {"id": "seedvr2-3b-int8", "role": "upscale/image+video diffusion upscaler (SeedVR2)", "path": "diffusion_models/seedvr2_3b_int8_convrot.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors", "gb": 3.46},
-    {"id": "seedvr2-vae", "role": "seedvr2 vae", "path": "vae/seedvr2_ema_vae_fp16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors", "gb": 0.5},
-    {"id": "ace-step-1.5-turbo-aio", "role": "music/full songs with lyrics (all-in-one)", "path": "checkpoints/ace_step_1.5_turbo_aio.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/checkpoints/ace_step_1.5_turbo_aio.safetensors", "gb": 10.0},
-
-    {"id": "4x-ultrasharp", "role": "upscale/detail", "path": "upscale_models/4x-UltraSharp.pth",
-     "url": "https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth", "gb": 0.07},
-    {"id": "realesrgan-x4plus", "role": "upscale/general", "path": "upscale_models/RealESRGAN_x4plus.pth",
-     "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth", "gb": 0.07},
-
-    {"id": "trellis2-int8", "role": "3d/image-to-mesh (TRELLIS.2, the gold path)", "path": "diffusion_models/trellis_2_int8_convrot.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/trellis2/resolve/main/split_files/diffusion_models/trellis_2_int8_convrot.safetensors", "gb": 5.3},
-    {"id": "trellis2-shape-vae", "role": "3d vae", "path": "vae/trellis_2_shape_vae_bf16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/trellis2/resolve/main/split_files/vae/trellis_2_shape_vae_bf16.safetensors", "gb": 1.1},
-    {"id": "trellis2-texture-vae", "role": "3d texture vae", "path": "vae/trellis_2_texture_vae_bf16.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/trellis2/resolve/main/split_files/vae/trellis_2_texture_vae_bf16.safetensors", "gb": 0.95},
-    {"id": "dinov3-L", "role": "3d image conditioning", "path": "clip_vision/dino_v3_L_naf_fp32.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/trellis2/resolve/main/split_files/clip_vision/dino_v3_L_naf_fp32.safetensors", "gb": 1.2},
-    {"id": "birefnet", "role": "background removal", "path": "background_removal/birefnet.safetensors",
-     "url": "https://huggingface.co/Comfy-Org/trellis2/resolve/main/split_files/background_removal/birefnet.safetensors", "gb": 0.44}
-  ]
+ "_doc": "Model manifest for ~/media-stack. `fetch-models` downloads anything missing (resumable). Paths are relative to ComfyUI/models/. Keep this in git; it is the reproducible list of what the stack needs.",
+ "models": [
+  {
+   "id": "animagine-xl-4.0",
+   "role": "image/anime (Animagine XL 4.0 \u2014 SDXL anime finetune, cel-shaded illustration / character sheets; OpenRAIL++-M)",
+   "path": "checkpoints/animagine-xl-4.0-opt.safetensors",
+   "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0-opt.safetensors",
+   "gb": 6.9
+  },
+  {
+   "id": "flux1-dev-fp8",
+   "role": "image/quality",
+   "path": "checkpoints/flux1-dev-fp8.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors",
+   "gb": 17.2
+  },
+  {
+   "id": "z-image-turbo",
+   "role": "image/fast (8 steps, Apache-2.0)",
+   "path": "diffusion_models/z_image_turbo_bf16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+   "gb": 12.3
+  },
+  {
+   "id": "z-image-te",
+   "role": "image/fast text encoder",
+   "path": "text_encoders/qwen_3_4b.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+   "gb": 8.0
+  },
+  {
+   "id": "z-image-vae",
+   "role": "image/fast vae",
+   "path": "vae/ae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
+   "gb": 0.34
+  },
+  {
+   "id": "z-image-controlnet-union",
+   "role": "image/control (canny/depth/pose/hed for Z-Image)",
+   "path": "model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
+   "url": "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
+   "gb": 3.1
+  },
+  {
+   "id": "qwen-image-edit-2509",
+   "role": "image/edit (instruction editing, turnarounds)",
+   "path": "diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+   "gb": 20.4
+  },
+  {
+   "id": "sa3-small-sfx",
+   "role": "sfx/dedicated (Stable Audio 3 Small-SFX \u2014 purpose-built for sound effects)",
+   "path": "checkpoints/stable_audio_3_small_sfx.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_small_sfx.safetensors",
+   "gb": 3.5
+  },
+  {
+   "id": "hyvideo15-720p-i2v",
+   "role": "video/quality (HunyuanVideo 1.5 8.3B, 720p image-to-video, cfg-distilled; Wan 2.2 5B stays the fast path)",
+   "path": "diffusion_models/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/diffusion_models/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors",
+   "gb": 16.7
+  },
+  {
+   "id": "hyvideo15-480p-t2v",
+   "role": "video/quality (HunyuanVideo 1.5 480p text-to-video, cfg-distilled)",
+   "path": "diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/diffusion_models/hunyuanvideo1.5_480p_t2v_cfg_distilled_fp16.safetensors",
+   "gb": 16.7
+  },
+  {
+   "id": "hyvideo15-vae",
+   "role": "video/quality vae",
+   "path": "vae/hunyuanvideo15_vae_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/vae/hunyuanvideo15_vae_fp16.safetensors",
+   "gb": 2.5
+  },
+  {
+   "id": "hyvideo15-byt5",
+   "role": "video/quality glyph text encoder",
+   "path": "text_encoders/byt5_small_glyphxl_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors",
+   "gb": 0.4
+  },
+  {
+   "id": "hyvideo15-sigclip",
+   "role": "video/quality image encoder for i2v",
+   "path": "clip_vision/sigclip_vision_patch14_384.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
+   "gb": 0.9
+  },
+  {
+   "id": "qwen-image-edit-2509-gguf",
+   "role": "image/edit Q4 GGUF \u2014 use this on Apple Silicon (fp8 upcasts to 39 GB bf16 on MPS; Q4 stays ~13 GB)",
+   "path": "unet/Qwen-Image-Edit-2509-Q4_K_M.gguf",
+   "url": "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_M.gguf",
+   "gb": 13.1
+  },
+  {
+   "id": "qwen-2.5-vl-7b",
+   "role": "image/edit text encoder",
+   "path": "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+   "gb": 9.4
+  },
+  {
+   "id": "qwen-image-vae",
+   "role": "image/edit vae",
+   "path": "vae/qwen_image_vae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+   "gb": 0.25
+  },
+  {
+   "id": "wan2.2-ti2v-5b",
+   "role": "video/text+image-to-video 720p",
+   "path": "diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+   "gb": 10.0
+  },
+  {
+   "id": "wan2.2-vae",
+   "role": "video vae",
+   "path": "vae/wan2.2_vae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors",
+   "gb": 1.4
+  },
+  {
+   "id": "umt5-xxl-fp8",
+   "role": "video text encoder",
+   "path": "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "gb": 6.7
+  },
+  {
+   "id": "stable-audio-open-1.0",
+   "role": "sfx/text-to-sound (Stable Audio Open 1.0; needs text_encoders/t5-base)",
+   "path": "checkpoints/stable-audio-open-1.0.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/stable-audio-open-1.0_repackaged/resolve/main/stable-audio-open-1.0.safetensors",
+   "gb": 4.85
+  },
+  {
+   "id": "t5-base",
+   "role": "sfx text encoder (required by stable-audio-open-1.0 template)",
+   "path": "text_encoders/t5-base.safetensors",
+   "url": "https://huggingface.co/ComfyUI-Wiki/t5-base/resolve/main/t5-base.safetensors",
+   "gb": 0.89
+  },
+  {
+   "id": "stable-audio-3-medium",
+   "role": "sfx/music text-to-audio (newer, Stability community license)",
+   "path": "checkpoints/stable_audio_3_medium.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_medium.safetensors",
+   "gb": 9.2
+  },
+  {
+   "id": "t5gemma-b-b-ul2",
+   "role": "stable-audio-3 text encoder",
+   "path": "text_encoders/t5gemma_b_b_ul2.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/text_encoders/t5gemma_b_b_ul2.safetensors",
+   "gb": 1.2
+  },
+  {
+   "id": "flux2-klein-4b",
+   "role": "image/fast+edit (FLUX.2 klein 4B distilled; shares qwen_3_4b encoder with Z-Image)",
+   "path": "diffusion_models/flux-2-klein-4b.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/diffusion_models/flux-2-klein-4b.safetensors",
+   "gb": 7.75
+  },
+  {
+   "id": "flux2-vae",
+   "role": "flux.2 vae",
+   "path": "vae/flux2-vae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+   "gb": 0.34
+  },
+  {
+   "id": "seedvr2-3b-int8",
+   "role": "upscale/image+video diffusion upscaler (SeedVR2)",
+   "path": "diffusion_models/seedvr2_3b_int8_convrot.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors",
+   "gb": 3.46
+  },
+  {
+   "id": "seedvr2-vae",
+   "role": "seedvr2 vae",
+   "path": "vae/seedvr2_ema_vae_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors",
+   "gb": 0.5
+  },
+  {
+   "id": "ace-step-1.5-turbo-aio",
+   "role": "music/full songs with lyrics (all-in-one)",
+   "path": "checkpoints/ace_step_1.5_turbo_aio.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/checkpoints/ace_step_1.5_turbo_aio.safetensors",
+   "gb": 10.0
+  },
+  {
+   "id": "4x-ultrasharp",
+   "role": "upscale/detail",
+   "path": "upscale_models/4x-UltraSharp.pth",
+   "url": "https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth",
+   "gb": 0.07
+  },
+  {
+   "id": "realesrgan-x4plus",
+   "role": "upscale/general",
+   "path": "upscale_models/RealESRGAN_x4plus.pth",
+   "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+   "gb": 0.07
+  },
+  {
+   "id": "trellis2-int8",
+   "role": "3d/image-to-mesh (TRELLIS.2, the gold path)",
+   "path": "diffusion_models/trellis_2_int8_convrot.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/diffusion_models/trellis_2_int8_convrot.safetensors",
+   "gb": 5.3
+  },
+  {
+   "id": "trellis2-shape-vae",
+   "role": "3d vae",
+   "path": "vae/trellis_2_shape_vae_bf16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors",
+   "gb": 1.1
+  },
+  {
+   "id": "trellis2-texture-vae",
+   "role": "3d texture vae",
+   "path": "vae/trellis_2_texture_vae_bf16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors",
+   "gb": 0.95
+  },
+  {
+   "id": "dinov3-L",
+   "role": "3d image conditioning",
+   "path": "clip_vision/dino_v3_L_naf_fp32.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/trellis2/resolve/main/split_files/clip_vision/dino_v3_L_naf_fp32.safetensors",
+   "gb": 1.2
+  },
+  {
+   "id": "birefnet",
+   "role": "background removal",
+   "path": "background_removal/birefnet.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/trellis2/resolve/main/split_files/background_removal/birefnet.safetensors",
+   "gb": 0.44
+  },
+  {
+   "id": "Wan2.2-I2V-A14B-HighNoise-Q6_K",
+   "role": "video (Wan 2.2 A14B i2v \u2014 higher-quant Q6_K kept)",
+   "path": "unet/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf",
+   "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf",
+   "gb": 12.0
+  },
+  {
+   "id": "Wan2.2-I2V-A14B-LowNoise-Q6_K",
+   "role": "video (Wan 2.2 A14B i2v \u2014 higher-quant Q6_K kept)",
+   "path": "unet/Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf",
+   "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/LowNoise/Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf",
+   "gb": 12.0
+  },
+  {
+   "id": "dino_v3_vit_l",
+   "role": "clip_vision",
+   "path": "clip_vision/dino_v3_vit_l.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/clip_vision/dino_v3_vit_l.safetensors",
+   "gb": 1.21
+  },
+  {
+   "id": "CLIP-ViT-H-14-laion2B-s32B-b79K",
+   "role": "clip_vision",
+   "path": "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+   "url": "https://huggingface.co/sharing1179/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors/resolve/main/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+   "gb": 2.53
+  },
+  {
+   "id": "pytorch_model",
+   "role": "image/video",
+   "path": "transformers/TencentGameMate/chinese-wav2vec2-base/pytorch_model.bin",
+   "url": "https://huggingface.co/TencentGameMate/chinese-wav2vec2-base/resolve/main/pytorch_model.bin",
+   "gb": 0.38
+  },
+  {
+   "id": "ip-adapter-plus_sdxl_vit-h",
+   "role": "image/control (IPAdapter)",
+   "path": "ipadapter/ip-adapter-plus_sdxl_vit-h.safetensors",
+   "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors",
+   "gb": 0.85
+  },
+  {
+   "id": "ip-adapter-plus-face_sd15",
+   "role": "image/control (IPAdapter)",
+   "path": "ipadapter/ip-adapter-plus-face_sd15.safetensors",
+   "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors",
+   "gb": 0.1
+  },
+  {
+   "id": "mm_sd_v15_v2",
+   "role": "video/animate (AnimateDiff SD1.5)",
+   "path": "animatediff_models/mm_sd_v15_v2.ckpt",
+   "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v15_v2.ckpt",
+   "gb": 1.82
+  },
+  {
+   "id": "RealVisXL_V5.0_fp16",
+   "role": "image/sdxl (RealVisXL 5.0)",
+   "path": "checkpoints/RealVisXL_V5.0_fp16.safetensors",
+   "url": "https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0_fp16.safetensors",
+   "gb": 6.94
+  },
+  {
+   "id": "ltx-video-2b-v0.9",
+   "role": "video (LTX-Video 2B)",
+   "path": "checkpoints/ltx-video-2b-v0.9.safetensors",
+   "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.safetensors",
+   "gb": 9.37
+  },
+  {
+   "id": "krea2_turbo_fp8_scaled",
+   "role": "image/fast (Krea 2 turbo)",
+   "path": "diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+   "gb": 13.14
+  },
+  {
+   "id": "qwen-image-Q6_K",
+   "role": "image/edit",
+   "path": "diffusion_models/qwen-image-Q6_K.gguf",
+   "url": "https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q6_K.gguf",
+   "gb": 16.82
+  },
+  {
+   "id": "ideogram4_fp8_scaled",
+   "role": "image (Ideogram 4)",
+   "path": "diffusion_models/ideogram4_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_fp8_scaled.safetensors",
+   "gb": 9.28
+  },
+  {
+   "id": "infinitetalk_single",
+   "role": "image/video (InfiniteTalk)",
+   "path": "diffusion_models/infinitetalk_single.safetensors",
+   "url": "https://huggingface.co/MeiGen-AI/InfiniteTalk/resolve/main/comfyui/infinitetalk_single.safetensors",
+   "gb": 2.71
+  },
+  {
+   "id": "trellis_2_bf16",
+   "role": "3d",
+   "path": "diffusion_models/trellis_2_bf16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/diffusion_models/trellis_2_bf16.safetensors",
+   "gb": 10.34
+  },
+  {
+   "id": "qwen-image-edit-2511-Q6_K",
+   "role": "image/edit",
+   "path": "diffusion_models/qwen-image-edit-2511-Q6_K.gguf",
+   "url": "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q6_K.gguf",
+   "gb": 16.85
+  },
+  {
+   "id": "acestep_v1.5_turbo",
+   "role": "image (AceStep turbo)",
+   "path": "diffusion_models/acestep_v1.5_turbo.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/ACE-Step-1.5/resolve/main/split_files/diffusion_models/acestep_v1.5_turbo.safetensors",
+   "gb": 4.79
+  },
+  {
+   "id": "wan2.1-i2v-14b-480p-Q4_K_M",
+   "role": "video (Wan 2.1 i2v 14B)",
+   "path": "diffusion_models/wan2.1-i2v-14b-480p-Q4_K_M.gguf",
+   "url": "https://huggingface.co/city96/Wan2.1-I2V-14B-480P-gguf/resolve/main/wan2.1-i2v-14b-480p-Q4_K_M.gguf",
+   "gb": 11.34
+  },
+  {
+   "id": "wan_2.1_vae",
+   "role": "vae",
+   "path": "vae/wan_2.1_vae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+   "gb": 0.25
+  },
+  {
+   "id": "ace_1.5_vae",
+   "role": "vae",
+   "path": "vae/ace_1.5_vae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/ACE-Step-1.5/resolve/main/split_files/vae/ace_1.5_vae.safetensors",
+   "gb": 0.34
+  },
+  {
+   "id": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise",
+   "role": "video/lora (Wan 2.2 lightx2v)",
+   "path": "loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+   "gb": 1.23
+  },
+  {
+   "id": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise",
+   "role": "video/lora (Wan 2.2 lightx2v)",
+   "path": "loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+   "gb": 1.23
+  },
+  {
+   "id": "qwen3vl_8b_fp8_scaled",
+   "role": "text encoder",
+   "path": "text_encoders/qwen3vl_8b_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors",
+   "gb": 10.59
+  },
+  {
+   "id": "qwen3vl_4b_fp8_scaled",
+   "role": "text encoder",
+   "path": "text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+   "gb": 5.24
+  },
+  {
+   "id": "umt5_xxl_fp16",
+   "role": "text encoder",
+   "path": "text_encoders/umt5_xxl_fp16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors",
+   "gb": 11.37
+  },
+  {
+   "id": "qwen3.5_9b_qwen_image_2.1_pe_t2i_w4a8",
+   "role": "text encoder",
+   "path": "text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i_w4a8.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i_w4a8.safetensors",
+   "gb": 6.72
+  },
+  {
+   "id": "t5xxl_fp16",
+   "role": "text encoder",
+   "path": "text_encoders/t5xxl_fp16.safetensors",
+   "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+   "gb": 9.79
+  },
+  {
+   "id": "Qwen3-VL-8B-Instruct-UD-Q4_K_XL",
+   "role": "text encoder",
+   "path": "text_encoders/Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf",
+   "url": "https://huggingface.co/unsloth/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf",
+   "gb": 5.15
+  },
+  {
+   "id": "qwen_0.6b_ace15",
+   "role": "text encoder",
+   "path": "text_encoders/qwen_0.6b_ace15.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/ACE-Step-1.5/resolve/main/split_files/text_encoders/qwen_0.6b_ace15.safetensors",
+   "gb": 1.19
+  },
+  {
+   "id": "qwen_1.7b_ace15",
+   "role": "text encoder",
+   "path": "text_encoders/qwen_1.7b_ace15.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/ACE-Step-1.5/resolve/main/split_files/text_encoders/qwen_1.7b_ace15.safetensors",
+   "gb": 3.71
+  },
+  {
+   "id": "clip-l",
+   "role": "SD1.5/SDXL CLIP-L text encoder (local; no public mirror recorded)",
+   "path": "clip/clip_l.safetensors",
+   "url": "",
+   "gb": 0.23
+  },
+  {
+   "id": "rife-4.26",
+   "role": "frame interpolation for the video chain (local; no public mirror recorded)",
+   "path": "frame_interpolation/rife_v4.26.safetensors",
+   "url": "",
+   "gb": 0.02
+  }
+ ],
+ "_note_3d": "Hunyuan3D 2.0/2.1 shape+paint weights were purged 2026-10-31 to free disk; the 3D lane is TRELLIS.2 (trellis_2_bf16 + shape/texture VAEs). Re-fetch only if a project needs the old route.",
+ "_updated": "2026-11-05"
 }

@@ -138,6 +138,11 @@ fi
 
 missing=0
 while IFS='|' read -r id path url gb role; do
+  if [ -z "$url" ]; then
+    # local-only asset (no public mirror recorded): never try to curl an empty URL
+    [ "$mode" = list ] && echo "local:   $id ($path)"
+    continue
+  fi
   [ -z "$id" ] && continue
   dest="$MODELS/$path"
   if [ -s "$dest" ]; then

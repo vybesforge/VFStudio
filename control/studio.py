@@ -210,9 +210,17 @@ def games():
 
 
 @router.get("/outputs")
-def outputs(kind: str = "image", limit: int = 48):
+def outputs(kind: str = "image", limit: int = 48, offset: int = 0):
+    """Gallery listing. Paged — the old signature returned the first 48 and had no
+    way to reach the rest, so a busy day looked like lost work.
+
+    Returns `total` (everything that matched) alongside the requested slice, so the
+    UI can say "showing 48 of 562" and offer a real next page.
+    """
     if kind not in ROOTS:
         raise HTTPException(400, "unknown kind")
+    limit = max(1, min(int(limit), 5000))
+    offset = max(0, int(offset))
     exts = EXT[kind]
     seen, items = set(), []
     roots = list(ROOTS[kind]) + BROAD_ROOTS
@@ -239,7 +247,10 @@ def outputs(kind: str = "image", limit: int = 48):
                           "mtime": st.st_mtime, "when": time.strftime("%m-%d %H:%M", time.localtime(st.st_mtime)),
                           "ext": p.suffix.lower().lstrip(".")})
     items.sort(key=lambda x: -x["mtime"])
-    return {"kind": kind, "items": items[:limit]}
+    total = len(items)
+    page = items[offset:offset + limit]
+    return {"kind": kind, "items": page, "total": total,
+            "offset": offset, "limit": limit, "has_more": offset + len(page) < total}
 
 
 # ───────────────────────── ComfyUI progress (websocket listener) ─────────────────────────

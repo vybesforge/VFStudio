@@ -36,8 +36,15 @@ VR = STACK / "vr"
 AUDIO_PY = STACK / "audio" / ".venv" / "bin" / "python"
 LLM_PY = STACK / "llm" / ".venv" / "bin" / "python"
 # Local language + vision models (MLX). Uncensored writer and an image-understanding VLM.
-LLM_MODEL = os.environ.get("LLM_MODEL", "mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit")
-VLM_MODEL = os.environ.get("VLM_MODEL", "mlx-community/Qwen3-VL-8B-Instruct-4bit")
+_LINUX = sys.platform.startswith("linux")
+# Local language + vision models. MLX on Apple; on the Linux box these are the
+# llama-server GGUFs that are actually loaded (see /etc/default + systemd units).
+LLM_MODEL = os.environ.get("LLM_MODEL", (
+    "Huihui-Qwen3-14B-abliterated-v2-Q6_K" if _LINUX
+    else "mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit"))
+VLM_MODEL = os.environ.get("VLM_MODEL", (
+    "Qwen3-VL-8B-Instruct-Q8_0" if _LINUX
+    else "mlx-community/Qwen3-VL-8B-Instruct-4bit"))
 
 for d in (LOGS, RUN, VR):
     d.mkdir(parents=True, exist_ok=True)
@@ -109,10 +116,12 @@ def _services() -> dict:
     # system, so the panel monitors them (cmd=None -> start/stop defer to systemctl).
     on_linux = sys.platform.startswith("linux")
     comfy.update({
-        "external": "comfyui-v100.service (:8189, shimmed to :8188)" if on_linux
+        "external": ("comfyui.service :8189 (V100 B, video/3D) + comfyui-b.service :8190 "
+                     "(V100 A, stills), shimmed to :8188") if on_linux
                     else "ComfyUI (:8188, external)",
-        "desc": "Image, video + 3D generation (ComfyUI on the GPU, :8189 via shim)"
-                if on_linux else "Image, video + 3D generation (ComfyUI)",
+        "desc": ("Image, video + 3D generation — two ComfyUI instances: video/3D on "
+                 ":8189, stills on :8190") if on_linux
+                else "Image, video + 3D generation (ComfyUI)",
     })
     return {
         "comfy": comfy,
@@ -127,11 +136,13 @@ def _services() -> dict:
         },
         "llm": {
             "label": "writer LLM",
-            "port": int(os.environ.get("LLM_PORT", "8000")),
+            "port": int(os.environ.get("LLM_PORT", "8101" if on_linux else "8000")),
             "cmd": None,
             "cwd": str(STACK),
-            "external": "llama-server :8000" if on_linux else "llama-server :8000 (external)",
-            "desc": "OpenAI-compatible chat · local llama-server (:8000)",
+            "external": ("qwen14-lazy :8101 → llama-qwen14 :8102 (Qwen3-14B Q6_K, lazy)"
+                         if on_linux else "llama-server :8000 (external)"),
+            "desc": ("OpenAI-compatible chat · lazy 14B gateway (:8101), wakes on first request"
+                     if on_linux else "OpenAI-compatible chat · local llama-server (:8000)"),
         },
         "vision": {
             "label": "vision VLM",
@@ -291,8 +302,14 @@ def _endpoints() -> list:
                 e["snippet"] = 'voice clone ref.wav "text to say in that voice"'
             elif e["key"] == "llm":
                 e["label"] = "Writer LLM (llama-server, OpenAI-compatible chat)"
+                e["desc"] = (f"{LLM_MODEL} · lazy 14B on :8101 (backend llama-qwen14 :8102, "
+                             "released after 30 min idle)")
+                e["snippet"] = ("curl -s {{base}}/chat/completions -H 'Content-Type: application/json' \\\n"
+                                f"  -d '{{\"model\":\"{LLM_MODEL}\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}],"
+                                "\"chat_template_kwargs\":{\"enable_thinking\":false}}'")
             elif e["key"] == "vision":
                 e["label"] = "Vision VLM (llama-server + mmproj)"
+                e["desc"] = f"{VLM_MODEL} · vision-vl.service on :8200 (V100 A, ~10 GB)"
         endpoints.append(e)
     return endpoints
 

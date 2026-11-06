@@ -13,11 +13,18 @@
 Every subcommand: waits for an idle queue (--now skips), submits an API-format prompt,
 polls /history, copies outputs into --out (default ~/media-stack/output/<kind>/) and
 prints one JSON line: {"ok": true, "files": [...], "seconds": 12.3, "prompt_id": "..."}.
-Nothing here calls a cloud API; all inference is the local ComfyUI on :8188.
+Nothing here calls a cloud API. Lanes (billie): image / control / upscale / edit / sfx /
+music go to :8190 (V100 A); video and 3D go to :8189 (V100 B). COMFY_HOST overrides both.
 """
 import argparse, json, math, os, random, shutil, subprocess, sys, time, urllib.request, urllib.parse, uuid
 
 HOST = os.environ.get("COMFY_HOST", "http://127.0.0.1:8188")
+# Lane routing (Dylan, 2026-11-05): video generation lives on V100 B (:8189),
+# stills and audio work on V100 A (:8190). An explicit COMFY_HOST still wins.
+IMG_HOST = os.environ.get("COMFY_IMG_HOST", "http://127.0.0.1:8190")
+VID_HOST = os.environ.get("COMFY_VID_HOST", "http://127.0.0.1:8189")
+SHIM_HOST = os.environ.get("COMFY_SHIM_HOST", "http://127.0.0.1:8188")
+VIDEO_LANE = {"video"}
 STACK = os.path.expanduser("~/media-stack")
 MODELS = f"{STACK}/ComfyUI/models"
 COMFY_OUT = f"{STACK}/ComfyUI/output"
@@ -53,6 +60,30 @@ ANIME_NEG = (
     "fused fingers, extra digits, text, signature, watermark, username, artist name, "
     "cropped, out of frame, worst quality, low quality, jpeg artifacts, blurry, deformed"
 )
+
+
+
+def _host_up(url: str) -> bool:
+    try:
+        urllib.request.urlopen(url + "/system_stats", timeout=2.0).read(64)
+        return True
+    except Exception:
+        return False
+
+
+def lane_host(cmd: str) -> str:
+    """Pick the ComfyUI instance for this subcommand."""
+    explicit = os.environ.get("COMFY_HOST")
+    if explicit:
+        return explicit
+    if sys.platform == "darwin":
+        return SHIM_HOST
+    want = VID_HOST if cmd in VIDEO_LANE else IMG_HOST
+    if _host_up(want):
+        return want
+    if _host_up(SHIM_HOST):
+        return SHIM_HOST
+    return want
 
 
 def have(key):
@@ -599,7 +630,9 @@ def g_music(a):
 
 def cmd_status(a):
     up = server_up()
-    info = {"server": HOST, "up": up, "models": {k: have(k) for k in FILES}}
+    info = {"server": HOST, "up": up, "models": {k: have(k) for k in FILES},
+            "lanes": {"image_audio": IMG_HOST, "image_audio_up": _host_up(IMG_HOST),
+                      "video": VID_HOST, "video_up": _host_up(VID_HOST)}}
     if up:
         q = http("GET", "/queue")
         info["queue"] = {"running": len(q["queue_running"]), "pending": len(q["queue_pending"])}
@@ -651,6 +684,8 @@ def main():
 
     sub.add_parser("status")
     a = p.parse_args()
+    global HOST
+    HOST = lane_host(a.cmd)
 
     if a.cmd == "status":
         return cmd_status(a)

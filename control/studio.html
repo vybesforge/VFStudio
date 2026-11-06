@@ -139,11 +139,11 @@
   <div id="cards" class="gcards hdr"></div>
 </header>
 <nav>
-  <button data-tab="image" class="active" title="Image · generate, upscale, canny-guided re-render and Qwen edit — all on the local ComfyUI">Image</button>
-  <button data-tab="video" title="Video · Wan 2.2 / HunyuanVideo 1.5 text- or image-to-video; clips land in output/video for the vid CLI">Video</button>
+  <button data-tab="image" class="active" title="Image · generate, upscale, canny re-render, Qwen edit — stills lane, V100 A (:8190)">Image</button>
+  <button data-tab="video" title="Video · Wan 2.2 / HunyuanVideo 1.5 text- or image-to-video — video lane, V100 B (:8189); clips land in output/video">Video</button>
   <button data-tab="3d" title="3D & VR · WebXR asset room, joint picker, Animate, TRELLIS.2 photo→mesh, prints and game projects">3D &amp; VR</button>
-  <button data-tab="sound" title="Sound · SFX, music and Demucs stem split / karaoke">Sound</button>
-  <button data-tab="voice" title="Voice · local TTS, voice cloning and transcription (mlx-audio)">Voice</button>
+  <button data-tab="sound" title="Sound · SFX, music and Demucs stem split — audio lane, V100 A (:8190)">Sound</button>
+  <button data-tab="voice" title="Voice · TTS on voice-tts:3200, transcription on voice-stt:3201">Voice</button>
   <button data-tab="write" title="Write · the uncensored local writer model: prose, screenplay, dialogue, lore">Write</button>
   <button data-tab="vision" title="Vision · local VLM: describe / ask / OCR an image, or snap the camera">Vision</button>
   <button data-tab="train" title="Train · LoRA datasets, training runs and the adapters they produce">Train</button>
@@ -157,7 +157,7 @@
 <!-- IMAGE -->
 <section class="tab active" id="tab-image"><div class="two">
   <div>
-    <div class="card"><div class="name">Text → image</div>
+    <div class="card"><div class="name">Text → image <span class="tag" title="stills lane — Dylan, Nov 2026">V100 A · :8190</span></div>
       <label>prompt</label><textarea id="im-prompt" placeholder="describe the image you want… (this box starts empty; nothing runs until you press Generate)"></textarea>
       <div class="fields">
         <div><label>model</label><select id="im-model"><option value="zimage">Z-Image-Turbo · 8 steps · fast</option><option value="klein">FLUX.2 klein 4B · 4 steps</option><option value="flux">Flux dev fp8 · 20 steps · slow, best text</option><option value="animagine">Animagine XL 4.0 · anime / illustration · 30 steps</option></select></div>
@@ -199,7 +199,7 @@
 <!-- VIDEO -->
 <section class="tab" id="tab-video"><div class="two">
   <div>
-    <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B</span></div>
+    <div class="card"><div class="name">Text / image → video <span class="tag">Wan 2.2 5B · V100 B :8189</span></div>
       <label>prompt</label><textarea id="vd-prompt">a mulefoot hog walks slowly across a sunlit barn floor, dust in the air, cinematic</textarea>
       <label>start image (optional — image-to-video)</label>
       <div class="row" style="gap:6px"><input id="vd-img" placeholder="blank = text-to-video" style="flex:1"><button onclick="pickFile('vd-img','image')" title="Pick a file from this machine, or upload one into the matching output folder">Upload…</button></div>
@@ -272,7 +272,7 @@
         <div class="full"><label>key</label><input id="mu-key" value="C major"></div>
       </div>
       <div class="btns"><button class="primary" onclick="runJob('music',{prompt:v('mu-tags'),lyrics:v('mu-lyrics'),seconds:v('mu-sec'),bpm:v('mu-bpm'),key:v('mu-key')})" title="Render a music bed with ACE-Step from style tags + optional lyrics">Generate music</button></div>
-      <div class="hint">Also: <code>stack music "caption"</code> (MiniMax-Music via mlx-audio).</div>
+      <div class="hint">Also: <code>stack music "caption"</code> (local music model).</div>
     </div>
     <div class="card" style="margin-top:12px"><div class="name">Stems (Demucs) — split a song into drums / bass / vocals / other</div>
       <label>audio file (gallery item → "stems", or upload)</label>
@@ -290,12 +290,12 @@
 <!-- VOICE -->
 <section class="tab" id="tab-voice"><div class="two">
   <div>
-    <div class="card"><div class="name">Speak <span class="tag">Kokoro</span></div>
+    <div class="card"><div class="name">Speak <span class="tag">voice-tts:3200</span></div>
       <label>text</label><textarea id="vo-text">Voice cloning on Apple Silicon works entirely offline.</textarea>
       <label>voice</label><select id="vo-voice"><option>af_heart</option></select>
-      <div class="btns"><button class="primary" onclick="runJob('say',{text:v('vo-text'),voice:v('vo-voice')})" title="Synthesise the text with the selected Kokoro voice">Speak</button></div>
+      <div class="btns"><button class="primary" onclick="runJob('say',{text:v('vo-text'),voice:v('vo-voice')})" title="Synthesise with Chatterbox on voice-tts:3200">Speak</button></div>
     </div>
-    <div class="card" style="margin-top:12px"><div class="name">Clone a voice <span class="tag">Qwen3-TTS</span></div>
+    <div class="card" style="margin-top:12px"><div class="name">Clone a voice <span class="tag">voice clone</span></div>
       <label>reference voice (5–15 s) — record it, upload it, or paste a path</label>
       <div class="btns">
         <button id="vo-rec" onclick="toggleRec()" title="Record a reference clip from the microphone (for cloning)">● Record from mic</button>
@@ -336,8 +336,8 @@
         <div><label>chapters (outline)</label><input id="wr-chapters" value="12"></div><div><label>pages (screenplay)</label><input id="wr-pages" value="4"></div>
         <div><label>characters (dialogue)</label><input id="wr-chars" placeholder="Mara, Ivo"></div><div><label>entries (lore)</label><input id="wr-items" value="8"></div>
       </div>
-      <div class="btns"><button class="primary" onclick="writeJob()" title="Generate with the local writer model (27B, thinking off)">Write</button></div>
-      <div class="hint">CLI: <code>scribe prose "premise" --genre noir --words 1200</code> · outputs saved to <code>output/text/</code>. 27B model: ~15 tok/s; a 900-word scene ≈ 1-2 min.</div>
+      <div class="btns"><button class="primary" onclick="writeJob()" title="Generate with the local writer model (Qwen3-14B abliterated v2 Q6_K on V100 B, thinking off). First write wakes it (~20-40 s), then it stays loaded while you work.">Write</button></div>
+      <div class="hint">CLI: <code>scribe prose "premise" --genre noir --words 1200</code> · outputs saved to <code>output/text/</code>. Lazy 14B Q6_K: 11.3 GB on V100 B, wakes on first request, releases after 30 min idle. <code>qwen14 status</code> / <code>qwen14 up</code>.</div>
     </div>
     <div id="jobs-write" class="card" style="margin-top:12px"></div>
   </div>
@@ -357,7 +357,7 @@
       <div class="btns"><button class="primary" onclick="runJob('see',{op:'ask',image:v('vi-image'),question:v('vi-q')})" title="Ask the local vision model a question about the image">Ask</button>
         <button onclick="runJob('see',{op:'describe',image:v('vi-image')})" title="Detailed description of the image from the local VLM">Describe</button><button onclick="runJob('see',{op:'ocr',image:v('vi-image')})" title="Transcribe all visible text in the image">OCR</button></div>
     </div>
-    <div class="card" style="margin-top:12px"><div class="name">Camera</div><div class="desc">FaceTime HD camera via imagesnap → <code>output/camera/</code>. macOS will ask for camera permission the first time.</div>
+    <div class="card" style="margin-top:12px"><div class="name">Camera</div><div class="desc">Local camera (v4l2 on billie, imagesnap on the Mac) → <code>output/camera/</code>.</div>
       <div class="btns"><button class="primary" onclick="runJob('see',{op:'snap'})" title="Capture a frame from the camera">Snap</button><button onclick="runJob('see',{op:'snap',question:v('vi-q')})" title="Capture a frame, then ask the question about it">Snap &amp; ask</button></div>
       <div class="hint">CLI: <code>see snap --ask "what am I holding?"</code> · <code>see describe photo.jpg</code></div>
     </div>
@@ -407,7 +407,7 @@
 <section class="tab" id="tab-models">
   <div class="card" id="inv-summary"></div>
   <div id="inv-groups"></div>
-  <h2>Audio models (mlx-audio, HF cache)</h2><div class="card" id="inv-audio"></div>
+  <h2>Audio models (HF cache)</h2><div class="card" id="inv-audio"></div>
   <h2>Tools</h2><div class="card" id="inv-tools"></div>
 </section>
 
@@ -435,7 +435,7 @@ skills: studio (start here) → studio-video-edit · studio-voice · studio-3d-p
 
 <!-- RESOURCES -->
 <section class="tab" id="tab-resources">
-  <div class="card" style="margin-bottom:14px"><div class="row"><div><div class="name">Memory control</div><div class="desc">Unload = ComfyUI models out of memory, writer LLM + vision VLM stopped, mlx-audio recycled — services stay up. Stop everything = all four services down.</div></div>
+  <div class="card" style="margin-bottom:14px"><div class="row"><div><div class="name">Memory control</div><div class="desc">Unload = ComfyUI models out of memory, the writer released from V100 B and the vision VLM stopped — services stay up. Stop everything = every service down.</div></div>
     <div class="btns" style="margin:0"><button class="primary" onclick="unloadAll(false)" title="Unload the loaded models without stopping the services">Unload all models / free memory</button><button class="danger" onclick="unloadAll(true)" title="Stop every studio service and unload the models">Stop everything</button></div></div>
     <div class="meta" id="unload-result"></div></div>
   <div class="stats" id="stats"></div>
@@ -466,7 +466,7 @@ const TAB_DESC={
   video:"Wan 2.2 (fast) or HunyuanVideo 1.5 (quality), text- or image-to-video. With a start image the size follows the picture's framing; clips land in output/video for the vid CLI.",
   "3d":"The asset room (WebXR) plus the joint picker: AI-place joints, nudge, Build rig, Animate. Below it TRELLIS.2 photo→mesh, print checks/slicing and game projects.",
   sound:"Sound effects, music beds (ACE-Step) and Demucs stem split or karaoke.",
-  voice:"Local TTS (Kokoro / Chatterbox), voice cloning from a short reference, and Whisper transcription to text or SRT.",
+  voice:"Local TTS on voice-tts:3200 and STT on voice-stt:3201 — speak, clone from a short reference, transcribe to text or SRT.",
   write:"The uncensored local writer model — prose, screenplays, dialogue trees and lore, with an optional draft to continue.",
   vision:"The local VLM: describe an image, ask it a question, OCR it, or snap the camera and ask about what it sees.",
   train:"LoRA datasets, training runs and the adapters they produce. Pick a ready-to-train dataset and watch the log.",
@@ -527,8 +527,12 @@ async function writeJob(){ const m=v('wr-mode'); const a={mode:m,prompt:v('wr-pr
   if(m!=='outline') delete a.chapters; if(m!=='screenplay') delete a.pages; if(m!=='dialogue') delete a.chars; if(m!=='lore') delete a.items; if(!['outline','prose'].includes(m)) delete a.genre;
   $('wr-result').textContent='writing…'; runJob('write',a); }
 async function svcState(){ try{ const s=await (await fetch('/api/status')).json(); const l=s.services.llm, vv=s.services.vision;
-  $('llm-state').innerHTML=`<span class="dot ${l.responding?'on':'off'}"></span>${l.label} :${l.port} — ${l.responding?'running':'stopped'} ${l.responding?'':'<button onclick="act(\'start/llm\');setTimeout(svcState,3000)" title="Start the writer model — it loads ~16 GB into memory first">Start (loads ~16 GB, 1-2 min)</button>'}`;
-  $('vlm-state').innerHTML=`<span class="dot ${vv.responding?'on':'off'}"></span>${vv.label} :${vv.port} — ${vv.responding?'running':'stopped'} ${vv.responding?'':'<button onclick="act(\'start/vision\');setTimeout(svcState,3000)" title="Start the vision model — ~5 GB, about 30 s">Start (~5 GB, ~30 s)</button>'}`; }catch(e){} }
+  let q=null; try{ q=await (await fetch('/api/qwen14/state')).json(); }catch(e){}
+  if(q && q.loader==='qwen14-lazy'){ const on=q.awake||q.starting; const word=q.awake?'awake (model loaded)':(q.starting?'waking…':'idle — loads on first write');
+    $('llm-state').innerHTML=`<span class="dot ${on?'on':'off'}"></span>${l.tile||l.label} — ${word}${q.awake?'':(q.starting?'':' <button onclick="act(\'start/llm\');setTimeout(svcState,4000)" title="Preload the writer now (11 GB on V100 B) instead of waiting for the first request">Preload now</button>')}${q.awake?' <button onclick="act(\'stop/llm\');setTimeout(svcState,3000)" title="Free V100 B now (it also releases itself after 30 min idle)">Release</button>':''}`;
+  } else
+  $('llm-state').innerHTML=`<span class="dot ${l.responding?'on':'off'}"></span>${l.tile||l.label} — ${l.responding?'running':'stopped'}`;
+  $('vlm-state').innerHTML=`<span class="dot ${vv.responding?'on':'off'}"></span>${vv.tile||vv.label} — ${vv.responding?'running':'stopped'} ${vv.responding?'':'<button onclick="act(\'start/vision\');setTimeout(svcState,3000)" title="Start the vision model — ~5 GB, about 30 s">Start (~5 GB, ~30 s)</button>'}`; }catch(e){} }
 async function cloneJob(){ if(!v('vo-ref')){flash('record or upload a reference first');return;} runJob('clone',{ref:v('vo-ref'),ref_text:v('vo-reftext'),text:v('vo-text')}); }
 // ── mic recording → /api/studio/upload → sets the reference path (localhost counts as a secure context for getUserMedia)
 let _rec=null,_chunks=[],_t0=0,_tick=null;
@@ -670,19 +674,27 @@ function openItem(it){
   $('modal').classList.add('open');
 }
 function closeModal(){ $('modal').classList.remove('open'); $('modal-ct').innerHTML=''; }
-const galCache={}, galSig={};
+const galCache={}, galSig={}, galLimit={};
+const GAL_PAGE=48, GAL_STEP=96;
 async function loadGallery(kind, force){
-  const j=await (await fetch('/api/studio/outputs?kind='+kind)).json();
-  const items=j.items||[], el=$('gal-'+kind); if(!el) return;
+  const lim=galLimit[kind]||GAL_PAGE;
+  const j=await (await fetch('/api/studio/outputs?kind='+kind+'&limit='+lim)).json();
+  const items=j.items||[], total=(j.total==null?items.length:j.total), el=$('gal-'+kind); if(!el) return;
   if(!items.length){ galCache[kind]=[]; galSig[kind]=''; el.innerHTML='<div class="desc">nothing generated yet</div>'; return; }
   // Only touch the DOM when the list actually changed. The 8-second timer used to rebuild
   // every tile — re-creating 48 video elements on a timer is what crashed the tab.
-  const sig=items.map(it=>it.path+'|'+it.mtime+'|'+it.bytes).join(';');
+  const sig=items.map(it=>it.path+'|'+it.mtime+'|'+it.bytes).join(';')+'#'+total;
   galCache[kind]=items;
   if(!force && galSig[kind]===sig) return;
   galSig[kind]=sig;
-  el.innerHTML=items.map((it,i)=>renderItem(it,i,kind)).join('');
+  const more=items.length<total
+    ? `<div style="grid-column:1/-1;display:flex;gap:10px;align-items:center;justify-content:center;padding:14px 0">
+         <span class="muted">showing ${items.length} of ${total}</span>
+         <button onclick="galMore('${kind}')">load ${Math.min(GAL_STEP,total-items.length)} more</button>
+       </div>` : '';
+  el.innerHTML=items.map((it,i)=>renderItem(it,i,kind)).join('')+more;
 }
+function galMore(kind){ galLimit[kind]=(galLimit[kind]||GAL_PAGE)+GAL_STEP; loadGallery(kind,true); }
 function renderItem(it,i,kind,cache){
     cache=cache||`galCache['${kind}']`;
     const audio=['wav','flac','mp3','ogg','opus'].includes(it.ext)?`<audio src="${it.url}" controls preload="none"></audio>`:'';
@@ -765,7 +777,8 @@ function epTile(it){
   return `<div class="eptile">
     <div class="row" style="flex-wrap:nowrap;align-items:flex-start;gap:8px">
       <div style="flex:1;min-width:0">
-        <div class="epname">${esc(it.label)}</div>
+        <div class="epname">${esc(it.tile||it.label)}</div>
+        <div class="desc" style="font-size:11px">${it.model?`<b>${esc(it.model)}</b> · `:''}${esc(it.label)}</div>
         <code class="epurl">${esc(epBase(it))}</code>
         <div class="desc" style="font-size:11px;margin-top:4px">${esc(it.desc)}</div>
       </div>
@@ -782,10 +795,10 @@ function svcCard(k,x){
   const eps=EP.items.filter(it=>it.svc===k);
   return `<div class="card">
     <div class="row" style="flex-wrap:nowrap;align-items:flex-start">
-      <div style="flex:1;min-width:0"><div class="name">${esc(x.label)}</div><div class="desc">${esc(x.desc)}</div></div>
+      <div style="flex:1;min-width:0"><div class="name">${esc(x.tile||x.label)}</div><div class="desc">${x.model?`<b>${esc(x.model)}</b> · `:''}${esc(x.desc)}</div></div>
       <button id="svct-${k}" class="svctog ${cls}" onclick="toggleSvc('${k}',${x.running})" title="${x.running?'click to stop':'click to start'}"><span class="dot ${cls}"></span>${st}</button>
     </div>
-    <div class="meta" id="svcm-${k}">port ${x.port}${x.pid?` · pid ${x.pid}`:''}</div>
+    <div class="meta" id="svcm-${k}">${x.unit?`unit ${esc(x.unit)}`:`port ${x.port}`}${x.pid?` · pid ${x.pid}`:''}</div>
     <div class="btns"><button class="primary" onclick="act('start/${k}')" title="Start this service">Start</button><button onclick="act('restart/${k}')" title="Restart this service (reloads its model)">Restart</button><button class="danger" onclick="act('stop/${k}')" title="Stop this service and free its memory">Stop</button>${k==='comfy'?`<button onclick="act('comfy/free')" title="Ask ComfyUI to free its VRAM without stopping the service">Free VRAM</button>`:''}<button onclick="svcLog('${k}')" title="Tail this service's log">Log</button></div>
     ${eps.length?`<div class="ephead">endpoints · copy &amp; paste</div>`+eps.map(epTile).join(''):''}
     <pre id="slog-${k}" style="display:${logOpen.has(k)?'block':'none'}">${esc(logText[k]||'')}</pre>
@@ -794,7 +807,7 @@ function svcCard(k,x){
 function panelCard(){
   const eps=EP.items.filter(it=>it.svc==='panel');
   return `<div class="card"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">
-    <div style="flex:1;min-width:0"><div class="name">panel</div><div class="desc">this page · :8787</div></div><span class="tag ok">this page</span></div>
+    <div style="flex:1;min-width:0"><div class="name">vf-panel:8787</div><div class="desc"><b>VF Studio panel</b> · this page</div></div><span class="tag ok">this page</span></div>
     <div class="meta">PANEL_HOST=0.0.0.0 stack panel exposes it to the LAN (WebXR still needs localhost/HTTPS)</div>
     ${eps.length?`<div class="ephead">endpoints · copy &amp; paste</div>`+eps.map(epTile).join(''):''}</div>`;
 }
@@ -812,7 +825,7 @@ function updateServiceState(){
     const cls=x.responding?'on':(x.running?'warn':'off'), st=x.responding?'running':(x.running?'starting':'stopped');
     const b=$('svct-'+k);
     if(b){ b.className='svctog '+cls; b.title=x.running?'click to stop':'click to start'; b.onclick=()=>toggleSvc(k,x.running); b.innerHTML=`<span class="dot ${cls}"></span>${st}`; }
-    const m=$('svcm-'+k); if(m) m.textContent=`port ${x.port}${x.pid?` · pid ${x.pid}`:''}`;
+    const m=$('svcm-'+k); if(m) m.textContent=`${x.unit?`unit ${x.unit}`:`port ${x.port}`}${x.pid?` · pid ${x.pid}`:''}`;
   });
 }
 async function refreshServices(){
@@ -842,7 +855,7 @@ async function refreshResources(){
     if(x.temp!==null&&x.temp!==undefined) bits.push(`${x.temp}°C`);
     if(x.power!==null&&x.power!==undefined) bits.push(`power ${Math.round(x.power)}${x.power_cap?`/${Math.round(x.power_cap)}`:''} W`);
     if(x.fan!==null&&x.fan!==undefined) bits.push(`fan ${x.fan}%`);
-    const procs=(x.procs||[]).slice(0,3).map(p=>`${p.name} ${p.mem>GB?(p.mem/GB).toFixed(1)+' GB':(p.mem/MB).toFixed(0)+' MB'}`).join(' · ');
+    const procs=(x.procs||[]).slice(0,4).map(p=>`${esc(p.tile||p.name)} ${p.mem>GB?(p.mem/GB).toFixed(1)+' GB':(p.mem/MB).toFixed(0)+' MB'}`).join(' · ');
     return `<div class="card stat"><div class="k">GPU ${x.index} · ${short}</div>
       <div class="v">${(x.mem_used/GB).toFixed(1)}<small> / ${(x.mem_total/GB).toFixed(1)} GB</small></div>${bar(pct)}
       <div class="meta">${bits.join(' · ')||'idle'}</div>
