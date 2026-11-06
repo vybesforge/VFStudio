@@ -139,10 +139,9 @@ def cmd_show(conf):
     live = pid_cards()
     problems = []
     print("\n  billie GPU lanes — source: %s\n" % CONF.replace(os.path.expanduser("~"), "~"))
-    print("  %-8s %-6s %-34s %-8s %-8s %s" % ("LANE", "CARD", "UUID", "PORT", "STATE", "ON CARD"))
-    print("  " + "-" * 100)
-    for unit, scope in [(u, s) for (u, s, _l, _p, _r) in SERVICES]:
-        pass  # services list below is authoritative; kept for readability
+    pci_of = {c["uuid"]: "0000:" + c["pci"] for c in gpu_table()}
+    print("  %-6s %-16s %-6s %-8s %-8s %s" % ("PORT", "PCI", "LANE", "STATE", "CARD", "SERVICE / ROLE"))
+    print("  " + "-" * 104)
     for unit in ["comfyui", "comfyui-b", "vision-vl", "llama-qwen14", "voice-tts", "voice-stt"]:
         lane = UNIT_LANE[unit]
         want = lane_uuid(conf, lane)
@@ -150,26 +149,30 @@ def cmd_show(conf):
         env, pid, state = unit_env(unit, scope)
         vis = env.get("CUDA_VISIBLE_DEVICES", "")
         pinned = [u.strip() for u in vis.split(",") if u.strip()]
-        card = cards.get(want, {})
         on = live.get(pid) if pid else None
-
-        if len(pinned) != 1 or pinned[0] != want:
-            problems.append("%s pins %s, lane %s wants %s" % (unit, vis or "(nothing)", lane, want))
-        elif on and on != want:
-            problems.append("%s is running on %s, not lane %s" % (unit, on[-12:], lane))
-
-        state_col = GREEN if state == "active" else DIM
-        on_col = (GREEN if on == want else RED) if on else DIM
-        print("  %-8s %-6s %-34s %-8s %s%-8s%s %s%s%s" % (
-            lane, card.get("idx", "?"), want[-12:], UNIT_PORT[unit],
-            state_col, state, OFF,
-            on_col, (on[-12:] if on else ("—" if state != "active" else "not on a card")), OFF))
+        requested_pci = conf.get("GPU_%s_PCI" % lane, "?")
+        actual_pci = pci_of.get(on, "—")
+        ok = (len(pinned) == 1 and pinned[0] == want) and (not on or on == want)
+        col = GREEN if (ok and state == "active") else (DIM if state != "active" else RED)
+        print("  %s%-6s %-16s %-6s %-8s %-6s %s%s" % (
+            col, UNIT_PORT[unit], actual_pci if on else requested_pci, lane,
+            state, (on[-6:] if on else "—"), UNIT_ROLE[unit], OFF))
+        if len(pinned) != 1:
+            problems.append("%s pins %d cards (%s) — a service must see exactly one, "
+                            "otherwise --cuda-device ordinals come back" % (unit, len(pinned), vis or "none"))
+        elif pinned[0] != want:
+            problems.append("%s pins %s, lane %s wants %s" % (unit, pinned[0][-12:], lane, want[-12:]))
+        if on and "0000:" + pci_of.get(on, "") and actual_pci != requested_pci:
+            problems.append("%s (: %d) is on %s, the contract says %s"
+                            % (unit, UNIT_PORT[unit], actual_pci, requested_pci))
     print()
     for c in gpu_table():
         lane = next((k for k in "AB" if conf.get("GPU_%s_UUID" % k) == c["uuid"]), None)
         name = "lane " + lane if lane else ("DISPLAY" if c["uuid"] == conf.get("GPU_DISPLAY_UUID") else "unassigned")
-        print("  gpu %s  %-22s %-8s %s MiB / %s MiB   %s" % (
-            c["idx"], c["name"][:22], name, c["used"], c["total"], c["uuid"][-12:]))
+        ports = {p for u, p in UNIT_PORT.items() if UNIT_LANE[u] == lane} if lane else set()
+        print("  gpu %s  PCI %-16s %-22s %-8s %5s / %-5s MiB  %s" % (
+            c["idx"], "0000:" + c["pci"], c["name"][:22], name, c["used"], c["total"],
+            ("ports " + ", ".join(":%d" % p for p in sorted(ports))) if ports else ""))
 
     MODEL_RE = re.compile(r"(llama-server|comfy|python|torch|demucs|diffrhythm)", re.I)
     names = {}

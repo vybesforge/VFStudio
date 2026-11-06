@@ -127,11 +127,16 @@ weaker model: exact commands, exact paths, expected output, measured pitfalls.
 systemd units are pinned by **UUID** through `bin/gpu-lanes apply`, and the tools read the same
 file for ports. No code or unit is allowed to use a numeric GPU index.
 
-| Lane | Card | Runs |
-|---|---|---|
-| A | V100 A (PCI 02:00) | stills (ComfyUI `:8190`), audio + music, vision `:8200`, voice `:3200`/`:3201` |
-| B | V100 B (PCI 03:00) | video + 3D (ComfyUI `:8189`), the lazy writer |
-| — | GTX 750 Ti (PCI 01:00) | screen + h264_nvenc only, **never a model** |
+The port **is** the lane. Port → PCI address is fixed and enforced by `bin/gpu-lanes check`:
+
+| Port | Lane | PCI | Card | Runs |
+|---|---|---|---|---|
+| `8189` | B | `0000:03:00.0` | V100 B | ComfyUI video + 3D, the lazy writer |
+| `8190` | A | `0000:02:00.0` | V100 A | ComfyUI stills, audio + music |
+| `8200` | A | `0000:02:00.0` | V100 A | vision VLM |
+| `3200` | A | `0000:02:00.0` | V100 A | TTS |
+| `3201` | A | `0000:02:00.0` | V100 A | STT |
+| — | — | `0000:01:00.0` | GTX 750 Ti | screen + h264_nvenc only, **never a model** |
 
 ```bash
 bin/gpu-lanes show     # truth table: lane -> card -> service -> what card it is really on
