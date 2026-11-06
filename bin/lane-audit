@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""lane-audit — prove every studio tool talks to the card its lane says.
+
+Reads each CLI's own source to find how it picks a ComfyUI host (a `_lane_url(...)`
+call, a literal port, or COMFY_HOST), resolves that through lib/lanes.py, then maps
+the resulting port to the card that actually answers on it — from the driver's
+process table, not from configuration.
+
+    bin/lane-audit            # table
+    bin/lane-audit --strict   # exit 1 if anything is off its lane
+
+Exit code is the only thing a script needs; the table is for a human.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.expanduser("~/media-stack/lib"))
+import lanes  # noqa: E402
+
+BIN = os.path.expanduser("~/.local/bin")
+REPO = os.path.expanduser("~/media-stack")
+
+# tool -> the lane it MUST use, and whether COMFY_HOST may override it
+EXPECT = [
+    # --- stills / audio lane (A) -------------------------------------------
+    ("gen image|control|upscale|edit|sfx|music", "stills", REPO + "/tools/comfy/gen", "gen"),
+    ("krea2_turbo", "stills", BIN + "/krea2_turbo", None),
+    ("zimage_turbo", "stills", BIN + "/zimage_turbo", None),
+    ("qwen_image_1", "stills", BIN + "/qwen_image_1", None),
+    ("sdxl_still", "stills", BIN + "/sdxl_still", None),
+    ("ref_views", "stills", BIN + "/ref_views", None),
+    ("facefix", "stills", BIN + "/facefix", None),
+    ("ideogram4", "stills", BIN + "/ideogram4", None),
+    ("ace_music", "audio", BIN + "/ace_music", None),
+    ("ace_song", "audio", BIN + "/ace_song", None),
+    ("ace_aio", "audio", BIN + "/ace_aio", None),
+    ("ace_base", "audio", BIN + "/ace_base", None),
+    # --- video / 3D lane (B) ----------------------------------------------
+    ("gen video", "video", REPO + "/tools/comfy/gen", "gen"),
+    ("pg_video", "video", BIN + "/pg_video", None),
+    ("ltx720", "video", BIN + "/ltx720", None),
+    ("infinitetalk_run", "video", BIN + "/infinitetalk_run", None),
+    ("hunyuan_i2v", "video", BIN + "/hunyuan_i2v", None),
+    ("trellis3d", "3d", REPO + "/tools/comfy/trellis3d", None),
+]
+
+GREEN, RED, DIM, OFF = "\033[32m", "\033[31m", "\033[2m", "\033[0m"
+
+
+def live_ports():
+    """port -> gpu uuid, from the running processes (the only authority)."""
+    out = {}
+    try:
+        rows = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,gpu_uuid",
+                               "--format=csv,noheader"], capture_output=True, text=True).stdout
+        pids = {}
+        for line in rows.strip().splitlines():
+            p = [t.strip() for t in line.split(",")]
+            if len(p) >= 2:
+                pids[int(p[0])] = p[1]
+    except Exception:
+        return out
+    for port in (lanes.port("stills"), lanes.port("video")):
+        try:
+            ss = subprocess.run(["ss", "-tlnp", "sport = :%d" % port], capture_output=True, text=True).stdout
+            m = re.search(r"pid=(\d+)", ss)
+            if m and int(m.group(1)) in pids:
+                out[port] = pids[int(m.group(1))]
+        except Exception:
+            pass
+    return out
+
+
+def source_lane(path):
+    """How does this tool choose a ComfyUI host?"""
+    try:
+        s = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return None, "missing"
+    m = re.findall(r'_lane_url\("([a-z0-9]+)"\)', s)
+    if m:
+        return m[-1], "_lane_url"
+    if "_LANES.get(\"COMFY_STILLS_PORT\"" in s and "_LANES.get(\"COMFY_VIDEO_PORT\"" in s:
+        return "gen", "config lanes"      # routes per subcommand; resolved by label
+    m = re.search(r'COMFY(?:_HOST)?\s*=\s*os\.environ\.get\("COMFY_HOST"\)\s*or\s*["\']http://127\.0\.0\.1:(\d+)', s)
+    if m:
+        return int(m.group(1)), "literal+env"
+    m = re.search(r'COMFY\s*=\s*["\']http://127\.0\.0\.1:(\d+)["\']', s)
+    if m:
+        return int(m.group(1)), "literal (no env)"
+    return None, "unknown"
+
+
+def main():
+    strict = "--strict" in sys.argv
+    cards = {}
+    for line in subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+                               capture_output=True, text=True).stdout.strip().splitlines():
+        i, u = [t.strip() for t in line.split(",")]
+        cards[u] = i
+    live = live_ports()
+    bad = []
+    print("\n  lane audit — every studio tool, resolved to the card that answers\n")
+    print("  %-42s %-7s %-6s %-8s %-10s %s" % ("TOOL", "WANT", "PORT", "CARD", "LIVE", "HOW"))
+    print("  " + "-" * 100)
+    for label, want, path, special in EXPECT:
+        lane, how = source_lane(path)
+        if lane == "gen":
+            lane = "video" if label.endswith("video") else "stills"
+        if lane is None:
+            print("  %-42s %-7s  %s??%s  %s" % (label, want, RED, OFF, how))
+            bad.append("%s: could not determine its lane (%s)" % (label, how))
+            continue
+        port = lanes.port(lane) if isinstance(lane, str) else lane
+        want_port = lanes.port(want if want != "3d" else "3d")
+        uuid = live.get(port)
+        card = cards.get(uuid, "—") if uuid else "idle"
+        ok = port == want_port
+        col = GREEN if ok else RED
+        if not ok:
+            bad.append("%s uses :%d (%s), should be :%d (%s)" % (label, port, lane, want_port, want))
+        if uuid and uuid != lanes.uuid(want if want != "3d" else "3d"):
+            bad.append("%s is answered by the wrong card" % label)
+        print("  %-42s %s%-7s %-6d %-8s %-10s%s %s" % (
+            label, col, want, port, card, ("on card" if uuid else "not loaded"), OFF, how))
+    print()
+    if bad:
+        print("  %sPROBLEMS%s" % (RED, OFF))
+        for b in bad:
+            print("   - " + b)
+        print()
+        return 1 if strict else 0
+    print("  %severy tool resolves to its lane%s — stills/audio on :%d, video/3D on :%d"
+          " (PCI addresses come from bin/gpu-lanes show)\n"
+          % (GREEN, OFF, lanes.port("stills"), lanes.port("video")))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

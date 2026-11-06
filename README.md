@@ -152,6 +152,7 @@ bin/gpu-lanes show     # truth table: lane -> card -> service -> what card it is
 bin/gpu-lanes check    # exit 1 on drift (for scripts / smoke tests)
 bin/gpu-lanes which video|stills|A|B   # print the UUID for a lane
 bin/gpu-lanes apply --restart          # rewrite the systemd drop-ins from the env file
+bin/lane-audit --strict                # every studio tool -> the card that answers it
 ```
 
 **Why indices are banned here.** Three schemes disagree on this machine, and every outage came
