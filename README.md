@@ -149,3 +149,18 @@ The panel's **Services** tab controls whichever engines exist on the machine it 
 - Hunyuan3D / `SaveGLB` write no `NORMAL` attribute — the Blender repair pass fixes it.
 - Full history, measurements and the approved gold-standard asset recipe: `STATE.md` and the
   `local-media-stack` skill.
+
+## License
+
+VF Studio is released under the **Apache License, Version 2.0** — the full text is in [LICENSE](LICENSE),
+and the canonical version lives at <https://www.apache.org/licenses/LICENSE-2.0>.
+
+- **Covers:** everything in this repository — the installer, CLIs, panel, skills and the model manifest.
+- **Does not cover:** model weights. Each one keeps its upstream license (many are research- or
+  community-licensed, and `fetch-models` stops rather than guessing when a download needs a login).
+  ComfyUI is installed as an upstream clone with its own license, not vendored here.
+- **What you make** with the studio is yours; the license puts no claim on generated output.
+- Apache 2.0 includes an express patent grant, and asks you to keep the copyright and attribution
+  notices if you redistribute.
+
+Copyright 2026 Vybesforge.
