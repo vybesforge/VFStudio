@@ -121,6 +121,49 @@ to `studio-video-edit`, `studio-voice`, `studio-3d-print`, `studio-vr`, `studio-
 `studio-animation`, `studio-writing`, `studio-vision` and `local-media-stack` (deep 3D reference). Skills are written for a
 weaker model: exact commands, exact paths, expected output, measured pitfalls.
 
+## GPU lanes — one source of truth
+
+`config/gpu-lanes.env` is the only place a card is named. Everything else derives from it:
+systemd units are pinned by **UUID** through `bin/gpu-lanes apply`, and the tools read the same
+file for ports. No code or unit is allowed to use a numeric GPU index.
+
+| Lane | Card | Runs |
+|---|---|---|
+| A | V100 A (PCI 02:00) | stills (ComfyUI `:8190`), audio + music, vision `:8200`, voice `:3200`/`:3201` |
+| B | V100 B (PCI 03:00) | video + 3D (ComfyUI `:8189`), the lazy writer |
+| — | GTX 750 Ti (PCI 01:00) | screen + h264_nvenc only, **never a model** |
+
+```bash
+bin/gpu-lanes show     # truth table: lane -> card -> service -> what card it is really on
+bin/gpu-lanes check    # exit 1 on drift (for scripts / smoke tests)
+bin/gpu-lanes which video|stills|A|B   # print the UUID for a lane
+bin/gpu-lanes apply --restart          # rewrite the systemd drop-ins from the env file
+```
+
+**Why indices are banned here.** Three schemes disagree on this machine, and every outage came
+from mixing them:
+
+- `nvidia-smi` order: `0` = 750 Ti, `1` = V100 A, `2` = V100 B
+- CUDA order (fastest first): `0` = V100 A, `1` = V100 B, `2` = 750 Ti
+- `--cuda-device N`: an ordinal **into `CUDA_VISIBLE_DEVICES`** — and ComfyUI *replaces* that
+  variable with `str(args.cuda_device)`, which throws a UUID pin away and re-introduces a bare
+  ordinal. That is why `--cuda-device 0` landed on A and `1` on B no matter what was pinned, and
+  why the box appeared to work while the reasoning was wrong.
+
+Each service therefore sees exactly **one** card (its UUID) and passes **no** device flag. A job
+that needs the other card talks to the other port.
+
+`voice-tts` / `voice-stt` are system units, so their drop-ins need root once:
+
+```bash
+sudo mkdir -p /etc/systemd/system/voice-tts.service.d /etc/systemd/system/voice-stt.service.d
+printf '[Service]\nEnvironment="CUDA_VISIBLE_DEVICES=%s"\n' "$(bin/gpu-lanes which A)" \
+  | sudo tee /etc/systemd/system/voice-tts.service.d/60-lane.conf >/dev/null
+printf '[Service]\nEnvironment="CUDA_VISIBLE_DEVICES=%s"\n' "$(bin/gpu-lanes which A)" \
+  | sudo tee /etc/systemd/system/voice-stt.service.d/60-lane.conf >/dev/null
+sudo systemctl daemon-reload && sudo systemctl restart voice-tts voice-stt
+```
+
 ## Services
 
 | Service | Port | Where | Protocol |

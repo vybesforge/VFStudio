@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""gpu-lanes — one source of truth for which GPU runs what on this box.
+
+    gpu-lanes show              # the truth table: lane, card, service, live process
+    gpu-lanes check             # exit 1 if any service pins the wrong card
+    gpu-lanes apply [--restart] # rewrite systemd drop-ins from config/gpu-lanes.env
+    gpu-lanes which A|B|video|stills   # print the UUID for a lane (for scripts)
+
+Why this exists: three numbering schemes disagree on this machine.
+
+    nvidia-smi order : 0 = 750 Ti   1 = V100 A (02:00)   2 = V100 B (03:00)
+    CUDA order       : 0 = V100 A   1 = V100 B           2 = 750 Ti
+    --cuda-device N  : ordinal INTO CUDA_VISIBLE_DEVICES, so "1" means the
+                       second card *in that list*, not nvidia-smi's #1.
+
+Every past outage came from mixing those. This tool removes the choice: each
+service sees exactly ONE card, pinned by UUID, and passes `--cuda-device 0`.
+A job that needs the other card talks to the other port instead.
+"""
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+STACK = os.path.expanduser("~/media-stack")
+CONF = os.path.join(STACK, "config", "gpu-lanes.env")
+
+# unit -> (scope, lane key, port, role)
+SERVICES = [
+    ("comfyui",       "user",   "A", 8190, "stills (ComfyUI)"),
+    ("comfyui",       "user",   "B", 8189, "video + 3D (ComfyUI)"),
+    ("vision-vl",     "user",   "A", 8200, "vision VLM"),
+    ("llama-qwen14",  "user",   "B", 8102, "writer LLM (backend of :8101)"),
+    ("voice-tts",     "system", "A", 3200, "TTS"),
+    ("voice-stt",     "system", "A", 3201, "STT"),
+]
+# dedupe: comfyui appears twice only for display (one unit, two lanes over time)
+UNIT_LANE = {
+    "comfyui": "B", "comfyui-b": "A", "vision-vl": "A",
+    "llama-qwen14": "B", "voice-tts": "A", "voice-stt": "A",
+}
+UNIT_ROLE = {
+    "comfyui": "video + 3D (ComfyUI :8189)",
+    "comfyui-b": "stills (ComfyUI :8190)",
+    "vision-vl": "vision VLM :8200",
+    "llama-qwen14": "writer LLM (backend :8102, gateway :8101)",
+    "voice-tts": "TTS :3200",
+    "voice-stt": "STT :3201",
+}
+UNIT_PORT = {"comfyui": 8189, "comfyui-b": 8190, "vision-vl": 8200,
+             "llama-qwen14": 8102, "voice-tts": 3200, "voice-stt": 3201}
+
+# ExecStart for the ComfyUI pair: with one visible card the device ordinal is
+# always 0, and the output dirs must stay split so the counters cannot collide.
+# IMPORTANT: ComfyUI's --cuda-device does NOT mean "prefer this card". main.py
+# does os.environ["CUDA_VISIBLE_DEVICES"] = str(args.cuda_device), which THROWS
+# AWAY a UUID pin and replaces it with a bare CUDA ordinal. That is why
+# `--cuda-device 0` landed on V100 A and `1` on V100 B regardless of any pin,
+# and why this box kept "working" with the wrong explanation. The args are
+# omitted entirely: with CUDA_VISIBLE_DEVICES=<one uuid> torch sees exactly one
+# device, so ordinal 0 IS that card, by construction.
+COMFY_EXEC = {
+    "comfyui": ("/home/billie/comfy/.venv-v100/bin/python", [
+        "main.py", "--listen", "0.0.0.0", "--port", "8189",
+        "--disable-auto-launch", "--fp32-vae", "--force-fp16"]),
+    "comfyui-b": ("/home/billie/comfy/.venv-v100/bin/python", [
+        "main.py", "--listen", "0.0.0.0", "--port", "8190",
+        "--disable-auto-launch", "--fp32-vae", "--force-fp16",
+        "--output-directory", "/home/billie/comfy/output-b",
+        "--temp-directory", "/home/billie/comfy/temp-b"]),
+}
+
+GREEN, RED, AMBER, DIM, OFF = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
+
+
+def load_conf():
+    conf = {}
+    for raw in open(CONF, encoding="utf-8"):
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        v = v.split("#", 1)[0].strip().strip('"')   # drop inline comments
+        if v:
+            conf[k.strip()] = v
+    return conf
+
+
+def sh(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def gpu_table():
+    out = sh(["nvidia-smi", "--query-gpu=index,pci.bus_id,name,uuid,memory.used,memory.total",
+              "--format=csv,noheader,nounits"]).stdout
+    rows = []
+    for line in out.strip().splitlines():
+        p = [t.strip() for t in line.split(",")]
+        if len(p) >= 6:
+            rows.append({"idx": p[0], "pci": p[1].split(":")[-2:] and ":".join(p[1].split(":")[1:3]),
+                         "name": p[2], "uuid": p[3], "used": int(p[4]), "total": int(p[5])})
+    return rows
+
+
+def unit_env(unit, scope):
+    cmd = ["systemctl"] + (["--user"] if scope == "user" else []) + ["show", unit, "-p", "Environment", "-p", "MainPID", "-p", "ActiveState"]
+    out = sh(cmd).stdout
+    env, pid, state = {}, None, "unknown"
+    for line in out.splitlines():
+        if line.startswith("Environment="):
+            for tok in re.findall(r'(\w+)=("([^"]*)"|\S+)', line[len("Environment="):]):
+                env[tok[0]] = tok[2] or tok[1]
+        elif line.startswith("MainPID="):
+            pid = int(line.split("=", 1)[1] or 0)
+        elif line.startswith("ActiveState="):
+            state = line.split("=", 1)[1]
+    return env, pid, state
+
+
+def pid_cards():
+    """pid -> gpu uuid, from the driver (the only authority on residency)."""
+    out = sh(["nvidia-smi", "--query-compute-apps=pid,gpu_uuid", "--format=csv,noheader"]).stdout
+    m = {}
+    for line in out.strip().splitlines():
+        p = [t.strip() for t in line.split(",")]
+        if len(p) >= 2:
+            m[int(p[0])] = p[1]
+    return m
+
+
+def lane_uuid(conf, lane):
+    return conf["GPU_%s_UUID" % lane]
+
+
+def cmd_show(conf):
+    cards = {c["uuid"]: c for c in gpu_table()}
+    live = pid_cards()
+    problems = []
+    print("\n  billie GPU lanes — source: %s\n" % CONF.replace(os.path.expanduser("~"), "~"))
+    print("  %-8s %-6s %-34s %-8s %-8s %s" % ("LANE", "CARD", "UUID", "PORT", "STATE", "ON CARD"))
+    print("  " + "-" * 100)
+    for unit, scope in [(u, s) for (u, s, _l, _p, _r) in SERVICES]:
+        pass  # services list below is authoritative; kept for readability
+    for unit in ["comfyui", "comfyui-b", "vision-vl", "llama-qwen14", "voice-tts", "voice-stt"]:
+        lane = UNIT_LANE[unit]
+        want = lane_uuid(conf, lane)
+        scope = "system" if unit.startswith("voice-") else "user"
+        env, pid, state = unit_env(unit, scope)
+        vis = env.get("CUDA_VISIBLE_DEVICES", "")
+        pinned = [u.strip() for u in vis.split(",") if u.strip()]
+        card = cards.get(want, {})
+        on = live.get(pid) if pid else None
+
+        if len(pinned) != 1 or pinned[0] != want:
+            problems.append("%s pins %s, lane %s wants %s" % (unit, vis or "(nothing)", lane, want))
+        elif on and on != want:
+            problems.append("%s is running on %s, not lane %s" % (unit, on[-12:], lane))
+
+        state_col = GREEN if state == "active" else DIM
+        on_col = (GREEN if on == want else RED) if on else DIM
+        print("  %-8s %-6s %-34s %-8s %s%-8s%s %s%s%s" % (
+            lane, card.get("idx", "?"), want[-12:], UNIT_PORT[unit],
+            state_col, state, OFF,
+            on_col, (on[-12:] if on else ("—" if state != "active" else "not on a card")), OFF))
+    print()
+    for c in gpu_table():
+        lane = next((k for k in "AB" if conf.get("GPU_%s_UUID" % k) == c["uuid"]), None)
+        name = "lane " + lane if lane else ("DISPLAY" if c["uuid"] == conf.get("GPU_DISPLAY_UUID") else "unassigned")
+        print("  gpu %s  %-22s %-8s %s MiB / %s MiB   %s" % (
+            c["idx"], c["name"][:22], name, c["used"], c["total"], c["uuid"][-12:]))
+
+    MODEL_RE = re.compile(r"(llama-server|comfy|python|torch|demucs|diffrhythm)", re.I)
+    names = {}
+    for line in sh(["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader"]).stdout.splitlines():
+        if "," in line:
+            pid, nm = line.split(",", 1)
+            names[int(pid.strip())] = nm.strip()
+    bad_on_display = [p for p, u in live.items()
+                      if u == conf.get("GPU_DISPLAY_UUID") and MODEL_RE.search(names.get(p, ""))]
+    if bad_on_display:
+        problems.append("%d process(es) are using the display card" % len(bad_on_display))
+    print()
+    if problems:
+        print("  %sDRIFT%s" % (AMBER, OFF))
+        for p in problems:
+            print("   - " + p)
+        print("\n  fix: gpu-lanes apply --restart\n")
+        return 1
+    print("  %sall lanes correct%s — every service sees exactly one card, pinned by UUID\n" % (GREEN, OFF))
+    return 0
+
+
+def dropin_path(unit):
+    return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user", "%s.service.d" % unit, "60-lane.conf")
+
+
+def cmd_apply(conf, restart):
+    changed = []
+    for unit in ["comfyui", "comfyui-b", "vision-vl", "llama-qwen14"]:
+        lane = UNIT_LANE[unit]
+        want = lane_uuid(conf, lane)
+        lines = ["# generated by `gpu-lanes apply` — do not hand-edit",
+                 "# lane %s from config/gpu-lanes.env" % lane,
+                 "[Service]",
+                 'Environment="CUDA_VISIBLE_DEVICES=%s"' % want]
+        # a stale two-card list in the unit itself would re-introduce ordinals
+        lines.append('Environment="VF_LANE=%s"' % lane)
+        if unit in COMFY_EXEC:
+            exe, args = COMFY_EXEC[unit]
+            lines.append("ExecStart=")          # clear the unit's ExecStart
+            lines.append("ExecStart=%s %s" % (exe, " ".join(args)))
+        p = dropin_path(unit)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        body = "\n".join(lines) + "\n"
+        old = open(p).read() if os.path.exists(p) else ""
+        if old != body:
+            open(p, "w").write(body)
+            changed.append(unit)
+        print("  %-14s lane %s  %s" % (unit, lane, want))
+
+    sys_steps = []
+    for unit in ("voice-tts", "voice-stt"):
+        want = lane_uuid(conf, "A")
+        sys_steps.append("sudo mkdir -p /etc/systemd/system/%s.service.d && "
+                         "printf '[Service]\\nEnvironment=\"CUDA_VISIBLE_DEVICES=%s\"\\n' | "
+                         "sudo tee /etc/systemd/system/%s.service.d/60-lane.conf" % (unit, want, unit))
+    sh(["systemctl", "--user", "daemon-reload"])
+    print("\n  user units reloaded; changed: %s" % (", ".join(changed) if changed else "nothing"))
+    if restart and changed:
+        for unit in changed:
+            sh(["systemctl", "--user", "restart", unit])
+            print("  restarted %s" % unit)
+    if sys_steps:
+        print("\n  system units need root — run these (they pin lane A by UUID):")
+        for s in sys_steps:
+            print("    " + s)
+        print("    sudo systemctl daemon-reload && sudo systemctl restart voice-tts voice-stt")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="gpu-lanes")
+    ap.add_argument("cmd", choices=["show", "check", "apply", "which"])
+    ap.add_argument("arg", nargs="?")
+    ap.add_argument("--restart", action="store_true")
+    a = ap.parse_args()
+    conf = load_conf()
+    if a.cmd == "which":
+        key = (a.arg or "A").upper()
+        if key in ("VIDEO", "B"):
+            print(lane_uuid(conf, "B"))
+        elif key in ("STILLS", "IMAGE", "AUDIO", "MUSIC", "A"):
+            print(lane_uuid(conf, "A"))
+        elif key in ("DISPLAY", "750"):
+            print(conf["GPU_DISPLAY_UUID"])
+        else:
+            sys.exit("unknown lane: %s (A, B, video, stills, audio, display)" % a.arg)
+        return 0
+    if a.cmd == "apply":
+        cmd_apply(conf, a.restart)
+        return 0
+    return cmd_show(conf)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -21,8 +21,25 @@ import argparse, json, math, os, random, shutil, subprocess, sys, time, urllib.r
 HOST = os.environ.get("COMFY_HOST", "http://127.0.0.1:8188")
 # Lane routing (Dylan, 2026-11-05): video generation lives on V100 B (:8189),
 # stills and audio work on V100 A (:8190). An explicit COMFY_HOST still wins.
-IMG_HOST = os.environ.get("COMFY_IMG_HOST", "http://127.0.0.1:8190")
-VID_HOST = os.environ.get("COMFY_VID_HOST", "http://127.0.0.1:8189")
+def _lane_cfg():
+    """Ports and UUIDs come from config/gpu-lanes.env — one source of truth."""
+    cfg = {}
+    try:
+        for raw in open(os.path.expanduser("~/media-stack/config/gpu-lanes.env"), encoding="utf-8"):
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                v = v.split("#", 1)[0].strip().strip('"')   # drop inline comments
+                if v:
+                    cfg[k.strip()] = v
+    except OSError:
+        pass
+    return cfg
+
+
+_LANES = _lane_cfg()
+IMG_HOST = os.environ.get("COMFY_IMG_HOST", "http://127.0.0.1:%s" % _LANES.get("COMFY_STILLS_PORT", "8190"))
+VID_HOST = os.environ.get("COMFY_VID_HOST", "http://127.0.0.1:%s" % _LANES.get("COMFY_VIDEO_PORT", "8189"))
 SHIM_HOST = os.environ.get("COMFY_SHIM_HOST", "http://127.0.0.1:8188")
 VIDEO_LANE = {"video"}
 STACK = os.path.expanduser("~/media-stack")
@@ -175,7 +192,36 @@ def upload_image(path):
         return json.loads(r.read())["name"]
 
 
+def free_lane(host):
+    """The video lane also carries the lazy writer. A 24 GB writer plus a render
+    does not fit in 32 GB, so release the writer before anything heavy lands.
+
+    Checked with systemd (deterministic), not by parsing a human-readable
+    status table: llama-qwen14 active == the weights are on the card.
+    """
+    try:
+        port = urllib.parse.urlparse(host).port or 0
+    except Exception:
+        port = 0
+    if port != int(_LANES.get("COMFY_VIDEO_PORT", "8189")):
+        return
+    qwen14 = os.path.expanduser("~/.local/bin/qwen14")
+    if not os.path.exists(qwen14):
+        return
+    try:
+        state = subprocess.run(["systemctl", "--user", "is-active", "llama-qwen14"],
+                               capture_output=True, text=True, timeout=10).stdout.strip()
+        if state == "active":
+            subprocess.run([qwen14, "down"], capture_output=True, text=True, timeout=180)
+            print("note: released the writer (24 GB) from the video lane before rendering",
+                  file=sys.stderr)
+    except Exception:
+        pass
+
+
 def run(prompt, kind, out_dir, timeout, now=False):
+    if kind in ("video",):
+        free_lane(HOST)
     if not server_up():
         die(f"ComfyUI is not running at {HOST}. Start it: stack start comfy")
     wait_idle(now)
