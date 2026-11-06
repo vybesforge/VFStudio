@@ -138,6 +138,15 @@ The port **is** the lane. Port → PCI address is fixed and enforced by `bin/gpu
 | `3201` | A | `0000:02:00.0` | V100 A | STT |
 | — | — | `0000:01:00.0` | GTX 750 Ti | screen + h264_nvenc only, **never a model** |
 
+Chassis note (Precision T5810, board 0HHV7N): **two Gen3 x16 slots** — physical slot 2 and slot 4 —
+plus a Gen3 **x8** slot 1. Both V100s sit in the x16 slots and train at x16; the 750 Ti is in the x8
+slot, which is why it reports `x8/x16`. Read it yourself:
+
+```bash
+bin/gpu-lanes links          # slot, generation, current vs max width
+cat /sys/bus/pci/devices/0000:00:02.0/max_link_width   # 16 = the slot is wired x16
+```
+
 ```bash
 bin/gpu-lanes show     # truth table: lane -> card -> service -> what card it is really on
 bin/gpu-lanes check    # exit 1 on drift (for scripts / smoke tests)
