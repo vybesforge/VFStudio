@@ -3,7 +3,7 @@ name: local-media-stack
 description: "Use when generating image/video/audio/3D locally on Apple Silicon. ComfyUI + mlx-audio stack, gen/fetch-models CLIs."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

@@ -3,7 +3,7 @@ name: studio-physics
 description: "Use when a local game or shot needs gravity, collisions, rigid bodies, or a soft-body bake."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos, linux, windows]
 metadata:
   hermes:

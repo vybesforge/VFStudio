@@ -3,7 +3,7 @@ name: studio-writing
 description: "Use when writing fiction, scripts, dialogue or lore locally."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

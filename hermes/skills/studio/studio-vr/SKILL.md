@@ -3,7 +3,7 @@ name: studio-vr
 description: "Use when loading, optimizing or exporting 3D/GLB assets for VR: Godot 4 OpenXR room, Windows SteamVR build, gltf-transform, local WebXR room."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

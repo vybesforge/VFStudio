@@ -3,7 +3,7 @@ name: studio-video-edit
 description: "Use when editing video locally: vid CLI, Blender VSE, SRT."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

@@ -3,7 +3,7 @@ name: studio-3d-print
 description: "Use when asked to design, check, or slice a 3D-printable part on this Mac (parametric CAD -> STL -> G-code/3MF for Bambu Lab or any FDM printer). Fully local: build123d + trimesh + OrcaSlicer CLI."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

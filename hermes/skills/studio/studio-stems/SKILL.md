@@ -3,7 +3,7 @@ name: studio-stems
 description: "Use when splitting a song into stems or making karaoke."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

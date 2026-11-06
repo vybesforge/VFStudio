@@ -3,7 +3,7 @@ name: studio-voice
 description: "Use when you need local TTS, voice cloning, or speech-to-text on this Mac."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

@@ -3,7 +3,7 @@ name: studio-game
 description: "Use when picking Godot vs Three.js and building or exporting a local game."
 version: 1.1.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos, linux, windows]
 metadata:
   hermes:

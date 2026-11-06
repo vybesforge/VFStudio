@@ -3,7 +3,7 @@ name: studio-animation
 description: "Use when rigging, animating or making sprite sheets."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:

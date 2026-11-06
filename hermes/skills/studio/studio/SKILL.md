@@ -3,7 +3,7 @@ name: studio
 description: "Use when making any asset on Dylan's Mac. Routes to tools."
 version: 1.0.0
 author: Jimmy
-license: MIT
+license: Apache-2.0
 platforms: [macos]
 metadata:
   hermes:
