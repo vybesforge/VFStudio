@@ -28,6 +28,35 @@ VIDEO_LANE = {"video"}
 STACK = os.path.expanduser("~/media-stack")
 MODELS = f"{STACK}/ComfyUI/models"
 COMFY_OUT = f"{STACK}/ComfyUI/output"
+
+# Where each instance actually writes. :8190 is started with
+# `--output-directory ~/comfy/output-b`, so assuming ComfyUI/output silently
+# missed every stills render (and worse: copied a stale file with the same name).
+COMFY_OUT_ROOTS = [
+    os.environ.get("COMFY_OUT"),
+    os.path.expanduser("~/comfy/output-b"),
+    f"{STACK}/ComfyUI/output",
+    os.path.expanduser("~/comfy/ComfyUI/output"),
+]
+
+
+def find_output(subfolder, filename, since):
+    """Locate a freshly written file across every known ComfyUI output root."""
+    rel = os.path.join(subfolder or "", filename)
+    tried = []
+    for root in [r for r in COMFY_OUT_ROOTS if r]:
+        cand = os.path.join(root, rel)
+        tried.append(cand)
+        if os.path.isfile(cand) and os.path.getmtime(cand) >= since - 5:
+            return cand
+    for root in [r for r in COMFY_OUT_ROOTS if r]:
+        cand = os.path.join(root, rel)
+        if os.path.isfile(cand) and os.path.getmtime(cand) < since - 5:
+            die("found %s but it is older than this run — the output root is probably "
+                "wrong, refusing to hand back a stale file" % cand)
+    die("ComfyUI reported %s but it is not on disk. Looked in: %s"
+        % (rel, ", ".join(tried)))
+
 OUT_ROOT = f"{STACK}/output"
 
 # ---- model table: filename -> (folder). gen status reports which are present ----
@@ -178,11 +207,10 @@ def run(prompt, kind, out_dir, timeout, now=False):
             for item in node_out.get(key, []) or []:
                 if item.get("type") != "output":
                     continue
-                src = os.path.join(COMFY_OUT, item.get("subfolder", ""), item["filename"])
-                if os.path.exists(src):
-                    dst = os.path.join(out_dir, item["filename"])
-                    shutil.copy2(src, dst)
-                    files.append(dst)
+                src = find_output(item.get("subfolder", ""), item["filename"], t0)
+                dst = os.path.join(out_dir, item["filename"])
+                shutil.copy2(src, dst)
+                files.append(dst)
     if not files:
         die(f"prompt {pid} finished with status '{st.get('status_str')}' but wrote no output files — treat as failed")
     return files, pid, round(time.time() - t0, 1)

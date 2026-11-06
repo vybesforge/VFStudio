@@ -39,6 +39,11 @@ STACK = HOME / "media-stack"
 OUT = STACK / "output"
 THUMBS = OUT / ".thumbs"
 COMFY_OUT = STACK / "ComfyUI" / "output"
+# The second ComfyUI instance (:8190, stills lane) is started with
+# --output-directory ~/comfy/output-b, so its renders never appear under
+# ComfyUI/output. The gallery has to read both roots or work done in that
+# instance's own UI looks lost.
+COMFY_OUT_ALT = Path(os.path.expanduser("~/comfy/output-b"))
 MODELS = STACK / "ComfyUI" / "models"
 MANIFEST = STACK / "models" / "manifest.json"
 JOBS_LOG = STACK / "logs" / "studio-jobs.jsonl"
@@ -151,11 +156,14 @@ EXT = {
 # where each modality's files live; (dir, url mount)
 ROOTS = {
     "image": [(OUT / "image", "/files/output/image"), (OUT / "control", "/files/output/control"),
-              (OUT / "upscale", "/files/output/upscale"), (COMFY_OUT, "/files/comfy_output")],
+              (OUT / "upscale", "/files/output/upscale"), (COMFY_OUT, "/files/comfy_output"),
+              (COMFY_OUT_ALT, "/files/comfy_output_b")],
     "video": [(OUT / "video", "/files/output/video"), (OUT / "image" / "uploads", "/files/output/image/uploads"), (COMFY_OUT / "video", "/files/comfy_output/video"),
+              (COMFY_OUT_ALT / "video", "/files/comfy_output_b/video"),
               (STACK / "scratch" / "video-test", "/files/scratch/video-test")],
     "sound": [(OUT / "sfx", "/files/output/sfx"), (OUT / "music", "/files/output/music"), (OUT / "stems", "/files/output/stems"),
-              (COMFY_OUT / "audio", "/files/comfy_output/audio"), (STACK / "scratch", "/files/scratch")],
+              (COMFY_OUT / "audio", "/files/comfy_output/audio"), (COMFY_OUT_ALT / "audio", "/files/comfy_output_b/audio"),
+              (STACK / "scratch", "/files/scratch")],
     "voice": [(OUT / "voice", "/files/output/voice"), (STACK / "scratch" / "voice-test", "/files/scratch/voice-test")],
     "text": [(OUT / "text", "/files/output/text")],
     "camera": [(OUT / "camera", "/files/output/camera"), (OUT / "image", "/files/output/image")],
@@ -200,6 +208,7 @@ def _game_projects():
 # Anything an AI writes under these trees is visible in the galleries, whatever subfolder it invents.
 # Extension filter per kind still applies, so a .glb in output/image/ shows under 3D, etc.
 BROAD_ROOTS = [(OUT, "/files/output"), (STACK / "scratch", "/files/scratch"), (COMFY_OUT, "/files/comfy_output"),
+               (COMFY_OUT_ALT, "/files/comfy_output_b"),
                (Path.home() / ".hermes" / "cache" / "generated" / "images", "/files/images")]
 
 
@@ -891,3 +900,181 @@ def voices():
         return {"voices": [w.strip() for w in out.replace(",", "\n").split() if w.strip() and "_" in w]}
     except Exception as exc:
         return {"voices": ["af_heart"], "error": str(exc)}
+
+
+# ───────────────────────── workflows ─────────────────────────
+# One row per runnable pipeline: what it does, the entry point that runs it, and
+# every weight it needs. `ready` is computed from the filesystem at request time,
+# so this tab is the truth about what can run right now and what is sitting
+# blocked on a missing download. Model paths are relative to ComfyUI/models/
+# unless absolute.
+WORKFLOWS = [
+    # ---- video
+    {"id": "mv_a14b", "lane": "Video", "name": "MV clips — quality",
+     "what": "Stills → motion clips. Wan 2.2 I2V A14B twin-expert (high/low noise) with the lightx2v 4-step LoRAs. The default for forge/video/*/run_clips.py.",
+     "tool": str(HOME / ".local" / "bin" / "pg_video"),
+     "run": "pg_video --model a14b --image still.png --prompt '...' --w 960 --h 544",
+     "models": ["unet/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf",
+                "unet/Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf",
+                "loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+                "loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+                "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+                "vae/wan_2.1_vae.safetensors"]},
+    {"id": "mv_5b", "lane": "Video", "name": "MV clips — fast",
+     "what": "Same job on the 5B TI2V model. Roughly a third of the model, lower fidelity — keep as the quick iteration path (MV_MODEL=5b).",
+     "tool": str(HOME / ".local" / "bin" / "pg_video"),
+     "run": "MV_MODEL=5b python forge/video/fc_mv/run_clips.py",
+     "models": ["diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+                "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+                "vae/wan2.2_vae.safetensors"]},
+    {"id": "sing_video_s2v", "lane": "Video", "name": "Singing video — lipsync",
+     "what": "One reference image + an audio track → a lip-synced performance. This is the model that makes the character actually sing your song.",
+     "tool": None,
+     "run": "ComfyUI template: video_wan2_2_s2v (image + audio → video)",
+     "models": ["diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors",
+                "audio_encoders/wav2vec2_large_english_fp16.safetensors",
+                "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+                "vae/wan_2.1_vae.safetensors"]},
+    {"id": "animate2", "lane": "Video", "name": "Character animation — motion transfer",
+     "what": "A reference image says WHO, a driving video says WHAT MOTION, the prompt says background + camera. No pose extraction. Holds identity across shots.",
+     "tool": None,
+     "run": "ComfyUI template: video_wan_animate2",
+     "models": ["diffusion_models/wan_animate_2_int8_convrot.safetensors",
+                "clip_vision/clip_vision_h.safetensors",
+                "loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+                "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+                "vae/wan_2.1_vae.safetensors"]},
+    {"id": "clip_restore", "lane": "Video", "name": "Clip restore — SeedVR2",
+     "what": "Render at 544p, restore to 1080p-class. 1-step diffusion upscale; the cheapest real quality jump on a finished clip.",
+     "tool": str(HOME / ".local" / "bin" / "pg_upscale"),
+     "run": "pg_upscale --video clips/s01.mp4 --scale 2",
+     "models": ["diffusion_models/seedvr2_3b_int8_convrot.safetensors",
+                "vae/seedvr2_ema_vae_fp16.safetensors"]},
+    {"id": "hyv15_i2v", "lane": "Video", "name": "High-quality i2v — HunyuanVideo 1.5",
+     "what": "8.3B cfg-distilled 720p image-to-video. The slower, more cinematic alternative to the Wan clips.",
+     "tool": str(GEN),
+     "run": "gen video --model hyv15 --image start.png --prompt '...'",
+     "models": ["diffusion_models/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp16.safetensors",
+                "clip_vision/sigclip_vision_patch14_384.safetensors",
+                "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+                "text_encoders/byt5_small_glyphxl_fp16.safetensors",
+                "vae/hunyuanvideo15_vae_fp16.safetensors"]},
+    {"id": "ltx720", "lane": "Video", "name": "LTX-Video 2B — 720p-class",
+     "what": "Fast true-motion img2vid/text2vid on the LTX 2B checkpoint. Lighter and quicker than Wan, less photoreal.",
+     "tool": str(HOME / ".local" / "bin" / "ltx720"),
+     "run": "ltx720 'prompt' --hero still.png --w 768 --h 512",
+     "models": ["checkpoints/ltx-video-2b-v0.9.safetensors",
+                "text_encoders/t5xxl_fp16.safetensors"]},
+    {"id": "infinitetalk", "lane": "Video", "name": "Talking head — InfiniteTalk (legacy)",
+     "what": "Image + audio → lip-synced talking clip via the Multitalk adapter on Wan 2.1. Superseded by S2V for singing; kept for the 480p path.",
+     "tool": str(HOME / ".local" / "bin" / "infinitetalk_run"),
+     "run": "infinitetalk_run --image rapper.jpg --audio vocal.wav --prompt '...'",
+     "models": ["diffusion_models/infinitetalk_single.safetensors",
+                "diffusion_models/wan2.1-i2v-14b-480p-Q4_K_M.gguf",
+                "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+                "text_encoders/umt5_xxl_fp16.safetensors",
+                "vae/wan_2.1_vae.safetensors"]},
+    # ---- image
+    {"id": "stills_krea2", "lane": "Image", "name": "MV stills — Krea 2 turbo",
+     "what": "The stills that seed every MV shot. Krea 2 turbo at 8 steps, cfg 1.",
+     "tool": str(HOME / "forge" / "video" / "fc_mv" / "run_stills.py"),
+     "run": "python forge/video/fc_mv/run_stills.py",
+     "models": ["diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+                "text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+                "vae/qwen_image_vae.safetensors"]},
+    {"id": "image_gen", "lane": "Image", "name": "Image generate — Flux / Z-Image",
+     "what": "General stills. Z-Image turbo for speed, Flux dev fp8 for quality.",
+     "tool": str(GEN),
+     "run": "gen image 'prompt' --model zimage",
+     "models": ["diffusion_models/z_image_turbo_bf16.safetensors",
+                "text_encoders/qwen_3_4b.safetensors",
+                "vae/ae.safetensors",
+                "checkpoints/flux1-dev-fp8.safetensors"]},
+    {"id": "image_edit", "lane": "Image", "name": "Image edit — Qwen-Image-Edit",
+     "what": "Instruction editing that keeps the subject: turnarounds, wardrobe changes, A-pose sheets. --fast uses the 4-step Lightning LoRA.",
+     "tool": str(GEN),
+     "run": "gen edit in.png 'instruction' --fast",
+     "models": ["diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+                "loras/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+                "loras/Qwen-Edit-2509-Multiple-angles.safetensors",
+                "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+                "vae/qwen_image_vae.safetensors"]},
+    # ---- audio / singing
+    {"id": "song_xl", "lane": "Singing", "name": "Full songs — ACE-Step 1.5 XL",
+     "what": "The quality tier for generated songs: 4B DiT decoder, 44 steps, cfg 5. Best open vocal/mix scores of the ACE-Step family.",
+     "tool": str(HOME / ".local" / "bin" / "ace_song"),
+     "run": "ace_song 'tags' --lyrics-file song.txt --seconds 180",
+     "models": ["diffusion_models/acestep_v1.5_xl_sft_bf16.safetensors",
+                "text_encoders/qwen_0.6b_ace15.safetensors",
+                "text_encoders/qwen_1.7b_ace15.safetensors",
+                "vae/ace_1.5_vae.safetensors"]},
+    {"id": "song_turbo", "lane": "Singing", "name": "Full songs — ACE-Step 1.5 turbo",
+     "what": "Same family, 8 steps / cfg 1 — for when you want a bed or a draft in seconds rather than the best take.",
+     "tool": str(HOME / ".local" / "bin" / "ace_music"),
+     "run": "ace_music 'tags' --seconds 60",
+     "models": ["diffusion_models/acestep_v1.5_turbo.safetensors",
+                "text_encoders/qwen_0.6b_ace15.safetensors",
+                "text_encoders/qwen_1.7b_ace15.safetensors",
+                "vae/ace_1.5_vae.safetensors"]},
+    {"id": "song_aio", "lane": "Singing", "name": "Full songs — ACE-Step AIO",
+     "what": "The all-in-one checkpoint the model card documents (LM + DiT + VAE in one file). Turbo semantics: 8 steps, cfg 1.",
+     "tool": str(HOME / ".local" / "bin" / "ace_aio"),
+     "run": "ace_aio --lyrics-file song.txt --tags 'rap, male rapper' --seconds 180",
+     "models": ["checkpoints/ace_step_1.5_turbo_aio.safetensors"]},
+    {"id": "song_diffrhythm2", "lane": "Singing", "name": "Songs — DiffRhythm 2",
+     "what": "Block-flow-matching full songs with tight lyric alignment. Drives the forge/audio/rap_v2 take harness (multi-take + STT scoring).",
+     "tool": str(HOME / "forge" / "audio" / "DiffRhythm2" / "inference.py"),
+     "run": "cd forge/audio/DiffRhythm2 && bash inference.sh",
+     "models": [str(HOME / "forge" / "audio" / "DiffRhythm2" / "ckpt" / "model.safetensors"),
+                str(HOME / "forge" / "audio" / "DiffRhythm2" / "ckpt" / "decoder.bin")]},
+    {"id": "svc_soulx", "lane": "Singing", "name": "Song re-voice — SVC pipeline",
+     "what": "The whole chain in one command: separates the song's lead vocal from its backing, converts that vocal to a reference voice's timbre, then remixes with the ORIGINAL backing. Keeps melody, timing and lyrics; fixes thin/inconsistent AI vocals.",
+     "tool": str(HOME / ".local" / "bin" / "svc_song"),
+     "run": "svc_song --song master.mp3 --voice ref.wav [--pitch-shift -2]",
+     "models": ["/home/billie/forge/audio/SoulX-Singer/pretrained_models/SoulX-Singer/model-svc.pt",
+                "/home/billie/forge/audio/SoulX-Singer/pretrained_models/SoulX-Singer/model.pt",
+                "/home/billie/forge/audio/SoulX-Singer/pretrained_models/SoulX-Singer-Preprocess/rmvpe/rmvpe.pt",
+                "/home/billie/forge/audio/SoulX-Singer/pretrained_models/SoulX-Singer-Preprocess/mel-band-roformer-karaoke/mel_band_roformer_karaoke_becruily.ckpt",
+                "/home/billie/forge/audio/SoulX-Singer/pretrained_models/SoulX-Singer-Preprocess/dereverb_mel_band_roformer/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"]},
+    {"id": "sfx_sa3", "lane": "Singing", "name": "SFX + music beds — Stable Audio 3",
+     "what": "Text-to-audio for sound design and instrumental beds (no lyrics — use ACE-Step for sung words).",
+     "tool": str(GEN),
+     "run": "gen sfx 'thunder, rain on a tin roof' --seconds 12",
+     "models": ["checkpoints/stable_audio_3_medium.safetensors",
+                "checkpoints/stable_audio_3_small_sfx.safetensors",
+                "text_encoders/t5gemma_b_b_ul2.safetensors"]},
+]
+
+
+@router.get("/workflows")
+def workflows():
+    """Every workflow the stack knows, with a live ready/blocked verdict."""
+    out = []
+    for w in WORKFLOWS:
+        files = []
+        for rel in w["models"]:
+            fp = Path(rel).expanduser()
+            if not fp.is_absolute():
+                fp = MODELS / rel
+            ok = fp.is_file()
+            files.append({"rel": rel, "name": fp.name, "present": ok,
+                          "gb": round(fp.stat().st_size / 1e9, 2) if ok else None})
+        tool = w.get("tool")
+        tool_ok = None
+        if tool:
+            tp = Path(tool)
+            # Presence is what matters. Several entry points are invoked as
+            # `bash foo.sh` or `python foo.py` and never carry the exec bit, so
+            # requiring +x reported working workflows as blocked.
+            tool_ok = tp.is_file()
+        missing = [f["name"] for f in files if not f["present"]]
+        out.append({"id": w["id"], "lane": w["lane"], "name": w["name"],
+                    "what": w["what"], "run": w.get("run", ""),
+                    "tool": tool, "tool_present": tool_ok,
+                    "models": files, "missing": missing,
+                    "ready": (not missing) and (tool_ok is not False)})
+    lanes = [{"lane": ln, "items": [x for x in out if x["lane"] == ln]}
+             for ln in dict.fromkeys(w["lane"] for w in WORKFLOWS)]
+    return {"lanes": lanes, "total": len(out),
+            "ready": sum(1 for x in out if x["ready"]),
+            "blocked": [x["name"] for x in out if not x["ready"]]}

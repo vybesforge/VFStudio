@@ -40,7 +40,7 @@ _LINUX = sys.platform.startswith("linux")
 # Local language + vision models. MLX on Apple; on the Linux box these are the
 # llama-server GGUFs that are actually loaded (see /etc/default + systemd units).
 LLM_MODEL = os.environ.get("LLM_MODEL", (
-    "Huihui-Qwen3-14B-abliterated-v2-Q6_K" if _LINUX
+    "qwen3.8-27b-abliterated-q4k-mtp" if _LINUX
     else "mlx-community/Qwen3.8-27B-Uncensored-OptiQ-4bit"))
 VLM_MODEL = os.environ.get("VLM_MODEL", (
     "Qwen3-VL-8B-Instruct-Q8_0" if _LINUX
@@ -139,9 +139,9 @@ def _services() -> dict:
             "port": int(os.environ.get("LLM_PORT", "8101" if on_linux else "8000")),
             "cmd": None,
             "cwd": str(STACK),
-            "external": ("qwen14-lazy :8101 → llama-qwen14 :8102 (Qwen3-14B Q6_K, lazy)"
+            "external": ("qwen14-lazy :8101 → llama-qwen14 :8102 (Qwen3.8-27B Q4_K, lazy)"
                          if on_linux else "llama-server :8000 (external)"),
-            "desc": ("OpenAI-compatible chat · lazy 14B gateway (:8101), wakes on first request"
+            "desc": ("OpenAI-compatible chat · lazy 27B gateway (:8101), wakes on first request"
                      if on_linux else "OpenAI-compatible chat · local llama-server (:8000)"),
         },
         "vision": {
@@ -302,7 +302,7 @@ def _endpoints() -> list:
                 e["snippet"] = 'voice clone ref.wav "text to say in that voice"'
             elif e["key"] == "llm":
                 e["label"] = "Writer LLM (llama-server, OpenAI-compatible chat)"
-                e["desc"] = (f"{LLM_MODEL} · lazy 14B on :8101 (backend llama-qwen14 :8102, "
+                e["desc"] = (f"{LLM_MODEL} · lazy 27B on :8101 (backend llama-qwen14 :8102, "
                              "released after 30 min idle)")
                 e["snippet"] = ("curl -s {{base}}/chat/completions -H 'Content-Type: application/json' \\\n"
                                 f"  -d '{{\"model\":\"{LLM_MODEL}\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}],"
@@ -1229,6 +1229,7 @@ for _mount, _dir in (("/files/out3d", COMFY / "output" / "3d"),
                      ("/files/images", HOME / ".hermes" / "cache" / "generated" / "images"),
                      ("/files/output", STACK / "output"),
                      ("/files/comfy_output", COMFY / "output"),
+                     ("/files/comfy_output_b", Path(os.path.expanduser("~/comfy/output-b"))),
                      ("/files/scratch", STACK / "scratch"),
                      ("/files/train", STACK / "train" / "datasets"),
                      ("/files/game", STACK / "game"),
